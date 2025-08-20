@@ -23,6 +23,7 @@ import {
 } from 'lucide-react-native';
 import React, { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   Modal,
@@ -41,6 +42,7 @@ import { Card } from '@/src/components/common/Card';
 import { Theme } from '@/src/constants/theme';
 import { useApp } from '@/src/context/AppContext';
 import { useAuth } from '@/src/context/AuthContext';
+import { debugFirebaseConnection } from '@/src/firebase/debugFirebase';
 
 // Use getFirestore() for db
 const db = getFirestore();
@@ -128,6 +130,7 @@ type User = {
   lastLogin: Date;
   revenue: number;
   region: string;
+  [key: string]: any; // Allow indexing for dynamic field access
 };
 
 // Service type definition
@@ -176,8 +179,9 @@ export default function AdminPanelScreen() {
 
   // State management
   const [activeTab, setActiveTab] = useState('dashboard');
-  // Replace mockUsers with real users from Firebase
+  // Real users from Firebase
   const [users, setUsers] = useState<User[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
   const [services, setServices] = useState<Service[]>(mockServices);
   const [coupons, setCoupons] = useState<Coupon[]>(mockCoupons);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -200,6 +204,16 @@ export default function AdminPanelScreen() {
   });
   const [editUser, setEditUser] = useState<User | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  
+  // Notification states
+  const [showBulkNotificationModal, setShowBulkNotificationModal] = useState(false);
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [notificationMessage, setNotificationMessage] = useState({
+    title: '',
+    body: '',
+    targetGroup: 'all' // 'all', 'filtered', 'selected'
+  });
   
   // Search queries
   const [userSearchQuery, setUserSearchQuery] = useState('');
@@ -344,12 +358,15 @@ export default function AdminPanelScreen() {
     return [{ label: 'All Statuses', value: 'all' }, ...statuses.map(status => ({ label: status.charAt(0).toUpperCase() + status.slice(1), value: status }))];
   };
 
-  const onRefresh = () => {
+  const onRefresh = async () => {
     setRefreshing(true);
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      await fetchUsers(); // Refresh users from Firebase
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+    } finally {
       setRefreshing(false);
-    }, 1000);
+    }
   };
 
   // --- EMAIL & NOTIFICATION SENDING HELPERS ---
@@ -425,6 +442,133 @@ export default function AdminPanelScreen() {
     }
   };
 
+  // Bulk notification functions
+  const handleSendBulkNotification = async () => {
+    if (!notificationMessage.title.trim() || !notificationMessage.body.trim()) {
+      Alert.alert('Error', 'Please fill in both title and message');
+      return;
+    }
+
+    let targetUsers: User[] = [];
+    
+    switch (notificationMessage.targetGroup) {
+      case 'all':
+        targetUsers = users;
+        break;
+      case 'filtered':
+        targetUsers = filteredUsers;
+        break;
+      case 'selected':
+        targetUsers = users.filter(user => selectedUsers.includes(user.id));
+        break;
+    }
+
+    if (targetUsers.length === 0) {
+      Alert.alert('Error', 'No users selected');
+      return;
+    }
+
+    Alert.alert(
+      'Confirm Bulk Notification',
+      `Send notification to ${targetUsers.length} user(s)?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Send', 
+          onPress: async () => {
+            let successCount = 0;
+            for (const user of targetUsers) {
+              const success = await sendBulkNotificationToUser(user, notificationMessage.title, notificationMessage.body);
+              if (success) successCount++;
+            }
+            
+            setShowBulkNotificationModal(false);
+            setNotificationMessage({ title: '', body: '', targetGroup: 'all' });
+            setSelectedUsers([]);
+            setIsSelectMode(false);
+            
+            Alert.alert(
+              'Notification Results',
+              `Successfully sent to ${successCount} out of ${targetUsers.length} users`
+            );
+          }
+        }
+      ]
+    );
+  };
+
+  const sendBulkNotificationToUser = async (user: User, title: string, body: string) => {
+    try {
+      const response = await fetch(`${CLOUD_FUNCTION_BASE_URL}/sendBulkNotification`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          name: user.name,
+          email: user.email,
+          title,
+          body,
+        }),
+      });
+      return response.ok;
+    } catch (error) {
+      console.error('Bulk notification error:', error);
+      return false;
+    }
+  };
+
+  const toggleUserSelection = (userId: string) => {
+    setSelectedUsers(prev => 
+      prev.includes(userId) 
+        ? prev.filter(id => id !== userId)
+        : [...prev, userId]
+    );
+  };
+
+  const selectAllUsers = () => {
+    setSelectedUsers(filteredUsers.map(user => user.id));
+  };
+
+  const clearSelection = () => {
+    setSelectedUsers([]);
+  };
+
+  // Helper function to create a test user in Firebase
+  const createTestUser = async () => {
+    try {
+      const testUser = {
+        name: 'Test User',
+        email: 'test@inevents.com',
+        phone: '+1234567890',
+        role: 'client',
+        status: 'active',
+        signupDate: new Date(),
+        lastLogin: new Date(),
+        revenue: 0,
+        region: 'Test Region',
+        createdAt: new Date(),
+        isTestUser: true, // Flag to identify test users
+      };
+
+      const docRef = await addDoc(collection(db, 'users'), testUser);
+      console.log('✅ Test user created with ID:', docRef.id);
+      Alert.alert('Success', `Test user created with ID: ${docRef.id}`);
+      
+      // Refresh users list
+      await fetchUsers();
+    } catch (error) {
+      console.error('Error creating test user:', error);
+      Alert.alert('Error', `Failed to create test user: ${(error as Error).message}`);
+    }
+  };
+
+  // Debug Firebase connection
+  const handleDebugFirebase = async () => {
+    console.log('Starting Firebase debug...');
+    await debugFirebaseConnection();
+    Alert.alert('Debug Complete', 'Check console for Firebase debug information');
+  };
+
   // Statistics based on filtered data
   const getFilteredStats = () => {
     const userStats = {
@@ -471,38 +615,254 @@ export default function AdminPanelScreen() {
   // Fetch users from Firebase
   const fetchUsers = async () => {
     try {
+      setUsersLoading(true);
+      console.log('=== FIREBASE USER FETCH DEBUG ===');
+      console.log('Project ID: inevents-2fe56');
+      console.log('Fetching users from Firebase...');
+      
+      // Check Firebase connection
+      console.log('Firebase app config:', db.app.options);
+      
       const usersCollection = collection(db, 'users');
+      console.log('Users collection reference created');
+      
       const usersSnapshot = await getDocs(usersCollection);
-      const usersData = usersSnapshot.docs.map(doc => {
+      console.log(`Found ${usersSnapshot.docs.length} documents in 'users' collection`);
+      
+      if (usersSnapshot.empty) {
+        console.warn('❌ Users collection is empty!');
+        console.log('Checking if collection exists...');
+        
+        // Try to check other possible collection names
+        const possibleCollections = ['users', 'Users', 'user', 'accounts', 'profiles'];
+        for (const collectionName of possibleCollections) {
+          try {
+            const testCollection = collection(db, collectionName);
+            const testSnapshot = await getDocs(testCollection);
+            console.log(`Collection '${collectionName}': ${testSnapshot.docs.length} documents`);
+            if (!testSnapshot.empty) {
+              console.log(`✅ Found data in '${collectionName}' collection`);
+              console.log('Sample document:', testSnapshot.docs[0].data());
+            }
+          } catch (error) {
+            console.log(`❌ Error checking '${collectionName}':`, (error as Error).message);
+          }
+        }
+      }
+      
+      const usersData = usersSnapshot.docs.map((doc, index) => {
         const data = doc.data();
-        return {
+        console.log(`User ${index + 1} (ID: ${doc.id}):`, data);
+        
+        // More flexible data mapping for your project structure
+        const userData = {
           id: doc.id,
-          name: data.name || '',
-          email: data.email || '',
-          phone: data.phone || '',
-          role: data.role || '',
-          status: data.status || 'active',
-          signupDate: data.signupDate?.toDate ? data.signupDate.toDate() : new Date(),
-          lastLogin: data.lastLogin?.toDate ? data.lastLogin.toDate() : new Date(),
-          revenue: data.revenue || 0,
-          region: data.region || '',
+          name: data.name || data.displayName || data.fullName || data.firstName || 'Unknown User',
+          email: data.email || data.emailAddress || '',
+          phone: data.phone || data.phoneNumber || data.mobile || '',
+          role: data.role || data.userType || data.type || data.accountType || 'client',
+          status: data.status || (data.isActive !== false ? 'active' : 'inactive') || 
+                 (data.active !== false ? 'active' : 'inactive') || 'active',
+          signupDate: data.signupDate?.toDate ? data.signupDate.toDate() : 
+                     data.createdAt?.toDate ? data.createdAt.toDate() : 
+                     data.dateCreated?.toDate ? data.dateCreated.toDate() :
+                     data.registrationDate?.toDate ? data.registrationDate.toDate() : new Date(),
+          lastLogin: data.lastLogin?.toDate ? data.lastLogin.toDate() : 
+                    data.lastLoginAt?.toDate ? data.lastLoginAt.toDate() : 
+                    data.lastSeen?.toDate ? data.lastSeen.toDate() :
+                    data.lastActivity?.toDate ? data.lastActivity.toDate() : new Date(),
+          revenue: data.revenue || data.totalEarnings || data.earnings || data.income || 0,
+          region: data.region || data.location || data.country || data.city || data.area || 'Unknown',
         };
+        
+        console.log(`Processed user ${index + 1}:`, userData);
+        return userData;
       });
+      
+      console.log('=== FINAL PROCESSED USERS ===');
+      console.log(`Total processed users: ${usersData.length}`);
+      console.log('All users data:', usersData);
+      
       setUsers(usersData);
+      
+      // If no users found, provide detailed troubleshooting info
+      if (usersData.length === 0) {
+        console.warn('🚨 NO USERS FOUND - TROUBLESHOOTING INFO:');
+        console.log('1. Check if users are registered in your app');
+        console.log('2. Verify Firestore security rules allow reading');
+        console.log('3. Ensure you are connected to the correct Firebase project (inevents-2fe56)');
+        console.log('4. Check if users are stored in a different collection name');
+        
+        // Add some sample users for testing with your project structure
+        const sampleUsers: User[] = [
+          {
+            id: 'sample-inevents-1',
+            name: 'Event Organizer',
+            email: 'organizer@inevents.com',
+            phone: '+1234567890',
+            role: 'artist',
+            status: 'active',
+            signupDate: new Date('2024-01-15'),
+            lastLogin: new Date(),
+            revenue: 2500,
+            region: 'North America',
+          },
+          {
+            id: 'sample-inevents-2',
+            name: 'Event Attendee',
+            email: 'attendee@inevents.com',
+            phone: '+1234567891',
+            role: 'client',
+            status: 'active',
+            signupDate: new Date('2024-02-20'),
+            lastLogin: new Date(),
+            revenue: 0,
+            region: 'Europe',
+          },
+          {
+            id: 'sample-inevents-3',
+            name: 'Event Manager',
+            email: 'manager@inevents.com',
+            phone: '+1234567892',
+            role: 'artist',
+            status: 'active',
+            signupDate: new Date('2024-03-10'),
+            lastLogin: new Date('2024-07-25'),
+            revenue: 1800,
+            region: 'Asia',
+          },
+        ];
+        
+        setUsers(sampleUsers);
+        console.log('✅ Added sample inevents users for testing');
+        console.log('Sample users:', sampleUsers);
+        
+        // Show alert with troubleshooting info
+        Alert.alert(
+          'No Firebase Users Found',
+          `No users found in Firestore collection 'users'.\n\nProject: inevents-2fe56\n\nPossible solutions:\n1. Register some users in your app\n2. Check Firestore security rules\n3. Verify collection name is 'users'\n\nSample users added for testing.`,
+          [{ text: 'OK' }]
+        );
+      } else {
+        console.log('✅ Successfully loaded real users from Firebase');
+        Alert.alert('Success', `Loaded ${usersData.length} real users from Firebase project: inevents-2fe56`);
+      }
+      
     } catch (error) {
-      console.error('Error fetching users:', error);
+      console.error('❌ FIREBASE ERROR:', error);
+      
+      // Detailed error logging
+      const errorDetails = {
+        message: (error as Error).message,
+        code: (error as any).code,
+        name: (error as Error).name,
+        stack: (error as Error).stack
+      };
+      console.error('Error details:', errorDetails);
+      
+      // Check for specific Firebase errors
+      let errorMessage = 'Unknown error occurred';
+      let troubleshootingInfo = '';
+      
+      if (error instanceof Error) {
+        const errorCode = (error as any).code;
+        
+        switch (errorCode) {
+          case 'permission-denied':
+            errorMessage = 'Permission denied - Check Firestore security rules';
+            troubleshootingInfo = '\n\nSolution:\n1. Update Firestore rules in Firebase Console\n2. Ensure user is authenticated\n3. Check if rules allow read access';
+            break;
+          case 'unavailable':
+            errorMessage = 'Firebase service unavailable - Check internet connection';
+            troubleshootingInfo = '\n\nSolution:\n1. Check internet connection\n2. Verify Firebase project status\n3. Try again in a few moments';
+            break;
+          case 'not-found':
+            errorMessage = 'Collection not found - Check collection name';
+            troubleshootingInfo = '\n\nSolution:\n1. Create "users" collection in Firestore\n2. Verify collection name spelling\n3. Check if data exists in Firestore Console';
+            break;
+          case 'invalid-argument':
+            errorMessage = 'Invalid query parameters';
+            troubleshootingInfo = '\n\nSolution:\n1. Check query syntax\n2. Verify field names\n3. Review console logs for details';
+            break;
+          default:
+            errorMessage = error.message || 'Failed to connect to Firebase';
+            if (error.message.includes('network')) {
+              troubleshootingInfo = '\n\nNetwork Error:\n1. Check internet connection\n2. Verify Firebase project settings\n3. Check if Firebase services are accessible';
+            } else if (error.message.includes('auth')) {
+              troubleshootingInfo = '\n\nAuthentication Error:\n1. Ensure user is logged in\n2. Check authentication configuration\n3. Verify Firebase Auth is enabled';
+            } else {
+              troubleshootingInfo = '\n\nGeneral Firebase Error:\n1. Check Firebase Console for issues\n2. Verify project configuration\n3. Review error logs for more details';
+            }
+        }
+      }
+      
+      // Show user-friendly error alert
+      Alert.alert(
+        'Firebase Connection Error', 
+        `${errorMessage}\n\nProject: inevents-2fe56\nError Code: ${(error as any).code || 'unknown'}\n${troubleshootingInfo}`,
+        [
+          { text: 'OK' },
+          { 
+            text: 'Debug', 
+            onPress: () => {
+              console.log('=== DETAILED ERROR DEBUG ===');
+              console.log('Firebase Config Check:', db.app.options);
+              console.log('Error Object:', error);
+              console.log('Error Details:', errorDetails);
+              Alert.alert('Debug Info', `Check console for detailed error information.\n\nProject ID: ${db.app.options.projectId}\nAPI Key: ${db.app.options.apiKey?.substring(0, 20)}...`);
+            }
+          }
+        ]
+      );
+      
+      // Set sample users for testing when error occurs
+      const sampleUsers: User[] = [
+        {
+          id: 'error-sample-1',
+          name: 'Test User (Error Mode)',
+          email: 'test@inevents.com',
+          phone: '+1234567890',
+          role: 'client',
+          status: 'active',
+          signupDate: new Date(),
+          lastLogin: new Date(),
+          revenue: 0,
+          region: 'Test Region',
+        }
+      ];
+      setUsers(sampleUsers);
+    } finally {
+      setUsersLoading(false);
+      console.log('=== END FIREBASE FETCH ===');
     }
   };
 
   // Delete user from Firebase
   const handleDeleteUser = async (userId: string) => {
-    try {
-      await deleteDoc(doc(db, 'users', userId));
-      fetchUsers();
-    } catch (error) {
-      console.error('Error deleting user:', error);
-      Alert.alert('Error', 'Failed to delete user');
-    }
+    Alert.alert(
+      'Confirm Delete',
+      'Are you sure you want to delete this user? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setUsersLoading(true);
+              await deleteDoc(doc(db, 'users', userId));
+              await fetchUsers(); // Refresh the users list
+              Alert.alert('Success', 'User deleted successfully');
+            } catch (error) {
+              console.error('Error deleting user:', error);
+              Alert.alert('Error', 'Failed to delete user');
+            } finally {
+              setUsersLoading(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
 
@@ -511,6 +871,7 @@ export default function AdminPanelScreen() {
   const handleUpdateUser = async () => {
     if (!editUser) return;
     try {
+      setUsersLoading(true);
       await updateDoc(doc(db, 'users', editUser.id), {
         name: editUser.name,
         email: editUser.email,
@@ -519,12 +880,17 @@ export default function AdminPanelScreen() {
         status: editUser.status,
         region: editUser.region,
         revenue: editUser.revenue,
+        updatedAt: new Date(),
       });
       setShowEditUserModal(false);
       setEditUser(null);
-      fetchUsers();
+      await fetchUsers(); // Refresh the users list
+      Alert.alert('Success', 'User updated successfully');
     } catch (error) {
+      console.error('Error updating user:', error);
       Alert.alert('Error', 'Failed to update user');
+    } finally {
+      setUsersLoading(false);
     }
   };
 
@@ -603,9 +969,16 @@ export default function AdminPanelScreen() {
     }
   };
 
-  // Fetch users on mount
+  // Fetch users on mount and set up real-time updates
   React.useEffect(() => {
     fetchUsers();
+    
+    // Optional: Set up interval to refresh users periodically
+    const interval = setInterval(() => {
+      fetchUsers();
+    }, 60000); // Refresh every minute
+    
+    return () => clearInterval(interval);
   }, []);
 
   const renderDashboardTab = () => (
@@ -614,7 +987,13 @@ export default function AdminPanelScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
       <View style={styles.header}>
-        <Text style={styles.greeting}>Admin Dashboard</Text>
+        <Text style={styles.greeting}>
+          {activeTab === 'dashboard' && 'Admin Dashboard'}
+          {activeTab === 'users' && 'Users'}
+          {activeTab === 'services' && 'Services'}
+          {activeTab === 'financial' && 'Financial Overview'}
+          {activeTab === 'coupons' && 'Coupons'}
+        </Text>
         <Text style={styles.date}>
           {new Date().toLocaleDateString('en-US', {
             weekday: 'long',
@@ -700,33 +1079,75 @@ export default function AdminPanelScreen() {
             <Gift size={20} color={Theme.colors.primary} />
             <Text style={styles.quickActionText}>Manage Coupons</Text>
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.quickActionItem}
+            onPress={fetchUsers}
+          >
+            <Users size={20} color={Theme.colors.info} />
+            <Text style={styles.quickActionText}>Refresh Users</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.quickActionItem}
+            onPress={createTestUser}
+          >
+            <Plus size={20} color={Theme.colors.success} />
+            <Text style={styles.quickActionText}>Create Test User</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.quickActionItem}
+            onPress={handleDebugFirebase}
+          >
+            <Activity size={20} color={Theme.colors.warning} />
+            <Text style={styles.quickActionText}>Debug Firebase</Text>
+          </TouchableOpacity>
         </View>
       </Card>
 
       {/* Platform Status */}
       <Card variant="elevated" style={styles.statusCard}>
-        <Text style={styles.cardTitle}>Platform Status</Text>
+        <Text style={styles.cardTitle}>Platform Status - inevents Project</Text>
         <View style={styles.statusGrid}>
+          <View style={styles.statusItem}>
+            <Text style={styles.statusLabel}>Firebase Users</Text>
+            <Text style={styles.statusValue}>{users.length}</Text>
+            <Text style={styles.statusSubtext}>
+              {usersLoading ? 'Loading...' : 'From inevents-2fe56'}
+            </Text>
+          </View>
+          <View style={styles.statusItem}>
+            <Text style={styles.statusLabel}>Active Users</Text>
+            <Text style={styles.statusValue}>{activeUsers}</Text>
+            <Text style={styles.statusSubtext}>Real-time count</Text>
+          </View>
           <View style={styles.statusItem}>
             <Text style={styles.statusLabel}>Artists</Text>
             <Text style={styles.statusValue}>{artists.length}</Text>
+            <Text style={styles.statusSubtext}>Event creators</Text>
           </View>
           <View style={styles.statusItem}>
             <Text style={styles.statusLabel}>Services</Text>
             <Text style={styles.statusValue}>{gigs.length}</Text>
+            <Text style={styles.statusSubtext}>Total events</Text>
           </View>
           <View style={styles.statusItem}>
             <Text style={styles.statusLabel}>Orders</Text>
             <Text style={styles.statusValue}>{orders.length}</Text>
+            <Text style={styles.statusSubtext}>Bookings</Text>
           </View>
           <View style={styles.statusItem}>
             <Text style={styles.statusLabel}>Tickets</Text>
             <Text style={styles.statusValue}>{tickets.length}</Text>
+            <Text style={styles.statusSubtext}>Support tickets</Text>
           </View>
         </View>
         <View style={styles.healthStatus}>
           <View style={styles.healthIndicator} />
-          <Text style={styles.healthText}>System Operational</Text>
+          <Text style={styles.healthText}>
+            {usersLoading ? 'Loading Users...' : `Connected to inevents-2fe56`}
+          </Text>
         </View>
       </Card>
 
@@ -756,41 +1177,179 @@ export default function AdminPanelScreen() {
           </TouchableOpacity>
         </View>
       </View>
-      {/* User List */}
-      <FlatList
-        data={filteredUsers}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
+
+      {/* Bulk Actions Header */}
+      <View style={styles.bulkActionsContainer}>
+        <View style={styles.bulkActionsRow}>
           <TouchableOpacity
-            style={styles.userItem}
+            style={[styles.bulkActionButton, styles.notifyAllButton]}
             onPress={() => {
-              setSelectedUser(item);
-              setShowUserModal(true);
-            }}
-            onLongPress={() => {
-              setEditUser(item);
-              setShowEditUserModal(true);
+              setNotificationMessage({ ...notificationMessage, targetGroup: 'all' });
+              setShowBulkNotificationModal(true);
             }}
           >
-            <View style={styles.userInfo}>
-              <Text style={styles.userName}>{item.name}</Text>
-              <Text style={styles.userEmail}>{item.email}</Text>
-              <Text style={styles.userRole}>{item.role} • {item.region}</Text>
-            </View>
-            <View style={styles.userActions}>
-              <View style={[styles.statusBadge, { backgroundColor: item.status === 'active' ? Theme.colors.success : Theme.colors.warning }]}>
-                <Text style={styles.statusText}>{item.status}</Text>
-              </View>
-              <TouchableOpacity onPress={() => handleDeleteUser(item.id)} style={styles.deleteButton}>
-                <Trash2 size={16} color={Theme.colors.error} />
+            <Bell size={16} color="white" />
+            <Text style={styles.bulkActionText}>Notify All ({users.length})</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.bulkActionButton, styles.notifyFilteredButton]}
+            onPress={() => {
+              setNotificationMessage({ ...notificationMessage, targetGroup: 'filtered' });
+              setShowBulkNotificationModal(true);
+            }}
+          >
+            <Bell size={16} color="white" />
+            <Text style={styles.bulkActionText}>Notify Filtered ({filteredUsers.length})</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.bulkActionsRow}>
+          <TouchableOpacity
+            style={[styles.bulkActionButton, styles.selectModeButton]}
+            onPress={() => {
+              setIsSelectMode(!isSelectMode);
+              if (isSelectMode) {
+                clearSelection();
+              }
+            }}
+          >
+            <Users size={16} color="white" />
+            <Text style={styles.bulkActionText}>
+              {isSelectMode ? 'Exit Select' : 'Select Users'}
+            </Text>
+          </TouchableOpacity>
+
+          {isSelectMode && (
+            <>
+              <TouchableOpacity
+                style={[styles.bulkActionButton, styles.selectAllButton]}
+                onPress={selectAllUsers}
+              >
+                <Check size={16} color="white" />
+                <Text style={styles.bulkActionText}>Select All</Text>
               </TouchableOpacity>
-              <ChevronRight size={16} color={Theme.colors.textLight} />
-            </View>
+
+              <TouchableOpacity
+                style={[styles.bulkActionButton, styles.clearButton]}
+                onPress={clearSelection}
+              >
+                <X size={16} color="white" />
+                <Text style={styles.bulkActionText}>Clear</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+
+        {isSelectMode && selectedUsers.length > 0 && (
+          <TouchableOpacity
+            style={[styles.bulkActionButton, styles.notifySelectedButton]}
+            onPress={() => {
+              setNotificationMessage({ ...notificationMessage, targetGroup: 'selected' });
+              setShowBulkNotificationModal(true);
+            }}
+          >
+            <Bell size={16} color="white" />
+            <Text style={styles.bulkActionText}>Notify Selected ({selectedUsers.length})</Text>
           </TouchableOpacity>
         )}
-        showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-      />
+      </View>
+
+      {/* User List */}
+      {usersLoading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Theme.colors.primary} />
+          <Text style={styles.loadingText}>Loading users from Firebase...</Text>
+        </View>
+      ) : (
+        <>
+          {filteredUsers.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Users size={48} color={Theme.colors.textLight} />
+              <Text style={styles.emptyTitle}>No Users Found</Text>
+              <Text style={styles.emptyMessage}>
+                {users.length === 0 
+                  ? "No users are registered in the system yet." 
+                  : "No users match your current search criteria."}
+              </Text>
+              <TouchableOpacity 
+                style={styles.refreshButton}
+                onPress={onRefresh}
+              >
+                <Text style={styles.refreshButtonText}>Refresh</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <FlatList
+              data={filteredUsers}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[
+                    styles.userItem,
+                    isSelectMode && selectedUsers.includes(item.id) && styles.selectedUserItem
+                  ]}
+                  onPress={() => {
+                    if (isSelectMode) {
+                      toggleUserSelection(item.id);
+                    } else {
+                      setSelectedUser(item);
+                      setShowUserModal(true);
+                    }
+                  }}
+                  onLongPress={() => {
+                    if (!isSelectMode) {
+                      setEditUser(item);
+                      setShowEditUserModal(true);
+                    }
+                  }}
+                >
+                  {isSelectMode && (
+                    <View style={styles.checkboxContainer}>
+                      <View style={[
+                        styles.checkbox,
+                        selectedUsers.includes(item.id) && styles.checkedBox
+                      ]}>
+                        {selectedUsers.includes(item.id) && (
+                          <Check size={12} color="white" />
+                        )}
+                      </View>
+                    </View>
+                  )}
+                  
+                  <View style={styles.userInfo}>
+                    <Text style={styles.userName}>{item.name}</Text>
+                    <Text style={styles.userEmail}>{item.email}</Text>
+                    <Text style={styles.userRole}>{item.role} • {item.region}</Text>
+                  </View>
+                  <View style={styles.userActions}>
+                    <View style={[styles.statusBadge, { backgroundColor: item.status === 'active' ? Theme.colors.success : Theme.colors.warning }]}>
+                      <Text style={styles.statusText}>{item.status}</Text>
+                    </View>
+                    
+                    {!isSelectMode && (
+                      <>
+                        <TouchableOpacity 
+                          onPress={() => handleSendNotification(item.id)} 
+                          style={styles.notifyButton}
+                        >
+                          <Bell size={16} color={Theme.colors.info} />
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => handleDeleteUser(item.id)} style={styles.deleteButton}>
+                          <Trash2 size={16} color={Theme.colors.error} />
+                        </TouchableOpacity>
+                        <ChevronRight size={16} color={Theme.colors.textLight} />
+                      </>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              )}
+              showsVerticalScrollIndicator={false}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+            />
+          )}
+        </>
+      )}
     </View>
   );
 
@@ -1157,6 +1716,113 @@ export default function AdminPanelScreen() {
     </Modal>
   );
 
+  // Bulk Notification Modal
+  const renderBulkNotificationModal = () => (
+    <Modal
+      visible={showBulkNotificationModal}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={() => setShowBulkNotificationModal(false)}
+    >
+      <SafeAreaView style={styles.modalContainer}>
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>Send Bulk Notification</Text>
+          <TouchableOpacity onPress={() => setShowBulkNotificationModal(false)}>
+            <X size={24} color={Theme.colors.textDark} />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={styles.modalContent}>
+          <View style={styles.userDetailSection}>
+            <Text style={styles.userDetailLabel}>Target Group</Text>
+            <View style={styles.targetGroupContainer}>
+              <TouchableOpacity
+                style={[
+                  styles.targetGroupButton,
+                  notificationMessage.targetGroup === 'all' && styles.activeTargetGroup
+                ]}
+                onPress={() => setNotificationMessage(prev => ({ ...prev, targetGroup: 'all' }))}
+              >
+                <Text style={[
+                  styles.targetGroupText,
+                  notificationMessage.targetGroup === 'all' && styles.activeTargetGroupText
+                ]}>
+                  All Users ({users.length})
+                </Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={[
+                  styles.targetGroupButton,
+                  notificationMessage.targetGroup === 'filtered' && styles.activeTargetGroup
+                ]}
+                onPress={() => setNotificationMessage(prev => ({ ...prev, targetGroup: 'filtered' }))}
+              >
+                <Text style={[
+                  styles.targetGroupText,
+                  notificationMessage.targetGroup === 'filtered' && styles.activeTargetGroupText
+                ]}>
+                  Filtered Users ({filteredUsers.length})
+                </Text>
+              </TouchableOpacity>
+              
+              {selectedUsers.length > 0 && (
+                <TouchableOpacity
+                  style={[
+                    styles.targetGroupButton,
+                    notificationMessage.targetGroup === 'selected' && styles.activeTargetGroup
+                  ]}
+                  onPress={() => setNotificationMessage(prev => ({ ...prev, targetGroup: 'selected' }))}
+                >
+                  <Text style={[
+                    styles.targetGroupText,
+                    notificationMessage.targetGroup === 'selected' && styles.activeTargetGroupText
+                  ]}>
+                    Selected Users ({selectedUsers.length})
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+
+          <View style={styles.userDetailSection}>
+            <Text style={styles.userDetailLabel}>Notification Title</Text>
+            <TextInput
+              style={styles.notificationInput}
+              placeholder="Enter notification title..."
+              value={notificationMessage.title}
+              onChangeText={text => setNotificationMessage(prev => ({ ...prev, title: text }))}
+              multiline={false}
+            />
+          </View>
+
+          <View style={styles.userDetailSection}>
+            <Text style={styles.userDetailLabel}>Notification Message</Text>
+            <TextInput
+              style={[styles.notificationInput, styles.messageInput]}
+              placeholder="Enter your notification message..."
+              value={notificationMessage.body}
+              onChangeText={text => setNotificationMessage(prev => ({ ...prev, body: text }))}
+              multiline={true}
+              numberOfLines={4}
+              textAlignVertical="top"
+            />
+          </View>
+
+          <View style={styles.modalActions}>
+            <TouchableOpacity
+              style={[styles.modalButton, styles.notificationButton]}
+              onPress={handleSendBulkNotification}
+            >
+              <Bell size={16} color="white" />
+              <Text style={styles.modalButtonText}>Send Notification</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
+
   const renderTabBar = () => (
     <View style={styles.tabBar}>
       <TouchableOpacity
@@ -1227,6 +1893,7 @@ export default function AdminPanelScreen() {
       {renderUserModal()}
       {renderEditUserModal()}
       {renderCreateCouponModal()}
+      {renderBulkNotificationModal()}
     </SafeAreaView>
   );
 }
@@ -1352,6 +2019,12 @@ const styles = StyleSheet.create({
     fontSize: Theme.typography.fontSize.lg,
     color: Theme.colors.primary,
     marginTop: Theme.spacing.xs,
+  },
+  statusSubtext: {
+    fontFamily: Theme.typography.fontFamily.regular,
+    fontSize: Theme.typography.fontSize.xs,
+    color: Theme.colors.textLight,
+    marginTop: 2,
   },
   healthStatus: {
     flexDirection: 'row',
@@ -1789,5 +2462,165 @@ const styles = StyleSheet.create({
   },
   activeTabText: {
     color: Theme.colors.primary,
+  },
+
+  // Bulk Actions Styles
+  bulkActionsContainer: {
+    marginBottom: Theme.spacing.lg,
+  },
+  bulkActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: Theme.spacing.sm,
+  },
+  bulkActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Theme.spacing.md,
+    paddingVertical: Theme.spacing.sm,
+    borderRadius: Theme.borderRadius.md,
+    flex: 1,
+    marginHorizontal: 2,
+    justifyContent: 'center',
+  },
+  bulkActionText: {
+    fontFamily: Theme.typography.fontFamily.medium,
+    fontSize: Theme.typography.fontSize.xs,
+    color: 'white',
+    marginLeft: Theme.spacing.xs,
+  },
+  notifyAllButton: {
+    backgroundColor: Theme.colors.primary,
+  },
+  notifyFilteredButton: {
+    backgroundColor: Theme.colors.info,
+  },
+  selectModeButton: {
+    backgroundColor: Theme.colors.warning,
+  },
+  selectAllButton: {
+    backgroundColor: Theme.colors.success,
+  },
+  clearButton: {
+    backgroundColor: Theme.colors.error,
+  },
+  notifySelectedButton: {
+    backgroundColor: Theme.colors.primary,
+    marginTop: Theme.spacing.sm,
+  },
+  
+  // Selection Styles
+  selectedUserItem: {
+    backgroundColor: Theme.colors.background,
+    borderWidth: 2,
+    borderColor: Theme.colors.primary,
+  },
+  checkboxContainer: {
+    marginRight: Theme.spacing.sm,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: Theme.colors.textLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkedBox: {
+    backgroundColor: Theme.colors.primary,
+    borderColor: Theme.colors.primary,
+  },
+  notifyButton: {
+    padding: Theme.spacing.sm,
+    marginRight: Theme.spacing.sm,
+  },
+
+  // Notification Modal Styles
+  targetGroupContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: Theme.spacing.sm,
+  },
+  targetGroupButton: {
+    paddingHorizontal: Theme.spacing.md,
+    paddingVertical: Theme.spacing.sm,
+    borderRadius: Theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: Theme.colors.border,
+    marginRight: Theme.spacing.sm,
+    marginBottom: Theme.spacing.sm,
+  },
+  activeTargetGroup: {
+    backgroundColor: Theme.colors.primary,
+    borderColor: Theme.colors.primary,
+  },
+  targetGroupText: {
+    fontFamily: Theme.typography.fontFamily.medium,
+    fontSize: Theme.typography.fontSize.sm,
+    color: Theme.colors.textDark,
+  },
+  activeTargetGroupText: {
+    color: 'white',
+  },
+  notificationInput: {
+    borderWidth: 1,
+    borderColor: Theme.colors.border,
+    borderRadius: Theme.borderRadius.md,
+    padding: Theme.spacing.md,
+    fontFamily: Theme.typography.fontFamily.regular,
+    fontSize: Theme.typography.fontSize.md,
+    color: Theme.colors.textDark,
+    marginTop: Theme.spacing.sm,
+  },
+  messageInput: {
+    height: 100,
+    textAlignVertical: 'top',
+  },
+
+  // Loading and Empty States
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: Theme.spacing.xl,
+  },
+  loadingText: {
+    fontFamily: Theme.typography.fontFamily.medium,
+    fontSize: Theme.typography.fontSize.md,
+    color: Theme.colors.textLight,
+    marginTop: Theme.spacing.md,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: Theme.spacing.xl,
+  },
+  emptyTitle: {
+    fontFamily: Theme.typography.fontFamily.semiBold,
+    fontSize: Theme.typography.fontSize.lg,
+    color: Theme.colors.textDark,
+    marginTop: Theme.spacing.md,
+    marginBottom: Theme.spacing.sm,
+  },
+  emptyMessage: {
+    fontFamily: Theme.typography.fontFamily.regular,
+    fontSize: Theme.typography.fontSize.md,
+    color: Theme.colors.textLight,
+    textAlign: 'center',
+    marginBottom: Theme.spacing.lg,
+    paddingHorizontal: Theme.spacing.lg,
+  },
+  refreshButton: {
+    backgroundColor: Theme.colors.primary,
+    paddingHorizontal: Theme.spacing.lg,
+    paddingVertical: Theme.spacing.md,
+    borderRadius: Theme.borderRadius.md,
+  },
+  refreshButtonText: {
+    fontFamily: Theme.typography.fontFamily.medium,
+    fontSize: Theme.typography.fontSize.md,
+    color: 'white',
   },
 });

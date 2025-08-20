@@ -35,6 +35,32 @@ export const CategorySelector: React.FC<CategorySelectorProps> = ({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.scrollContainer}
       >
+        {/* Add 'All' category at the start */}
+        <TouchableOpacity
+          key="All"
+          style={[
+            styles.categoryButton,
+            selectedCategory === 'All' && styles.selectedCategory,
+          ]}
+          onPress={() => onSelectCategory('All')}
+          activeOpacity={0.7}
+        >
+          <View style={styles.iconWrapper}>
+            <Icon
+              name="grid"
+              size={16}
+              color={selectedCategory === 'All' ? Theme.colors.secondary : Theme.colors.primary}
+            />
+          </View>
+          <Text
+            style={[
+              styles.categoryText,
+              selectedCategory === 'All' && styles.selectedCategoryText,
+            ]}
+          >
+            All
+          </Text>
+        </TouchableOpacity>
         {CATEGORIES.map((category) => (
           <TouchableOpacity
             key={category.name}

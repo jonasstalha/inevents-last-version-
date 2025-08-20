@@ -1,7 +1,7 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import React from 'react';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useArtistStore } from '../../../src/components/artist/ArtistStore';
 
 const SettingsPage = () => {
@@ -30,9 +30,12 @@ const SettingsPage = () => {
     toggleDarkMode();
   };
 
-  const handleLogout = () => {
-    // Clear auth tokens and navigate to login
-    router.replace('/auth/login');
+  const handleLogout = async () => {
+    // Perform full logout: Firebase, AsyncStorage, cache
+    const performCompleteLogout = (await import('../../../src/utils/logoutUtil')).default;
+    await performCompleteLogout();
+    // Redirect to the main index/start page
+    router.replace('/');
   };
 
   return (

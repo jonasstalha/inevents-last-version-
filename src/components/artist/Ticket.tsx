@@ -5,30 +5,33 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    Image,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { useArtistStore } from './ArtistStore';
+import { useAuth } from '../../context/AuthContext';
+import { addTicketToFirebase, addServiceToFirebase } from '../../firebase/artistsService';
 
 // Only import MapView and Marker if not on web
 let MapView: any = () => null;
 let Marker: any = () => null;
 if (Platform.OS !== 'web') {
-  const maps = require('expo-maps');
-  MapView = maps.MapView;
-  Marker = maps.Marker;
+  // ExpoMaps is not supported with Hermes or not installed. Commented out to prevent error.
+  // const maps = require('expo-maps');
+  // MapView = maps.MapView;
+  // Marker = maps.Marker;
 }
 
 // Fallback type for MapPressEvent for web
@@ -41,6 +44,7 @@ const { width } = Dimensions.get('window');
 
 export default function Ticket() {
   const { gigs, addTicketToGig, addGig } = useArtistStore();
+  const { user } = useAuth();
 
   // --- FORM STATE ---
   const [form, setForm] = useState({
@@ -212,8 +216,7 @@ export default function Ticket() {
     setForm({ ...form, ticketTypes });
   };
 
-  const handleSubmit = () => {
-    // Validation: only require name, price, quantity, date, time
+  const handleSubmit = async () => {
     if (!form.name || !form.price || !form.location) {
       setError('Please fill all required fields.');
       return;
@@ -223,63 +226,50 @@ export default function Ticket() {
       return;
     }
     setSubmitting(true);
-    // Add ticket to the first gig (or create a default gig if none exists)
-    let gigId = gigs[0]?.id;
-    if (!gigId) {
-      const defaultGig = {
-        artistId: 'default',
-        title: 'General',
-        description: 'General tickets',
-        basePrice: 0,
-        images: [],
-        category: '',
-        options: [],
+    try {
+      if (!user?.id) throw new Error('User not authenticated');
+      await addTicketToFirebase(user.id, {
+        name: form.name,
+        price: Number(form.price),
+        location: form.location,
+        description: form.description,
+        flyer: form.flyer,
+        ticketTypes: form.ticketTypes,
+        category: form.category,
+      });
+      setForm({
+        name: '',
+        price: '',
         location: '',
-        rating: 0,
-        reviewCount: 0,
-        createdAt: new Date(),
-      };
-      addGig(defaultGig);
-      gigId = (gigs.length > 0 ? gigs[gigs.length - 1].id : '1');
+        category: '',
+        description: '',
+        flyer: '',
+        ticketTypes: [
+          { type: 'Normal', price: '' },
+          { type: 'VIP', price: '' },
+          { type: 'VVIP', price: '' },
+        ],
+      });
+      setError('');
+      setActiveTab('createTicket');
+      Alert.alert('Success', 'Ticket added and saved to Firebase!', [
+        { text: 'OK', style: 'default' }
+      ]);
+    } catch (err: any) {
+      setError('Failed to save ticket: ' + (err.message || 'Unknown error'));
     }
-    addTicketToGig(gigId, {
-      id: Date.now().toString(),
-      name: form.name,
-      price: Number(form.price),
-      location: form.location,
-      description: form.description,
-      flyer: form.flyer,
-      ticketTypes: form.ticketTypes,
-    });
-    setForm({
-      name: '',
-      price: '',
-      location: '',
-      category: '',
-      description: '',
-      flyer: '',
-      ticketTypes: [
-        { type: 'Normal', price: '' },
-        { type: 'VIP', price: '' },
-        { type: 'VVIP', price: '' },
-      ],
-    });
     setSubmitting(false);
-    setError('');
-    setActiveTab('createTicket');
-    Alert.alert('Success', 'Ticket added successfully!', [
-      { text: 'OK', style: 'default' }
-    ]);
   };
 
-  const handleServiceSubmit = () => {
+  const handleServiceSubmit = async () => {
     if (!serviceForm.title || !serviceForm.city) {
       setServiceError('Please fill all required fields.');
       return;
     }
     setServiceSubmitting(true);
-    // Here you would add logic to save the service (e.g., call addServiceToStore or similar)
-    setTimeout(() => {
+    try {
+      if (!user?.id) throw new Error('User not authenticated');
+      await addServiceToFirebase(user.id, serviceForm);
       setServiceForm({
         title: '',
         city: '',
@@ -288,12 +278,14 @@ export default function Ticket() {
         images: [],
         items: [{ title: '', price: '' }],
       });
-      setServiceSubmitting(false);
       setServiceError('');
-      Alert.alert('Success', 'Service created successfully!', [
+      Alert.alert('Success', 'Service created and saved to Firebase!', [
         { text: 'OK', style: 'default' }
       ]);
-    }, 1000);
+    } catch (err: any) {
+      setServiceError('Failed to save service: ' + (err.message || 'Unknown error'));
+    }
+    setServiceSubmitting(false);
   };
 
   const renderHeader = () => (

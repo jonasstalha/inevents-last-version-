@@ -1,40 +1,39 @@
-import React, { useState, useEffect } from 'react';
+import { useRouter } from 'expo-router';
+import { Formik } from 'formik';
+import React, { useEffect, useState } from 'react';
 import {
-  StyleSheet,
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
-  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
   TextInput,
-  ActivityIndicator,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { Formik } from 'formik';
 import * as Yup from 'yup';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
 
 // Firebase imports
-import { initializeApp, getApps } from 'firebase/app';
+import { getApps, initializeApp } from 'firebase/app';
 import {
-  getAuth,
   createUserWithEmailAndPassword,
+  getAuth,
+  onAuthStateChanged,
   signInWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged
+  signOut
 } from 'firebase/auth';
 import {
-  getFirestore,
   doc,
-  setDoc,
-  getDoc
+  getDoc,
+  getFirestore,
+  setDoc
 } from 'firebase/firestore';
 
-// Firebase Configuration
+// Firebase Configuration - Updated to match inevents-2fe56 project
 const firebaseConfig = {
-  apiKey: 'AIzaSyC7Mr5CAQPoqAIMLh-IefxsVugqyI8PYXA',
+  apiKey: 'AIzaSyA4d4sIGVIDfhMOuG75qDK_rUZiPsugcYE',
   authDomain: 'inevents-2fe56.firebaseapp.com',
   projectId: 'inevents-2fe56',
   storageBucket: 'inevents-2fe56.appspot.com',
@@ -51,14 +50,28 @@ const db = getFirestore(app);
 const registerWithEmail = async (email, password, name) => {
   const userCredential = await createUserWithEmailAndPassword(auth, email, password);
   
-  // Save user profile in Firestore
+  // Save comprehensive user profile in Firestore users collection
   await setDoc(doc(db, 'users', userCredential.user.uid), {
+    id: userCredential.user.uid,
     uid: userCredential.user.uid,
-    email,
-    name,
-    createdAt: new Date().toISOString(),
+    name: name,
+    email: email,
+    phone: '', // Will be updated in createUserProfile
+    role: 'client', // Default role, will be updated in createUserProfile
+    status: 'active',
+    signupDate: new Date(),
+    createdAt: new Date(),
+    lastLogin: new Date(),
+    revenue: 0,
+    region: 'Unknown',
+    // Additional fields for inevents project
+    eventsAttended: 0,
+    eventsOrganized: 0,
+    favoriteCategory: '',
+    specialization: '',
   });
 
+  console.log('✅ User created in Firestore users collection:', userCredential.user.uid);
   return userCredential;
 };
 
@@ -70,14 +83,30 @@ const createUserProfile = async (uid, email, phone, role) => {
   await setDoc(
     doc(db, 'users', uid),
     {
-      uid,
-      email,
-      phone,
-      role,
-      createdAt: new Date().toISOString(),
+      id: uid,
+      uid: uid,
+      email: email,
+      phone: phone,
+      role: role,
+      status: 'active',
+      signupDate: new Date(),
+      createdAt: new Date(),
+      lastLogin: new Date(),
+      revenue: 0,
+      region: 'Unknown',
+      // Role-specific fields
+      ...(role === '(artist)' ? {
+        eventsOrganized: 0,
+        specialization: '',
+      } : {
+        eventsAttended: 0,
+        favoriteCategory: '',
+      }),
     },
-    { merge: true }
+    { merge: true } // This will update existing fields while keeping others
   );
+  
+  console.log(`✅ User profile updated in Firestore: ${uid} as ${role}`);
 };
 
 const getUserRole = async (uid) => {
@@ -202,7 +231,7 @@ const RegisterSchema = Yup.object().shape({
   email: Yup.string().email('Invalid email').required('Email is required'),
   password: Yup.string().min(6, 'Password must be at least 6 characters').required('Password is required'),
   phone: Yup.string().required('Phone number is required'),
-  role: Yup.string().oneOf(['artist', 'client'], 'Invalid role').required('Role is required'),
+  role: Yup.string().oneOf(['(artist)', 'client'], 'Invalid role').required('Role is required'),
 });
 
 // Main Component
@@ -223,10 +252,14 @@ export default function AuthScreen() {
           
           // Auto-redirect based on role
           if (role === 'admin') {
+            console.log('🔄 Redirecting admin to /(admin)');
             router.replace('/(admin)');
-          } else if (role === 'artist') {
-            router.replace('/artist');
+          } else if (role === '(artist)') {
+            console.log('🎨 Redirecting (artist) to standalone (artist) app');
+            // Redirect to separate (artist) application
+            router.replace('/(artist)');
           } else {
+            console.log('👤 Redirecting client to /(client)/profile');
             router.replace('/(client)/profile');
           }
         } catch (error) {
@@ -243,10 +276,19 @@ export default function AuthScreen() {
     return unsubscribe; // unsubscribe on unmount
   }, [initializing, router]);
 
-  // Redirect to profile page if user is logged in (after initialization)
+  // Redirect to appropriate page if user is logged in (after initialization)
   useEffect(() => {
     if (!initializing && user) {
-      router.replace('/(client)/profile');
+      if (user.role === 'admin') {
+        console.log('🔄 Auto-redirecting admin to /(admin)');
+        router.replace('/(admin)');
+      } else if (user.role === '(artist)') {
+        console.log('🎨 Auto-redirecting (artist) to standalone (artist) app');
+        router.replace('/(artist)');
+      } else {
+        console.log('👤 Auto-redirecting client to /(client)/profile');
+        router.replace('/(client)/profile');
+      }
     }
   }, [initializing, user, router]);
 
@@ -276,11 +318,14 @@ export default function AuthScreen() {
             text: 'OK',
             onPress: () => {
               if (role === 'admin') {
-                router.replace({ pathname: '/(admin)' });
-              } else if (role === 'artist') {
-                router.replace({ pathname: '/artist' });
+                console.log('🔄 Login success - redirecting admin to /(admin)');
+                router.replace('/(admin)');
+              } else if (role === '(artist)') {
+                console.log('🎨 Login success - redirecting (artist) to standalone (artist) app');
+                router.replace('/(artist)');
               } else {
-                router.replace({ pathname: '/(client)/profile' });
+                console.log('👤 Login success - redirecting client to /(client)/profile');
+                router.replace('/(client)/profile');
               }
             },
           },
@@ -323,10 +368,12 @@ export default function AuthScreen() {
           {
             text: 'OK',
             onPress: () => {
-              if (values.role === 'artist') {
-                router.replace({ pathname: '/artist' });
+              if (values.role === '(artist)') {
+                console.log('🎨 Registration success - redirecting (artist) to standalone (artist) app');
+                router.replace('/(artist)');
               } else {
-                router.replace({ pathname: '/(client)/profile' });
+                console.log('👤 Registration success - redirecting client to /(client)/profile');
+                router.replace('/(client)/profile');
               }
             },
           },
@@ -358,6 +405,7 @@ export default function AuthScreen() {
 
   const toggleMode = () => setIsLoginMode(prev => !prev);
 
+  // Go back to the previous screen/section
   const goBack = () => {
     router.back();
   };
@@ -374,20 +422,33 @@ export default function AuthScreen() {
       >
         <View style={styles.container}>
           {/* Back Button */}
+
           <TouchableOpacity onPress={goBack} style={styles.backButton}>
-            <ArrowLeftIcon />
+            <View style={{
+              backgroundColor: '#f3f4f6',
+              borderRadius: 20,
+              padding: 8,
+              shadowColor: '#000',
+              shadowOpacity: 0.08,
+              shadowOffset: { width: 0, height: 2 },
+              shadowRadius: 4,
+              elevation: 2,
+            }}>
+              <ArrowLeftIcon />
+            </View>
           </TouchableOpacity>
 
           {/* Header */}
-          <Text style={styles.title}>
+
+          <Text style={[styles.title, { fontSize: 32, color: '#6a0dad', marginBottom: 4, letterSpacing: 1.2 }]}> 
             {isLoginMode ? 'Welcome Back' : 'Create Account'}
           </Text>
-          <Text style={styles.subtitle}>
+          <Text style={[styles.subtitle, { fontSize: 16, color: '#7c3aed', marginBottom: 28, letterSpacing: 0.5 }]}> 
             {isLoginMode ? 'Sign in to continue' : 'Sign up to get started'}
           </Text>
 
           {/* Auth Form Card */}
-          <CustomCard style={styles.authCard}>
+          <CustomCard style={[styles.authCard, { backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e5e7eb', shadowOpacity: 0.13, shadowRadius: 12, elevation: 7 }] }>
             {isLoginMode ? (
               // Login Form
               <Formik
@@ -415,7 +476,7 @@ export default function AuthScreen() {
                       onChangeText={handleChange('email')}
                       onBlur={handleBlur('email')}
                       error={touched.email && errors.email ? errors.email : undefined}
-                      style={undefined}
+                      style={{ backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#e5e7eb' }}
                     />
 
                     <CustomInput
@@ -427,25 +488,35 @@ export default function AuthScreen() {
                       onChangeText={handleChange('password')}
                       onBlur={handleBlur('password')}
                       error={touched.password && errors.password ? errors.password : undefined}
-                      style={undefined}
+                      style={{ backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#e5e7eb' }}
                     />
 
                     <TouchableOpacity
-                      style={styles.showPasswordButton}
+                      style={[styles.showPasswordButton, { marginTop: 0, marginBottom: 8 }] }
                       onPress={() => setShowPassword(!showPassword)}
                     >
-                      <Text style={styles.showPasswordText}>
+                      <Text style={[styles.showPasswordText, { color: '#6a0dad', fontWeight: 'bold' }]}>
                         {showPassword ? 'Hide' : 'Show'} Password
                       </Text>
                     </TouchableOpacity>
 
-                    <CustomButton
-                      title="Login"
-                      onPress={handleSubmit}
-                      loading={isSubmitting}
-                      fullWidth
-                      style={styles.submitButton}
-                    />
+                    <TouchableOpacity
+                      onPress={() => handleSubmit()}
+                      style={[
+                        styles.button,
+                        styles.primaryButton,
+                        styles.fullWidthButton,
+                        styles.submitButton,
+                        { backgroundColor: isSubmitting ? '#a78bfa' : '#6a0dad', borderRadius: 16, shadowColor: '#6a0dad', shadowOpacity: 0.18, shadowOffset: { width: 0, height: 4 }, shadowRadius: 8, elevation: 4 }
+                      ]}
+                      disabled={isSubmitting}
+                    >
+                      {isSubmitting ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <Text style={[styles.buttonText, styles.primaryButtonText, { fontSize: 18, fontWeight: '700', letterSpacing: 1 }]}>Login</Text>
+                      )}
+                    </TouchableOpacity>
                   </View>
                 )}
               </Formik>
@@ -533,7 +604,7 @@ export default function AuthScreen() {
                     {/* Role Selection */}
                     <Text style={styles.roleLabel}>I am a:</Text>
                     <View style={styles.roleContainer}>
-                      {['client', 'artist'].map(role => (
+                      {['client', '(artist)'].map(role => (
                         <TouchableOpacity
                           key={role}
                           style={[

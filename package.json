@@ -20,6 +20,7 @@
     "@react-navigation/native": "^7.1.14",
     "@stripe/stripe-react-native": "^0.45.0",
     "@types/lodash": "^4.17.20",
+    "ansi-escapes": "^7.0.0",
     "expo": "53.0.18",
     "expo-auth-session": "~6.2.0",
     "expo-blur": "~14.1.5",

@@ -1,15 +1,22 @@
-import React, { useState } from 'react';
-import { View, Text, Image, TextInput, TouchableOpacity, ScrollView, StyleSheet, Button, SafeAreaView, Platform, StatusBar } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MaterialCommunityIcons, Ionicons, FontAwesome5 } from '@expo/vector-icons';
-import { useArtistStore } from './ArtistStore';
+import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import * as ImagePicker from 'expo-image-picker';
-import {  Alert } from 'react-native';
+import { getAuth } from 'firebase/auth';
+import React, { useEffect, useState } from 'react';
+import { Alert, Image, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { fetchServicesByArtistId } from '../../firebase/artistServices';
+import { addServiceToFirebase, addTicketToFirebase, fetchArtistById } from '../../firebase/artistsService';
+import { useArtistStore } from './ArtistStore';
 import CalendarPage from './CalendarPage';
 
 const ArtistMobileApp = () => {
+  // Error/success state for forms
+  const [serviceError, setServiceError] = useState('');
+  const [serviceSuccess, setServiceSuccess] = useState('');
+  const [eventError, setEventError] = useState('');
+  const [eventSuccess, setEventSuccess] = useState('');
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
@@ -38,13 +45,42 @@ const ArtistMobileApp = () => {
   const [credits, setCredits] = useState(50);
   const [walletBalance, setWalletBalance] = useState(1250.00);
 
-  const artistProfile = {
-    name: "Creative Arts Studio",
-    image: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&h=150&fit=crop&crop=face",
-    description: "Professional event services and creative solutions for your special moments",
-    rating: 4.8,
-    reviewsCount: 124
-  };
+  // State for real artist profile
+  const [artistProfile, setArtistProfile] = useState({
+    name: '',
+    image: '',
+    description: '',
+    rating: 0,
+    reviewsCount: 0
+  });
+  const [profileLoading, setProfileLoading] = useState(true);
+
+  // Fetch real artist profile on mount
+  useEffect(() => {
+    const fetchProfile = async () => {
+      const auth = getAuth();
+      const user = auth.currentUser;
+      if (!user) return;
+      setProfileLoading(true);
+      try {
+        const artist = await fetchArtistById(user.uid);
+        if (artist) {
+          setArtistProfile({
+            name: artist.name,
+            image: artist.profileImage || '',
+            description: artist.bio,
+            rating: artist.rating,
+            reviewsCount: (artist as any).reviewCount || (artist as any).reviewsCount || 0
+          });
+        }
+      } catch (e) {
+        // fallback: keep empty/default
+      } finally {
+        setProfileLoading(false);
+      }
+    };
+    fetchProfile();
+  }, []);
 
   // Replace with marketplace categories from client CategorySelector
   const MARKETPLACE_CATEGORIES = [
@@ -146,16 +182,30 @@ const ArtistMobileApp = () => {
     setAddOns(updated);
   };
 
-  const addService = () => {
-    if (credits < 5) {
-      alert('Insufficient credits! You need 5 credits to publish a service.');
+  const addService = async () => {
+    const auth = getAuth();
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      setServiceError('You must be logged in to add a service.');
+      Alert.alert('Error', 'You must be logged in to add a service.');
       return;
     }
-    if (!selectedCategory || !newService.title || !newService.description || !newService.basePrice) return;
-    addGig({
+    setServiceError('');
+    setServiceSuccess('');
+    if (credits < 5) {
+      setServiceError('Insufficient credits! You need 5 credits to publish a service.');
+      Alert.alert('Error', 'Insufficient credits! You need 5 credits to publish a service.');
+      return;
+    }
+    if (!selectedCategory || !newService.title || !newService.description || !newService.basePrice) {
+      setServiceError('Please fill in all required fields.');
+      Alert.alert('Error', 'Please fill in all required fields.');
+      return;
+    }
+    const serviceData = {
       title: newService.title,
       description: newService.description,
-      category: selectedCategory.name, // Use category name as string
+      category: selectedCategory.name,
       basePrice: Number(newService.basePrice),
       images: serviceImages,
       options: serviceOptions.map(opt => ({
@@ -168,43 +218,84 @@ const ArtistMobileApp = () => {
       rating: 0,
       reviewCount: 0,
       createdAt: new Date(),
-      artistId: '1', // TODO: Replace with actual artistId from context/auth
-    });
-    setCredits(credits - 5);
-    setNewService({
-      title: '',
-      description: '',
-      basePrice: '',
-      minQuantity: '1',
-      maxQuantity: '10',
-      category: '',
-      images: [],
-      addOns: [{ name: '', price: '', type: 'checkbox' }],
-      providerName: artistProfile.name,
-      providerAvatar: artistProfile.image,
-      rating: 0,
-      reviewCount: 0,
-      isAvailable: true,
-      location: '',
-      defaultMessage: '',
-      tags: '',
-    });
-    setServiceImages([]);
-    setServiceOptions([{ title: '', price: '', description: '' }]);
-    setServiceLocation('');
-    setSelectedCategory(null);
+      artistId: currentUser.uid,
+    };
+    try {
+      console.log('Attempting to add service to Firebase:', serviceData);
+      Alert.alert('Debug', 'Attempting to add service to Firebase. Check console for details.');
+      const result = await addServiceToFirebase(currentUser.uid, serviceData);
+      console.log('Service added to Firebase result:', result);
+      Alert.alert('Success', 'Service added to Firebase!');
+      // Fetch all services from Firebase and update local gigs state
+      const allGigs = await fetchServicesByArtistId(currentUser.uid);
+      allGigs.forEach(gig => delete gig.orders); // Remove orders if present for compatibility
+      gigs.forEach(g => deleteGig(g.id));
+      allGigs.forEach(gig => addGig({
+        artistId: gig.artistId,
+        title: gig.title,
+        description: gig.description,
+        basePrice: gig.basePrice,
+        images: gig.images,
+        category: gig.category,
+        options: gig.options,
+        location: gig.location,
+        rating: gig.rating,
+        reviewCount: gig.reviewCount,
+        createdAt: gig.createdAt,
+      }));
+      setCredits(credits - 5);
+      setServiceSuccess('Service added successfully!');
+      setNewService({
+        title: '',
+        description: '',
+        basePrice: '',
+        minQuantity: '1',
+        maxQuantity: '10',
+        category: '',
+        images: [],
+        addOns: [{ name: '', price: '', type: 'checkbox' }],
+        providerName: artistProfile.name,
+        providerAvatar: artistProfile.image,
+        rating: 0,
+        reviewCount: 0,
+        isAvailable: true,
+        location: '',
+        defaultMessage: '',
+        tags: '',
+      });
+      setServiceImages([]);
+      setServiceOptions([{ title: '', price: '', description: '' }]);
+      setServiceLocation('');
+      setSelectedCategory(null);
+    } catch (error) {
+      setServiceError('Failed to add service to Firebase.');
+      console.error('Failed to add service to Firebase:', error);
+      Alert.alert('Error', 'Failed to add service to Firebase: ' + (error?.message || error));
+    }
   };
 
-  const addEvent = () => {
-    if (credits < 10) {
-      alert('Insufficient credits! You need 10 credits to publish an event.');
+  const addEvent = async () => {
+    const auth = getAuth();
+    const currentUser = auth.currentUser;
+    setEventError('');
+    setEventSuccess('');
+    if (!currentUser) {
+      setEventError('You must be logged in to add an event.');
       return;
     }
-    if (!newEvent.title || !newEvent.description || !newEvent.date) return;
-    addGig({
+    if (credits < 10) {
+      setEventError('Insufficient credits! You need 10 credits to publish an event.');
+      return;
+    }
+    if (!newEvent.title || !newEvent.description || !newEvent.date) {
+      setEventError('Please fill in all required fields.');
+      return;
+    }
+    // Save event as a service (if needed)
+    const eventData = {
       title: newEvent.title,
       description: newEvent.description,
-      category: categories[0]?.name || '', // Use category name as string
+      category: categories[0]?.name || '',
       basePrice: 0,
       images: [],
       options: [],
@@ -212,16 +303,33 @@ const ArtistMobileApp = () => {
       rating: 0,
       reviewCount: 0,
       createdAt: new Date(),
-      artistId: '1', // TODO: Replace with actual artistId from context/auth
-    });
-    setCredits(credits - 10);
-    setNewEvent({
-      title: '',
-      description: '',
-      date: '',
-      ticketTypes: [{ name: 'Normal', price: '', quantity: '' }],
-      flyer: null
-    });
+      artistId: currentUser.uid,
+    };
+    // Save tickets to tickets subcollection
+    const ticketData = newEvent.ticketTypes.map(t => ({
+      ...t,
+      eventTitle: newEvent.title,
+      eventDate: newEvent.date,
+      artistId: currentUser.uid,
+    }));
+    try {
+      await addServiceToFirebase(currentUser.uid, eventData);
+      for (const ticket of ticketData) {
+        await addTicketToFirebase(currentUser.uid, ticket);
+      }
+      addGig(eventData);
+      setCredits(credits - 10);
+      setEventSuccess('Event and tickets added successfully!');
+      setNewEvent({
+        title: '',
+        description: '',
+        date: '',
+        ticketTypes: [{ name: 'Normal', price: '', quantity: '' }],
+        flyer: null
+      });
+    } catch (error) {
+      setEventError('Failed to add event or tickets to Firebase.');
+    }
   };
 
   const addTicketType = () => {
@@ -239,7 +347,7 @@ const ArtistMobileApp = () => {
 
   // Home Page Component
   const HomePage = () => (
-    <ScrollView style={[styles.container, { paddingTop: insets.top }]}>
+    <ScrollView style={[styles.container, { paddingTop: insets.top }]}> 
       {/* Profile Preview */}
       <View style={styles.profileCard}>
         <LinearGradient
@@ -247,22 +355,50 @@ const ArtistMobileApp = () => {
           style={styles.profileGradient}
         >
           <View style={styles.profileHeader}>
-            <Image 
-              source={{ uri: artistProfile.image }} 
-              style={styles.profileImage}
-            />
-            <View style={styles.profileInfo}>
-              <Text style={styles.profileName}>{artistProfile.name}</Text>
-              <View style={styles.ratingContainer}>
-                <Text style={styles.ratingStar}>⭐</Text>
-                <Text style={styles.ratingText}>{artistProfile.rating} ({artistProfile.reviewsCount} reviews)</Text>
-              </View>
-              <Text style={styles.profileDescription}>{artistProfile.description}</Text>
-            </View>
+            {profileLoading ? (
+              <Text style={{ color: '#fff', fontSize: 18 }}>Loading profile...</Text>
+            ) : (
+              <>
+                <Image 
+                  source={{ uri: artistProfile.image || 'https://ui-avatars.com/api/?name=Artist' }} 
+                  style={styles.profileImage}
+                />
+                <View style={styles.profileInfo}>
+                  <Text style={styles.profileName}>{artistProfile.name}</Text>
+                  <View style={styles.ratingContainer}>
+                    {/* Show 0 stars and 0 rating if no reviews, else show real stars and rating */}
+                    {artistProfile.reviewsCount === 0 ? (
+                      <>
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <Text key={i} style={styles.ratingStar}>☆</Text>
+                        ))}
+                        <Text style={styles.ratingText}>0.0 (0 reviews)</Text>
+                      </>
+                    ) : (
+                      <>
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <Text key={i} style={styles.ratingStar}>
+                            {artistProfile.rating >= i + 1
+                              ? '★'
+                              : artistProfile.rating >= i + 0.5
+                              ? '⯨'
+                              : '☆'}
+                          </Text>
+                        ))}
+                        <Text style={styles.ratingText}>
+                          {artistProfile.rating.toFixed(1)} ({artistProfile.reviewsCount} reviews)
+                        </Text>
+                      </>
+                    )}
+                  </View>
+                  <Text style={styles.profileDescription}>{artistProfile.description}</Text>
+                </View>
+              </>
+            )}
           </View>
           <TouchableOpacity 
             style={styles.viewProfileButton}
-            onPress={() => router.push('/artist/public-profile')}
+            onPress={() => router.push('/(artist)/public-profile')}
           >
             <Text style={styles.viewProfileText}>👁️ View Public Profile</Text>
           </TouchableOpacity>
@@ -287,9 +423,6 @@ const ArtistMobileApp = () => {
           <Text style={styles.addFundsText}>➕ Add Funds</Text>
         </TouchableOpacity>
       </View>
-
- 
-
     </ScrollView>
   );
 
@@ -881,7 +1014,22 @@ const OrderManagementPage = () => {
       case 'calendar':
         return <CalendarPage />;
       case 'ticket':
-        return require('./Ticket').default ? React.createElement(require('./Ticket').default) : null;
+        try {
+          const TicketComponent = require('./Ticket');
+          return TicketComponent?.default ? React.createElement(TicketComponent.default) : (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>Ticket component not found</Text>
+              <Text style={styles.errorSubtext}>Add services and tickets here</Text>
+            </View>
+          );
+        } catch (error) {
+          return (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>Ticket component not available</Text>
+              <Text style={styles.errorSubtext}>Add services and tickets here</Text>
+            </View>
+          );
+        }
       case 'analytics':
         return <AnalyticsPage />;
       case 'settings':
@@ -1662,6 +1810,25 @@ const styles = StyleSheet.create({
     color: '#333',
     marginLeft: 12,
     fontWeight: '500',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+    backgroundColor: '#f5f5f5',
+  },
+  errorText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  errorSubtext: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
   },
 
 });
