@@ -1,10 +1,13 @@
+import { useAuth } from '@/src/context/AuthContext';
 import { useRouter } from 'expo-router';
-import { Formik } from 'formik';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
+  Animated,
+  Dimensions,
+  Image,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -13,898 +16,1332 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import * as Yup from 'yup';
 
-// Firebase imports
-import { getApps, initializeApp } from 'firebase/app';
-import {
-  createUserWithEmailAndPassword,
-  getAuth,
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  signOut
-} from 'firebase/auth';
-import {
-  doc,
-  getDoc,
-  getFirestore,
-  setDoc
-} from 'firebase/firestore';
+const { width, height } = Dimensions.get('window');
 
-// Firebase Configuration - Updated to match inevents-2fe56 project
-const firebaseConfig = {
-  apiKey: 'AIzaSyA4d4sIGVIDfhMOuG75qDK_rUZiPsugcYE',
-  authDomain: 'inevents-2fe56.firebaseapp.com',
-  projectId: 'inevents-2fe56',
-  storageBucket: 'inevents-2fe56.appspot.com',
-  messagingSenderId: '780609459655',
-  appId: '1:780609459655:android:c4535e1323f166ef7f75e2',
-};
-
-// Initialize Firebase
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApps()[0];
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-// Firebase Auth Functions
-const registerWithEmail = async (email, password, name) => {
-  const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-  
-  // Save comprehensive user profile in Firestore users collection
-  await setDoc(doc(db, 'users', userCredential.user.uid), {
-    id: userCredential.user.uid,
-    uid: userCredential.user.uid,
-    name: name,
-    email: email,
-    phone: '', // Will be updated in createUserProfile
-    role: 'client', // Default role, will be updated in createUserProfile
-    status: 'active',
-    signupDate: new Date(),
-    createdAt: new Date(),
-    lastLogin: new Date(),
-    revenue: 0,
-    region: 'Unknown',
-    // Additional fields for inevents project
-    eventsAttended: 0,
-    eventsOrganized: 0,
-    favoriteCategory: '',
-    specialization: '',
-  });
-
-  console.log('✅ User created in Firestore users collection:', userCredential.user.uid);
-  return userCredential;
-};
-
-const loginWithEmail = async (email, password) => {
-  return signInWithEmailAndPassword(auth, email, password);
-};
-
-const createUserProfile = async (uid, email, phone, role) => {
-  await setDoc(
-    doc(db, 'users', uid),
-    {
-      id: uid,
-      uid: uid,
-      email: email,
-      phone: phone,
-      role: role,
-      status: 'active',
-      signupDate: new Date(),
-      createdAt: new Date(),
-      lastLogin: new Date(),
-      revenue: 0,
-      region: 'Unknown',
-      // Role-specific fields
-      ...(role === '(artist)' ? {
-        eventsOrganized: 0,
-        specialization: '',
-      } : {
-        eventsAttended: 0,
-        favoriteCategory: '',
-      }),
-    },
-    { merge: true } // This will update existing fields while keeping others
-  );
-  
-  console.log(`✅ User profile updated in Firestore: ${uid} as ${role}`);
-};
-
-const getUserRole = async (uid) => {
-  try {
-    const userDoc = await getDoc(doc(db, 'users', uid));
-    if (userDoc.exists()) {
-      return userDoc.data().role;
-    }
-    return 'client'; // default role
-  } catch (error) {
-    console.error('Error getting user role:', error);
-    return 'client';
-  }
-};
-
-const logout = async () => {
-  return signOut(auth);
-};
-
-// Theme object
-const Theme = {
-  colors: {
-    primary: '#3B82F6',
-    secondary: '#FFFFFF',
-    background: '#F8FAFC',
-    textDark: '#1F2937',
-    textLight: '#6B7280',
-    border: '#E5E7EB',
-    error: '#EF4444',
-    success: '#10B981',
-  },
-  spacing: {
-    xs: 4,
-    sm: 8,
-    md: 16,
-    lg: 24,
-    xl: 32,
-    xxl: 48,
-  },
-  typography: {
-    fontSize: {
-      xs: 12,
-      sm: 14,
-      md: 16,
-      lg: 18,
-      xl: 20,
-      xxl: 32,
-    },
-  },
-  borderRadius: {
-    sm: 4,
-    md: 8,
-    lg: 12,
-    xl: 16,
-  },
-};
-
-// Custom Input Component
-const CustomInput = ({ label, leftIcon, error, style, ...props }) => (
-  <View style={[styles.inputContainer, style]}>
-    <Text style={styles.inputLabel}>{label}</Text>
-    <View style={[styles.inputWrapper, error && styles.inputError]}>
-      {leftIcon && <View style={styles.iconContainer}>{leftIcon}</View>}
-      <TextInput
-        style={[styles.textInput, leftIcon && styles.textInputWithIcon]}
-        placeholderTextColor={Theme.colors.textLight}
-        {...props}
-      />
-    </View>
-    {error && <Text style={styles.errorText}>{error}</Text>}
-  </View>
-);
-
-// Custom Button Component
-const CustomButton = ({ title, onPress, loading, fullWidth, variant = 'primary', style }) => (
-  <TouchableOpacity
-    style={[
-      styles.button,
-      variant === 'primary' ? styles.primaryButton : styles.outlineButton,
-      fullWidth && styles.fullWidthButton,
-      loading && styles.disabledButton,
-      style,
-    ]}
-    onPress={onPress}
-    disabled={loading}
-  >
-    {loading ? (
-      <ActivityIndicator color={variant === 'primary' ? '#FFFFFF' : Theme.colors.primary} />
-    ) : (
-      <Text style={[
-        styles.buttonText,
-        variant === 'primary' ? styles.primaryButtonText : styles.outlineButtonText,
-      ]}>
-        {title}
-      </Text>
-    )}
-  </TouchableOpacity>
-);
-
-// Custom Card Component
-const CustomCard = ({ children, style }) => (
-  <View style={[styles.card, style]}>
-    {children}
-  </View>
-);
-
-// Icon Components
-const ArrowLeftIcon = () => <Text style={styles.icon}>←</Text>;
-const UserIcon = () => <Text style={styles.icon}>👤</Text>;
-const MailIcon = () => <Text style={styles.icon}>📧</Text>;
-const LockIcon = () => <Text style={styles.icon}>🔒</Text>;
-const PhoneIcon = () => <Text style={styles.icon}>📱</Text>;
-
-// Validation Schemas
-const LoginSchema = Yup.object().shape({
-  email: Yup.string().email('Invalid email').required('Email is required'),
-  password: Yup.string().min(6, 'Password must be at least 6 characters').required('Password is required'),
-});
-
-const RegisterSchema = Yup.object().shape({
-  name: Yup.string().required('Name is required'),
-  email: Yup.string().email('Invalid email').required('Email is required'),
-  password: Yup.string().min(6, 'Password must be at least 6 characters').required('Password is required'),
-  phone: Yup.string().required('Phone number is required'),
-  role: Yup.string().oneOf(['(artist)', 'client'], 'Invalid role').required('Role is required'),
-});
-
-// Main Component
 export default function AuthScreen() {
-  const [isLoginMode, setIsLoginMode] = useState(true);
-  const [showPassword, setShowPassword] = useState(false);
-  const [initializing, setInitializing] = useState(true);
-  const [user, setUser] = useState<{ email: string | null; role: string } | null>(null);
   const router = useRouter();
+  const { login, register, loading, user, verifyPhoneNumber, confirmVerificationCode } = useAuth();
+  
+  const [isLogin, setIsLogin] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [isPhoneVerified, setIsPhoneVerified] = useState(false);
+  const [verificationCode, setVerificationCode] = useState('');
+  const [isVerificationSent, setIsVerificationSent] = useState(false);
+  const [verificationError, setVerificationError] = useState('');
+  const [verificationLoading, setVerificationLoading] = useState(false);
+  const [developmentCode, setDevelopmentCode] = useState('');
+  
+  // This comment replaces duplicate animation values that were here
+  const [userRole, setUserRole] = useState<'artist' | 'client' | 'admin'>('client');
+  
+  // Additional fields for artists
+  const [city, setCity] = useState('');
+  const [storeName, setStoreName] = useState('');
+  const [categories, setCategories] = useState<string[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
 
-  // Auth state change listener
+  // Animation refs
+  const logoAnim = useRef(new Animated.Value(0)).current;
+  const formAnim = useRef(new Animated.Value(0)).current;
+  
+  // Available categories for artists
+  const availableCategories = [
+    'Music', 
+    'Visual Arts', 
+    'Performing Arts', 
+    'Dance', 
+    'Photography', 
+    'Culinary Arts',
+    'Digital Art',
+    'Fashion',
+    'Crafts',
+    'Literature',
+    'Film & Video',
+    'Other'
+  ];
+  
+  // Function to add a category
+  const addCategory = () => {
+    if (selectedCategory && !categories.includes(selectedCategory)) {
+      setCategories([...categories, selectedCategory]);
+      setSelectedCategory('');
+    }
+  };
+  
+  // Function to remove a category
+  const removeCategory = (category: string) => {
+    setCategories(categories.filter(c => c !== category));
+  };
+  
+  // Check if artist form is valid
+  const isArtistFormValid = () => {
+    if (userRole !== 'artist') return true;
+    return storeName.trim() !== '' && 
+           city.trim() !== '' && 
+           categories.length > 0;
+  };
+
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
+    Animated.sequence([
+      Animated.timing(logoAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+      Animated.sequence([
+        Animated.delay(300),
+        Animated.spring(formAnim, {
+          toValue: 1,
+          tension: 20,
+          friction: 7,
+          useNativeDriver: true,
+        })
+      ]),
+    ]).start();
+  }, []);
+
+  // Function to send verification code
+  const handleSendVerificationCode = async () => {
+    // Enhanced validation
+    if (!phoneNumber) {
+      setVerificationError('Please enter your WhatsApp number');
+      return;
+    }
+    
+    const cleanedNumber = phoneNumber.replace(/\D/g, '');
+    if (cleanedNumber.length < 10) {
+      setVerificationError('Please enter a valid WhatsApp number with at least 10 digits');
+      return;
+    }
+    
+    try {
+      setVerificationLoading(true);
+      setVerificationError('');
+      setVerificationCode(''); // Clear any existing code
+      
+      // Call the verification service
+      const result = await verifyPhoneNumber(phoneNumber);
+      
+      // For development only - set the actual verification code for testing
+      setDevelopmentCode(result.verificationCode);
+      
+      setIsVerificationSent(true);
+      
+      // Don't show an alert (better UX) - instead the UI will update to show code input field
+      // Clear any previous errors since we successfully sent the code
+      setVerificationError('');
+      
+      // Auto-focus on code input (handled in the component via autoFocus)
+    } catch (error) {
+      console.error('Failed to send verification code:', error);
+      setVerificationError('Unable to send verification code. Please check your number and try again.');
+    } finally {
+      setVerificationLoading(false);
+    }
+  };
+  
+  // Function to verify the code
+  const handleVerifyCode = async () => {
+    if (!verificationCode || verificationCode.length !== 6) {
+      setVerificationError('Please enter a valid 6-digit WhatsApp verification code');
+      return;
+    }
+    
+    try {
+      setVerificationLoading(true);
+      setVerificationError('');
+      
+      // Verify the code from WhatsApp
+      const isValid = await confirmVerificationCode(phoneNumber, verificationCode);
+      
+      if (isValid) {
+        setIsPhoneVerified(true);
+        // No alert for better UX, just show visual confirmation
+      } else {
+        // First attempt - give a helpful message
+        if (!verificationError) {
+          setVerificationError('The WhatsApp code entered is not valid. Please check and try again.');
+        } else {
+          // Second or subsequent attempt - give more options
+          setVerificationError('WhatsApp verification failed. Double-check the code or request a new one.');
+        }
+        // Automatically clear the code field for better UX
+        setVerificationCode('');
+      }
+    } catch (error) {
+      console.error('Failed to verify WhatsApp code:', error);
+      setVerificationError('WhatsApp verification failed. Please try again or request a new code.');
+      setVerificationCode('');
+    } finally {
+      setVerificationLoading(false);
+    }
+  };
+
+  const handleAuthentication = async () => {
+    if (!email || !password) {
+      Alert.alert('Error', 'Please enter both email and password');
+      return;
+    }
+
+    try {
+      console.log(`Attempting to ${isLogin ? 'login' : 'register'} with email: ${email}`);
+      
+      if (isLogin) {
+        // Perform login - now returns the role directly
+        const userRole = await login(email, password);
+        console.log('Login successful - got user role:', userRole);
+        
+        // Simple navigation based on role
+        if (userRole === 'admin') {
+          console.log('Navigating to admin area');
+          router.push('/(admin)');
+        } else if (userRole === 'artist') {
+          console.log('Navigating to artist area');
+          router.push('/(artist)');
+        } else {
+          console.log('Navigating to client area (default)');
+          router.push('/(client)');
+        }
+      } else {
+        // Registration flow
+        if (!name) {
+          Alert.alert('Error', 'Please enter your name');
+          return;
+        }
+        
+        // Check phone verification
+        if (!isPhoneVerified) {
+          Alert.alert('Error', 'Please verify your phone number before registration');
+          return;
+        }
+        
+        // Prepare artist details if needed
+        if (userRole === 'artist') {
+          if (!storeName) {
+            Alert.alert('Error', 'Please enter your store name');
+            return;
+          }
+          if (!city) {
+            Alert.alert('Error', 'Please enter your city');
+            return;
+          }
+          if (categories.length === 0) {
+            Alert.alert('Error', 'Please select at least one category');
+            return;
+          }
+        }
+        
+        // Register with selected role and additional info for artists
+        const artistDetails = userRole === 'artist' ? { storeName, city, categories } : undefined;
+        await register(email, password, name, phoneNumber, isPhoneVerified, userRole, artistDetails);
+        console.log('Registration successful, navigating to appropriate route');
+        
+        // Navigate immediately based on the role selected during registration
         try {
-          const role = await getUserRole(user.uid);
-          setUser({ email: user.email, role });
+          console.log(`Registered as ${userRole}, navigating to appropriate route`);
           
-          // Auto-redirect based on role
-          if (role === 'admin') {
-            console.log('🔄 Redirecting admin to /(admin)');
-            router.replace('/(admin)');
-          } else if (role === '(artist)') {
-            console.log('🎨 Redirecting (artist) to standalone (artist) app');
-            // Redirect to separate (artist) application
-            router.replace('/(artist)');
+          // Use simple conditional navigation
+          if (userRole === 'admin') {
+            router.push('/(admin)');
+          } else if (userRole === 'artist') {
+            router.push('/(artist)');
           } else {
-            console.log('👤 Redirecting client to /(client)/profile');
-            router.replace('/(client)/profile');
+            router.push('/(client)');
           }
         } catch (error) {
-          console.error('Error getting user role:', error);
-          setUser(user ? { email: user.email, role: '' } : null);
+          console.error('Navigation error:', error);
+          
+          // Try one more time after a short delay
+          setTimeout(() => {
+            try {
+              console.log(`Retry navigation as ${userRole}`);
+              if (userRole === 'artist') {
+                router.push('/(artist)');
+              } else if (userRole === 'admin') {
+                router.push('/(admin)');
+              } else {
+                router.push('/(client)');
+              }
+            } catch (retryError) {
+              console.error('Retry navigation failed:', retryError);
+              // Last resort - just navigate to the root
+              router.push('/');
+            }
+          }, 500);
         }
-      } else {
-        setUser(null);
+      }
+    } catch (error: any) {
+      console.error('Authentication error:', error);
+      
+      // Extract a user-friendly error message
+      let errorMessage = 'Failed to authenticate';
+      
+      if (error.message) {
+        if (error.message.includes('auth/email-already-in-use')) {
+          errorMessage = 'This email is already registered. Please log in instead.';
+        } else if (error.message.includes('auth/invalid-email')) {
+          errorMessage = 'Please enter a valid email address.';
+        } else if (error.message.includes('auth/weak-password')) {
+          errorMessage = 'Password is too weak. Please use at least 6 characters.';
+        } else if (error.message.includes('auth/wrong-password') || error.message.includes('auth/user-not-found')) {
+          errorMessage = 'Invalid email or password.';
+        } else {
+          errorMessage = error.message;
+        }
       }
       
-      if (initializing) setInitializing(false);
+      Alert.alert('Authentication Error', errorMessage);
+    }
+  };
+
+  const toggleAuthMode = () => {
+    // First animate out
+    Animated.timing(formAnim, {
+      toValue: 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start(() => {
+      // Change state
+      setIsLogin(!isLogin);
+      
+      // Then animate back in
+      Animated.timing(formAnim, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
     });
-
-    return unsubscribe; // unsubscribe on unmount
-  }, [initializing, router]);
-
-  // Redirect to appropriate page if user is logged in (after initialization)
-  useEffect(() => {
-    if (!initializing && user) {
-      if (user.role === 'admin') {
-        console.log('🔄 Auto-redirecting admin to /(admin)');
-        router.replace('/(admin)');
-      } else if (user.role === '(artist)') {
-        console.log('🎨 Auto-redirecting (artist) to standalone (artist) app');
-        router.replace('/(artist)');
-      } else {
-        console.log('👤 Auto-redirecting client to /(client)/profile');
-        router.replace('/(client)/profile');
-      }
-    }
-  }, [initializing, user, router]);
-
-  // Show loading screen while initializing
-  if (initializing) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={Theme.colors.primary} />
-        <Text style={styles.loadingText}>Loading...</Text>
-      </View>
-    );
-  }
-
-  const handleLogin = async (
-    values: { email: string; password: string },
-    { setSubmitting, setErrors }: { setSubmitting: (b: boolean) => void; setErrors: (e: any) => void }
-  ) => {
-    try {
-      setSubmitting(true);
-      const userCredential = await loginWithEmail(values.email, values.password);
-      const role = await getUserRole(userCredential.user.uid);
-      Alert.alert(
-        'Success',
-        `Welcome back! Logged in as ${role}`,
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              if (role === 'admin') {
-                console.log('🔄 Login success - redirecting admin to /(admin)');
-                router.replace('/(admin)');
-              } else if (role === '(artist)') {
-                console.log('🎨 Login success - redirecting (artist) to standalone (artist) app');
-                router.replace('/(artist)');
-              } else {
-                console.log('👤 Login success - redirecting client to /(client)/profile');
-                router.replace('/(client)/profile');
-              }
-            },
-          },
-        ]
-      );
-    } catch (error) {
-      console.error('Login error:', error);
-      let errorMessage = 'Invalid email or password';
-      if (error && typeof error === 'object' && 'code' in error) {
-        if (error.code === 'auth/user-not-found') {
-          errorMessage = 'No account found with this email';
-        } else if (error.code === 'auth/wrong-password') {
-          errorMessage = 'Incorrect password';
-        } else if (error.code === 'auth/invalid-email') {
-          errorMessage = 'Invalid email address';
-        }
-      }
-      setErrors({
-        email: errorMessage,
-        password: errorMessage,
-      });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleRegister = async (
-    values: { name: string; email: string; password: string; phone: string; role: string },
-    { setSubmitting, setErrors }: { setSubmitting: (b: boolean) => void; setErrors: (e: any) => void }
-  ) => {
-    try {
-      setSubmitting(true);
-      const userCredential = await registerWithEmail(values.email, values.password, values.name);
-      const uid = userCredential.user.uid;
-      await createUserProfile(uid, values.email, values.phone, values.role);
-      Alert.alert(
-        'Success',
-        `Account created successfully! Welcome ${values.name}`,
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              if (values.role === '(artist)') {
-                console.log('🎨 Registration success - redirecting (artist) to standalone (artist) app');
-                router.replace('/(artist)');
-              } else {
-                console.log('👤 Registration success - redirecting client to /(client)/profile');
-                router.replace('/(client)/profile');
-              }
-            },
-          },
-        ]
-      );
-    } catch (error) {
-      console.error('Registration error:', error);
-      let errorMessage = 'Registration failed';
-      if (error && typeof error === 'object' && 'code' in error) {
-        if (error.code === 'auth/email-already-in-use') {
-          errorMessage = 'Email is already registered';
-        } else if (error.code === 'auth/weak-password') {
-          errorMessage = 'Password is too weak';
-        } else if (error.code === 'auth/invalid-email') {
-          errorMessage = 'Invalid email address';
-        }
-      }
-      setErrors({
-        email: errorMessage,
-      });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleGoogleSignIn = async () => {
-    Alert.alert('Info', 'Google Sign-In would be implemented here with expo-auth-session');
-  };
-
-  const toggleMode = () => setIsLoginMode(prev => !prev);
-
-  // Go back to the previous screen/section
-  const goBack = () => {
-    router.back();
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.keyboardAvoidingView}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.container}>
-          {/* Back Button */}
-
-          <TouchableOpacity onPress={goBack} style={styles.backButton}>
-            <View style={{
-              backgroundColor: '#f3f4f6',
-              borderRadius: 20,
-              padding: 8,
-              shadowColor: '#000',
-              shadowOpacity: 0.08,
-              shadowOffset: { width: 0, height: 2 },
-              shadowRadius: 4,
-              elevation: 2,
-            }}>
-              <ArrowLeftIcon />
-            </View>
-          </TouchableOpacity>
-
-          {/* Header */}
-
-          <Text style={[styles.title, { fontSize: 32, color: '#6a0dad', marginBottom: 4, letterSpacing: 1.2 }]}> 
-            {isLoginMode ? 'Welcome Back' : 'Create Account'}
-          </Text>
-          <Text style={[styles.subtitle, { fontSize: 16, color: '#7c3aed', marginBottom: 28, letterSpacing: 0.5 }]}> 
-            {isLoginMode ? 'Sign in to continue' : 'Sign up to get started'}
-          </Text>
-
-          {/* Auth Form Card */}
-          <CustomCard style={[styles.authCard, { backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e5e7eb', shadowOpacity: 0.13, shadowRadius: 12, elevation: 7 }] }>
-            {isLoginMode ? (
-              // Login Form
-              <Formik
-                initialValues={{ email: '', password: '' }}
-                validationSchema={LoginSchema}
-                onSubmit={handleLogin}
-              >
-                {({
-                  handleChange,
-                  handleBlur,
-                  handleSubmit,
-                  values,
-                  errors,
-                  touched,
-                  isSubmitting,
-                }) => (
-                  <View>
-                    <CustomInput
-                      label="Email"
-                      placeholder="Enter your email"
-                      keyboardType="email-address"
-                      autoCapitalize="none"
-                      leftIcon={<MailIcon />}
-                      value={values.email}
-                      onChangeText={handleChange('email')}
-                      onBlur={handleBlur('email')}
-                      error={touched.email && errors.email ? errors.email : undefined}
-                      style={{ backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#e5e7eb' }}
-                    />
-
-                    <CustomInput
-                      label="Password"
-                      placeholder="Enter your password"
-                      secureTextEntry={!showPassword}
-                      leftIcon={<LockIcon />}
-                      value={values.password}
-                      onChangeText={handleChange('password')}
-                      onBlur={handleBlur('password')}
-                      error={touched.password && errors.password ? errors.password : undefined}
-                      style={{ backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#e5e7eb' }}
-                    />
-
-                    <TouchableOpacity
-                      style={[styles.showPasswordButton, { marginTop: 0, marginBottom: 8 }] }
-                      onPress={() => setShowPassword(!showPassword)}
-                    >
-                      <Text style={[styles.showPasswordText, { color: '#6a0dad', fontWeight: 'bold' }]}>
-                        {showPassword ? 'Hide' : 'Show'} Password
-                      </Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      onPress={() => handleSubmit()}
-                      style={[
-                        styles.button,
-                        styles.primaryButton,
-                        styles.fullWidthButton,
-                        styles.submitButton,
-                        { backgroundColor: isSubmitting ? '#a78bfa' : '#6a0dad', borderRadius: 16, shadowColor: '#6a0dad', shadowOpacity: 0.18, shadowOffset: { width: 0, height: 4 }, shadowRadius: 8, elevation: 4 }
-                      ]}
-                      disabled={isSubmitting}
-                    >
-                      {isSubmitting ? (
-                        <ActivityIndicator color="#fff" />
-                      ) : (
-                        <Text style={[styles.buttonText, styles.primaryButtonText, { fontSize: 18, fontWeight: '700', letterSpacing: 1 }]}>Login</Text>
-                      )}
-                    </TouchableOpacity>
+    <View style={styles.container}>
+      <Image 
+        source={require('../assets/indexpage/mainpic.png')} 
+        style={styles.heroImage} 
+        resizeMode="cover" 
+      />
+      <View style={styles.overlayContainer} />
+      
+      <View style={styles.content}>
+        <Animated.Image
+            source={require('../assets/indexpage/welcomepage.png')}
+            style={[
+              styles.logo,
+              {
+                opacity: logoAnim,
+                transform: [
+                  { 
+                    translateY: logoAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-20, 0],
+                    })
+                  },
+                ],
+              },
+            ]}
+          />
+          
+          <Animated.View 
+            style={[
+              styles.formContainer,
+              {
+                opacity: formAnim,
+                transform: [
+                  {
+                    translateY: formAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [30, 0],
+                    }),
+                  },
+                  {
+                    scale: formAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.95, 1]
+                    })
+                  }
+                ],
+              }
+            ]}
+          >
+          <ScrollView 
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+          <Text style={styles.formTitle}>{isLogin ? 'Welcome Back' : 'Create Account'}</Text>
+          
+          {!isLogin && (
+            <TextInput
+              style={styles.input}
+              placeholder="Name"
+              placeholderTextColor="#aaa"
+              value={name}
+              onChangeText={setName}
+            />
+          )}
+          
+          <TextInput
+            style={styles.input}
+            placeholder="Email"
+            placeholderTextColor="#aaa"
+            value={email}
+            onChangeText={setEmail}
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
+          
+          {!isLogin && (
+            <View style={styles.phoneVerificationContainer}>
+              <Text style={styles.verificationTitle}>
+                {isPhoneVerified ? "✓ Phone Verified" : "Phone Verification (WhatsApp)"}
+              </Text>
+              
+              <View style={styles.phoneInputContainer}>
+                <TextInput
+                  style={[styles.input, styles.phoneInput, isPhoneVerified && styles.verifiedInput]}
+                  placeholder="WhatsApp Number"
+                  placeholderTextColor="#aaa"
+                  value={phoneNumber}
+                  onChangeText={setPhoneNumber}
+                  keyboardType="phone-pad"
+                  editable={!isPhoneVerified}
+                />
+                
+                {!isPhoneVerified && (
+                  <TouchableOpacity 
+                    style={[styles.verificationButton, isVerificationSent && styles.verificationSentButton]} 
+                    onPress={handleSendVerificationCode}
+                    disabled={verificationLoading || !phoneNumber || phoneNumber.length < 10}
+                  >
+                    {verificationLoading ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                        <Text style={[styles.verificationButtonText, {marginRight: 5}]}>
+                          {isVerificationSent ? 'Resend to' : 'Send to'}
+                        </Text>
+                        <Text style={{color: '#ffffff', fontSize: 16, fontWeight: 'bold'}}>WhatsApp</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                )}
+                
+                {isPhoneVerified && (
+                  <View style={styles.verifiedBadge}>
+                    <Text style={styles.verifiedText}>✓ Verified</Text>
                   </View>
                 )}
-              </Formik>
-            ) : (
-              // Register Form
-              <Formik
-                initialValues={{
-                  name: '',
-                  email: '',
-                  password: '',
-                  phone: '',
-                  role: 'client',
-                }}
-                validationSchema={RegisterSchema}
-                onSubmit={handleRegister}
-              >
-                {({
-                  handleChange,
-                  handleBlur,
-                  handleSubmit,
-                  values,
-                  errors,
-                  touched,
-                  setFieldValue,
-                  isSubmitting,
-                }) => (
-                  <View>
-                    <CustomInput
-                      label="Name"
-                      placeholder="Enter your full name"
-                      leftIcon={<UserIcon />}
-                      value={values.name}
-                      onChangeText={handleChange('name')}
-                      onBlur={handleBlur('name')}
-                      error={touched.name && errors.name ? errors.name : undefined}
-                      style={undefined}
-                    />
-
-                    <CustomInput
-                      label="Email"
-                      placeholder="Enter your email"
-                      keyboardType="email-address"
-                      autoCapitalize="none"
-                      leftIcon={<MailIcon />}
-                      value={values.email}
-                      onChangeText={handleChange('email')}
-                      onBlur={handleBlur('email')}
-                      error={touched.email && errors.email ? errors.email : undefined}
-                      style={undefined}
-                    />
-
-                    <CustomInput
-                      label="Phone Number"
-                      placeholder="Enter your phone number"
-                      keyboardType="phone-pad"
-                      leftIcon={<PhoneIcon />}
-                      value={values.phone}
-                      onChangeText={handleChange('phone')}
-                      onBlur={handleBlur('phone')}
-                      error={touched.phone && errors.phone ? errors.phone : undefined}
-                      style={undefined}
-                    />
-
-                    <CustomInput
-                      label="Password"
-                      placeholder="Enter your password"
-                      secureTextEntry={!showPassword}
-                      leftIcon={<LockIcon />}
-                      value={values.password}
-                      onChangeText={handleChange('password')}
-                      onBlur={handleBlur('password')}
-                      error={touched.password && errors.password ? errors.password : undefined}
-                      style={undefined}
-                    />
-
-                    <TouchableOpacity
-                      style={styles.showPasswordButton}
-                      onPress={() => setShowPassword(!showPassword)}
-                    >
-                      <Text style={styles.showPasswordText}>
-                        {showPassword ? 'Hide' : 'Show'} Password
-                      </Text>
-                    </TouchableOpacity>
-
-                    {/* Role Selection */}
-                    <Text style={styles.roleLabel}>I am a:</Text>
-                    <View style={styles.roleContainer}>
-                      {['client', '(artist)'].map(role => (
+              </View>
+              
+              {isVerificationSent && !isPhoneVerified && (
+                <>
+                  <View style={styles.whatsappVerificationBox}>
+                    <View style={styles.whatsappIcon}>
+                      <Text style={styles.whatsappIconText}>✓</Text>
+                    </View>
+                    <Text style={styles.codeSentText}>
+                      Enter the 6-digit verification code sent to your WhatsApp
+                    </Text>
+                    
+                    <View style={styles.codeVerificationContainer}>
+                      <TextInput
+                        style={[styles.input, styles.codeInput]}
+                        placeholder="- - - - - -"
+                        placeholderTextColor="#aaa"
+                        value={verificationCode}
+                        onChangeText={setVerificationCode}
+                        keyboardType="number-pad"
+                        maxLength={6}
+                        autoFocus
+                      />
+                      
+                      <TouchableOpacity 
+                        style={[
+                          styles.verifyCodeButton,
+                          (!verificationCode || verificationCode.length !== 6) && styles.disabledButton
+                        ]}
+                        onPress={handleVerifyCode}
+                        disabled={verificationLoading || !verificationCode || verificationCode.length !== 6}
+                      >
+                        {verificationLoading ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                          <Text style={[styles.verificationButtonText, {marginRight: 5}]}>Verify</Text>
+                          <Text style={{color: '#ffffff', fontSize: 16, fontWeight: 'bold'}}>WhatsApp</Text>
+                        </View>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                    
+                    <Text style={styles.whatsappNote}>
+                      Please check your WhatsApp for a message containing your verification code
+                    </Text>
+                    
+                    {developmentCode ? (
+                      <View style={styles.developmentCodeContainer}>
+                        <Text style={styles.developmentCodeTitle}>DEVELOPMENT MODE</Text>
+                        <Text style={styles.developmentCodeText}>
+                          Verification Code: <Text style={styles.codeHighlight}>{developmentCode}</Text>
+                        </Text>
                         <TouchableOpacity
-                          key={role}
-                          style={[
-                            styles.roleButton,
-                            values.role === role && styles.selectedRole,
-                          ]}
-                          onPress={() => setFieldValue('role', role)}
+                          onPress={() => {
+                            setVerificationCode(developmentCode);
+                          }}
+                          style={styles.copyCodeButton}
                         >
-                          <Text
-                            style={[
-                              styles.roleText,
-                              values.role === role && styles.selectedRoleText,
-                            ]}
-                          >
-                            {role.charAt(0).toUpperCase() + role.slice(1)}
-                          </Text>
+                          <Text style={styles.copyCodeButtonText}>Use This Code</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
+                  </View>
+                </>
+              )}
+              
+              {verificationError ? (
+                <Text style={styles.errorText}>{verificationError}</Text>
+              ) : null}
+              
+              {isPhoneVerified && (
+                <View style={styles.verificationSuccessContainer}>
+                  <View style={styles.whatsappIcon}>
+                    <Text style={{fontSize: 24, color: '#25D366'}}>✓</Text>
+                  </View>
+                  <Text style={styles.successText}>
+                    Your WhatsApp number has been successfully verified
+                  </Text>
+                  <Text style={styles.verificationSuccessNote}>
+                    You can now proceed with account creation
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
+          
+          <TextInput
+            style={styles.input}
+            placeholder="Password"
+            placeholderTextColor="#aaa"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+          />
+          
+          {!isLogin && (
+            <View style={styles.roleSelector}>
+              <Text style={styles.roleTitle}>I want to join as:</Text>
+              <View style={styles.roleButtonsContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.roleButton,
+                    userRole === 'client' && styles.activeRoleButton
+                  ]}
+                  onPress={() => setUserRole('client')}
+                >
+                  <Text style={[
+                    styles.roleButtonText,
+                    userRole === 'client' && styles.activeRoleButtonText
+                  ]}>Client</Text>
+                  <Text style={styles.roleDescription}>
+                    Book services & events
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.roleButton,
+                    userRole === 'artist' && styles.activeRoleButton
+                  ]}
+                  onPress={() => setUserRole('artist')}
+                >
+                  <Text style={[
+                    styles.roleButtonText,
+                    userRole === 'artist' && styles.activeRoleButtonText
+                  ]}>Artist</Text>
+                  <Text style={styles.roleDescription}>
+                    Offer services & tickets
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+          
+          {/* Additional fields for artists */}
+          {!isLogin && userRole === 'artist' && (
+            <View style={styles.artistDetailsContainer}>
+              <Text style={styles.sectionTitle}>Artist Details</Text>
+              
+              <TextInput
+                style={styles.input}
+                placeholder="Store/Business Name"
+                placeholderTextColor="#aaa"
+                value={storeName}
+                onChangeText={setStoreName}
+              />
+              
+              <TextInput
+                style={styles.input}
+                placeholder="City"
+                placeholderTextColor="#aaa"
+                value={city}
+                onChangeText={setCity}
+              />
+              
+              <Text style={styles.categoryLabel}>Categories</Text>
+              
+              <View style={styles.categorySelector}>
+                <TouchableOpacity 
+                  style={[styles.input, { flex: 1, marginRight: 10, justifyContent: 'center' }]}
+                  onPress={() => setShowCategoryModal(true)}
+                >
+                  <Text style={{color: selectedCategory ? '#333' : '#aaa'}}>
+                    {selectedCategory || "Select a category"}
+                  </Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={styles.addButton}
+                  onPress={addCategory}
+                  disabled={!selectedCategory}
+                >
+                  <Text style={styles.addButtonText}>Add</Text>
+                </TouchableOpacity>
+              </View>
+              
+              {/* Category selection modal */}
+              <Modal
+                visible={showCategoryModal}
+                transparent={true}
+                animationType="slide"
+                onRequestClose={() => setShowCategoryModal(false)}
+              >
+                <View style={styles.modalOverlay}>
+                  <View style={styles.modalContent}>
+                    <Text style={styles.modalTitle}>Select a Category</Text>
+                    
+                    <ScrollView style={styles.categoryList}>
+                      {availableCategories.map((category, index) => (
+                        <TouchableOpacity
+                          key={index}
+                          style={styles.categoryOption}
+                          onPress={() => {
+                            setSelectedCategory(category);
+                            setShowCategoryModal(false);
+                          }}
+                        >
+                          <Text style={styles.categoryOptionText}>{category}</Text>
                         </TouchableOpacity>
                       ))}
-                    </View>
-                    {touched.role && errors.role && (
-                      <Text style={styles.errorText}>{errors.role}</Text>
-                    )}
-
-                    <CustomButton
-                      title="Register"
-                      onPress={handleSubmit}
-                      loading={isSubmitting}
-                      fullWidth
-                      style={styles.submitButton}
-                    />
+                    </ScrollView>
+                    
+                    <TouchableOpacity
+                      style={styles.closeButton}
+                      onPress={() => setShowCategoryModal(false)}
+                    >
+                      <Text style={styles.closeButtonText}>Cancel</Text>
+                    </TouchableOpacity>
                   </View>
-                )}
-              </Formik>
-            )}
-
-            {/* Google Sign In Button */}
-            <CustomButton
-              title="Sign in with Google"
-              onPress={handleGoogleSignIn}
-              fullWidth
-              variant="outline"
-              style={styles.googleButton}
-              loading={false}
-            />
-          </CustomCard>
-
-          {/* Toggle Mode */}
-          <View style={styles.toggleContainer}>
-            <Text style={styles.toggleText}>
-              {isLoginMode ? "Don't have an account?" : 'Already have an account?'}
-            </Text>
-            <TouchableOpacity onPress={toggleMode}>
-              <Text style={styles.toggleLink}>
-                {isLoginMode ? 'Sign Up' : 'Login'}
+                </View>
+              </Modal>
+              
+              {/* Show selected categories */}
+              <View style={styles.categoriesContainer}>
+                {categories.map((category, index) => (
+                  <View key={index} style={styles.categoryTag}>
+                    <Text style={styles.categoryText}>{category}</Text>
+                    <TouchableOpacity
+                      onPress={() => removeCategory(category)}
+                      style={styles.removeButton}
+                    >
+                      <Text style={styles.removeButtonText}>×</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+          
+          <TouchableOpacity 
+            style={[
+              styles.button, 
+              (!isLogin && (!isArtistFormValid() || !isPhoneVerified)) && styles.disabledButton
+            ]}
+            onPress={handleAuthentication}
+            disabled={loading || (!isLogin && (!isArtistFormValid() || !isPhoneVerified))}
+          >
+            {loading ? (
+              <ActivityIndicator size="large" color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>
+                {isLogin ? 'Log In' : 'Create Account'}
+                {!isLogin && !isPhoneVerified ? ' (Verify Phone First)' : ''}
               </Text>
-            </TouchableOpacity>
-          </View>
-
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+            )}
+          </TouchableOpacity>
+          
+          {/* Sign up / Login toggle */}
+          <TouchableOpacity onPress={toggleAuthMode} style={styles.toggleAuthContainer}>
+            <Text style={styles.toggleAuthText}>
+              {isLogin ? "Don't have an account? " : "Already have an account? "}
+              <Text style={styles.toggleAuthTextBold}>
+                {isLogin ? "Sign up" : "Log in"}
+              </Text>
+            </Text>
+          </TouchableOpacity>
+          </ScrollView>
+        </Animated.View>
+        
+        <TouchableOpacity
+          style={[styles.adminButton]}
+          onPress={() => {
+            try {
+              console.log('Attempting to navigate to admin panel');
+              router.push('/(admin)');
+            } catch (error) {
+              console.error('Navigation error:', error);
+              Alert.alert('Navigation Error', 'Could not navigate to admin panel');
+            }
+          }}
+        >
+          <Text style={styles.adminButtonText}>Admin Access</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
-// Styles
 const styles = StyleSheet.create({
-  keyboardAvoidingView: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-  },
   container: {
     flex: 1,
-    padding: Theme.spacing.lg,
-    backgroundColor: Theme.colors.background,
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: Theme.colors.background,
-  },
-  loadingText: {
-    marginTop: Theme.spacing.md,
-    fontSize: Theme.typography.fontSize.md,
-    color: Theme.colors.textLight,
-  },
-  accountContainer: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  userInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: Theme.spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: Theme.colors.border,
-    marginBottom: Theme.spacing.sm,
-  },
-  userInfoLabel: {
-    fontSize: Theme.typography.fontSize.md,
-    fontWeight: '500',
-    color: Theme.colors.textDark,
-  },
-  userInfoValue: {
-    fontSize: Theme.typography.fontSize.md,
-    color: Theme.colors.textLight,
-  },
-  logoutButton: {
-    marginTop: Theme.spacing.sm,
-  },
-  backButton: {
-    paddingTop: Theme.spacing.xl,
-    paddingBottom: Theme.spacing.lg,
-  },
-  title: {
-    fontSize: Theme.typography.fontSize.xxl,
-    fontWeight: 'bold',
-    color: Theme.colors.textDark,
-    marginBottom: Theme.spacing.sm,
-  },
-  subtitle: {
-    fontSize: Theme.typography.fontSize.md,
-    color: Theme.colors.textLight,
-    marginBottom: Theme.spacing.xl,
-  },
-  authCard: {
+  // Artist details styles
+  artistDetailsContainer: {
     width: '100%',
-    marginBottom: Theme.spacing.lg,
+    marginBottom: 24,
+    borderWidth: 1.5,
+    borderColor: '#d0d0d0',
+    borderRadius: 16,
+    padding: 18,
+    backgroundColor: 'rgba(250, 250, 255, 0.9)',
+    shadowColor: '#6a0dad',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 5,
+    elevation: 4,
   },
-  card: {
-    backgroundColor: 'white',
-    borderRadius: Theme.borderRadius.xl,
-    padding: Theme.spacing.lg,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#6a0dad',
+    marginBottom: 16,
+    textAlign: 'center',
+    letterSpacing: 0.5,
   },
-  inputContainer: {
-    marginBottom: Theme.spacing.md,
+  categoryLabel: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#4361EE',
+    marginTop: 16,
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
-  inputLabel: {
-    fontSize: Theme.typography.fontSize.sm,
-    fontWeight: '500',
-    color: Theme.colors.textDark,
-    marginBottom: Theme.spacing.xs,
-  },
-  inputWrapper: {
+  categorySelector: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 20,
+    backgroundColor: 'rgba(245, 240, 255, 0.3)',
+    padding: 10,
+    borderRadius: 16,
+  },
+  addButton: {
+    backgroundColor: '#6a0dad',
+    borderRadius: 14,
+    padding: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#6a0dad',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
     borderWidth: 1,
-    borderColor: Theme.colors.border,
-    borderRadius: Theme.borderRadius.md,
-    backgroundColor: 'white',
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    minWidth: 80,
   },
-  inputError: {
-    borderColor: Theme.colors.error,
-    backgroundColor: '#FEF2F2',
+  addButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
   },
-  iconContainer: {
-    paddingLeft: Theme.spacing.sm,
-    paddingRight: Theme.spacing.xs,
+  categoriesContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 16,
+    marginTop: 10,
+    backgroundColor: 'rgba(245, 245, 255, 0.5)',
+    padding: 10,
+    borderRadius: 16,
   },
-  textInput: {
+  categoryTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(106, 13, 173, 0.15)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(106, 13, 173, 0.3)',
+    borderRadius: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginRight: 10,
+    marginBottom: 10,
+    shadowColor: '#6a0dad',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  categoryText: {
+    color: '#6a0dad',
+    marginRight: 8,
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+  },
+  removeButton: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 24,
+    height: 24,
+    backgroundColor: 'rgba(106, 13, 173, 0.2)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(106, 13, 173, 0.3)',
+  },
+  removeButtonText: {
+    color: '#6a0dad',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: -2, // Adjust vertical alignment of the "×" character
+  },
+  // Modal styles
+  modalOverlay: {
     flex: 1,
-    paddingVertical: Theme.spacing.sm,
-    paddingHorizontal: Theme.spacing.sm,
-    fontSize: Theme.typography.fontSize.md,
-    color: Theme.colors.textDark,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
   },
-  textInputWithIcon: {
-    paddingLeft: 0,
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    width: '100%',
+    padding: 24,
+    maxHeight: '80%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 15,
+    elevation: 15,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    marginBottom: 20,
+    textAlign: 'center',
+    color: '#6a0dad',
+    letterSpacing: 0.5,
+  },
+  categoryList: {
+    maxHeight: 300,
+  },
+  categoryOption: {
+    paddingVertical: 16,
+    paddingHorizontal: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0, 0, 0, 0.08)',
+    marginVertical: 2,
+    borderRadius: 10,
+  },
+  categoryOptionText: {
+    fontSize: 17,
+    color: '#333',
+    fontWeight: '500',
+  },
+  closeButton: {
+    marginTop: 20,
+    backgroundColor: '#f0f0f0',
+    padding: 15,
+    borderRadius: 12,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  closeButtonText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#6a0dad',
+  },
+  heroImage: {
+    width: width,
+    height: height,
+    position: 'absolute',
+  },
+  overlayContainer: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+  },
+  content: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  formContainer: {
+    width: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.98)',
+    borderRadius: 30,
+    maxHeight: '85%',
+    padding: 36,
+    marginBottom: 24,
+    elevation: 12,
+    shadowColor: '#4361EE',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.7)',
+  },
+  formTitle: {
+    fontSize: 36,
+    fontWeight: '800',
+    color: '#6a0dad',
+    marginBottom: 36,
+    marginTop: 8,
+    textAlign: 'center',
+    letterSpacing: 1.2,
+    textShadowColor: 'rgba(106, 13, 173, 0.25)',
+    textShadowOffset: { width: 1, height: 2 },
+    textShadowRadius: 4,
+    fontFamily: Platform.OS === 'ios' ? 'Avenir-Heavy' : 'sans-serif-medium',
+  },
+  input: {
+    backgroundColor: '#f8f9ff',
+    borderWidth: 2,
+    borderColor: '#e0e0ff',
+    borderRadius: 15,
+    height: 60,
+    padding: 18,
+    marginBottom: 20,
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '500',
+    shadowColor: '#4361EE',
+    shadowOpacity: 0.15,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  button: {
+    backgroundColor: '#6a0dad', // vibrant violet
+    paddingVertical: 18,
+    paddingHorizontal: 40,
+    borderRadius: 30,
+    elevation: 8,
+    shadowColor: '#6a0dad',
+    shadowOpacity: 0.4,
+    shadowOffset: { width: 0, height: 5 },
+    shadowRadius: 10,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 25,
+    marginBottom: 20,
+    transform: [{ scale: 1 }],
+  },
+  disabledButton: {
+    backgroundColor: '#b5b5b5',
+    opacity: 0.6,
+    elevation: 2,
+    shadowOpacity: 0.1,
+    borderColor: 'transparent',
+  },
+  // Phone verification styles
+  phoneVerificationContainer: {
+    width: '100%',
+    marginBottom: 24,
+    borderWidth: 1.5,
+    borderColor: '#d0d0d0',
+    borderRadius: 16,
+    padding: 18,
+    backgroundColor: 'rgba(250, 250, 255, 0.9)',
+    shadowColor: '#6a0dad',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 5,
+    elevation: 4,
+  },
+  phoneInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 15,
+    backgroundColor: 'rgba(245, 240, 255, 0.5)',
+    padding: 10,
+    borderRadius: 18,
+  },
+  phoneInput: {
+    flex: 1,
+    marginBottom: 0,
+    marginRight: 12,
+    backgroundColor: '#f8f9ff',
+    borderColor: '#6a0dad',
+    borderWidth: 1.5,
+    borderRadius: 14,
+  },
+  verificationButton: {
+    backgroundColor: '#6a0dad',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 120,
+    elevation: 5,
+    shadowColor: '#6a0dad',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  verificationSentButton: {
+    backgroundColor: '#4361EE',
+  },
+  verificationButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  verifiedBadge: {
+    backgroundColor: '#4CAF50',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 3,
+    shadowColor: '#388E3C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  verifiedText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    textShadowColor: 'rgba(0, 0, 0, 0.2)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1,
+  },
+  codeVerificationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  codeInput: {
+    flex: 1,
+    marginBottom: 0,
+    marginRight: 10,
+    letterSpacing: 12,
+    textAlign: 'center',
+    fontSize: 24,
+    fontWeight: 'bold',
+    backgroundColor: 'rgba(37, 211, 102, 0.1)',
+    borderColor: '#25D366',
+    borderWidth: 2,
+    color: '#075E54',
+  },
+  verifyCodeButton: {
+    backgroundColor: '#25D366',
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 90,
+    elevation: 4,
+    shadowColor: '#25D366',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  verificationTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  verifiedInput: {
+    backgroundColor: '#f0fff0',
+    borderColor: '#4CAF50',
+    color: '#333',
+  },
+  codeSentText: {
+    color: '#4361EE',
+    fontSize: 14,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  successText: {
+    color: '#25D366',
+    fontSize: 16,
+    marginTop: 5,
+    textAlign: 'center',
+    fontWeight: 'bold',
   },
   errorText: {
-    fontSize: Theme.typography.fontSize.xs,
-    color: Theme.colors.error,
-    marginTop: Theme.spacing.xs,
+    color: '#FF5252',
+    fontSize: 14,
+    marginTop: 8,
+    marginBottom: 10,
+    textAlign: 'center',
+    fontWeight: '600',
+    backgroundColor: 'rgba(255, 82, 82, 0.1)',
+    borderRadius: 8,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 82, 82, 0.3)',
   },
-  showPasswordButton: {
-    alignSelf: 'flex-end',
-    marginBottom: Theme.spacing.md,
+  buttonText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    textShadowColor: 'rgba(0, 0, 0, 0.2)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
-  showPasswordText: {
-    fontSize: Theme.typography.fontSize.sm,
-    color: Theme.colors.primary,
-    fontWeight: '500',
+  logo: {
+    width: 250, // Fixed width, increased for better visibility
+    height: 90,
+    marginBottom: 30,
+    alignSelf: 'center',
+    resizeMode: 'contain',
   },
-  roleLabel: {
-    fontSize: Theme.typography.fontSize.sm,
-    fontWeight: '500',
-    color: Theme.colors.textDark,
-    marginBottom: Theme.spacing.xs,
+  switchModeText: {
+    color: '#6a0dad',
+    fontSize: 16,
+    textAlign: 'center',
+    marginTop: 10,
   },
-  roleContainer: {
+  roleSelector: {
+    marginBottom: 24,
+    marginTop: 5,
+  },
+  roleTitle: {
+    fontSize: 17,
+    marginBottom: 10,
+    color: '#333',
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  roleButtonsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: Theme.spacing.md,
   },
   roleButton: {
     flex: 1,
-    paddingVertical: Theme.spacing.sm,
-    paddingHorizontal: Theme.spacing.sm,
-    borderRadius: Theme.borderRadius.md,
-    borderWidth: 1,
-    borderColor: Theme.colors.border,
-    marginHorizontal: Theme.spacing.xs,
-    alignItems: 'center',
-  },
-  selectedRole: {
-    backgroundColor: Theme.colors.primary,
-    borderColor: Theme.colors.primary,
-  },
-  roleText: {
-    fontSize: Theme.typography.fontSize.sm,
-    fontWeight: '500',
-    color: Theme.colors.textDark,
-  },
-  selectedRoleText: {
-    color: Theme.colors.secondary,
-  },
-  button: {
-    paddingVertical: Theme.spacing.sm,
-    paddingHorizontal: Theme.spacing.lg,
-    borderRadius: Theme.borderRadius.md,
+    backgroundColor: '#f8f8f8',
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 48,
+    marginHorizontal: 6,
+    borderWidth: 1.5,
+    borderColor: '#ddd',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
   },
-  primaryButton: {
-    backgroundColor: Theme.colors.primary,
+  activeRoleButton: {
+    backgroundColor: '#f0e6ff',
+    borderColor: '#6a0dad',
+    elevation: 3,
+    shadowColor: '#6a0dad',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
   },
-  outlineButton: {
+  roleButtonText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#555',
+    marginBottom: 4,
+  },
+  activeRoleButtonText: {
+    color: '#6a0dad',
+    fontWeight: '700',
+  },
+  roleDescription: {
+    fontSize: 12,
+    color: '#777',
+    textAlign: 'center',
+  },
+  adminButton: {
     backgroundColor: 'transparent',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 30,
     borderWidth: 1,
-    borderColor: Theme.colors.border,
+    borderColor: 'rgba(255,255,255,0.4)',
+    marginTop: 10,
   },
-  fullWidthButton: {
-    width: '100%',
+  adminButtonText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
   },
-  disabledButton: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    fontSize: Theme.typography.fontSize.md,
-    fontWeight: '600',
-  },
-  primaryButtonText: {
-    color: Theme.colors.secondary,
-  },
-  outlineButtonText: {
-    color: Theme.colors.textDark,
-  },
-  submitButton: {
-    marginTop: Theme.spacing.md,
-  },
-  googleButton: {
-    marginTop: Theme.spacing.md,
-  },
-  toggleContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
+  toggleAuthContainer: {
+    marginTop: 15,
+    paddingVertical: 12,
     alignItems: 'center',
-    marginTop: Theme.spacing.lg,
+    backgroundColor: 'rgba(250, 250, 255, 0.9)',
+    borderRadius: 30,
+    paddingHorizontal: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(106, 13, 173, 0.2)',
   },
-  toggleText: {
-    fontSize: Theme.typography.fontSize.sm,
-    color: Theme.colors.textLight,
-  },
-  toggleLink: {
-    fontSize: Theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: Theme.colors.primary,
-    marginLeft: Theme.spacing.xs,
-  },
-  demoContainer: {
-    marginTop: Theme.spacing.xl,
-    padding: Theme.spacing.md,
-    backgroundColor: '#F3F4F6',
-    borderRadius: Theme.borderRadius.md,
-  },
-  demoTitle: {
-    fontSize: Theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: Theme.colors.textDark,
-    marginBottom: Theme.spacing.xs,
-  },
-  demoText: {
-    fontSize: Theme.typography.fontSize.xs,
-    color: Theme.colors.textLight,
-    lineHeight: 16,
-  },
-  icon: {
+  toggleAuthText: {
+    color: '#444',
     fontSize: 16,
-    color: Theme.colors.textLight,
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  toggleAuthTextBold: {
+    color: '#6a0dad',
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 10,
+  },
+  whatsappVerificationBox: {
+    backgroundColor: 'rgba(37, 211, 102, 0.1)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(37, 211, 102, 0.3)',
+    borderRadius: 16,
+    padding: 20,
+    marginVertical: 15,
+    alignItems: 'center',
+    shadowColor: '#25D366',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  whatsappIcon: {
+    width: 50,
+    height: 50,
+    marginBottom: 10,
+    backgroundColor: '#e6f9ef',
+    borderRadius: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#25D366',
+  },
+  whatsappIconText: {
+    fontSize: 24,
+    color: '#25D366',
+  },
+  whatsappNote: {
+    fontSize: 14,
+    color: '#555',
+    marginTop: 15,
+    fontStyle: 'italic',
+    textAlign: 'center',
+  },
+  developmentCodeContainer: {
+    marginTop: 15,
+    padding: 15,
+    backgroundColor: '#FFECB3',
+    borderWidth: 1,
+    borderColor: '#FF9800',
+    borderRadius: 12,
+    width: '100%',
+    alignItems: 'center',
+  },
+  developmentCodeTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#E65100',
+    marginBottom: 8,
+  },
+  developmentCodeText: {
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  codeHighlight: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#FF5722',
+    letterSpacing: 2,
+  },
+  copyCodeButton: {
+    backgroundColor: '#FF9800',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    marginTop: 5,
+  },
+  copyCodeButtonText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  verificationSuccessContainer: {
+    backgroundColor: 'rgba(37, 211, 102, 0.1)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(37, 211, 102, 0.3)',
+    borderRadius: 16,
+    padding: 20,
+    marginVertical: 15,
+    alignItems: 'center',
+    shadowColor: '#25D366',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  verificationSuccessNote: {
+    fontSize: 14,
+    color: '#555',
+    marginTop: 5,
+    textAlign: 'center',
   },
 });

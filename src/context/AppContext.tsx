@@ -1,5 +1,6 @@
-import React, { createContext, useContext } from 'react';
-import { Gig, Artist, Order, Ticket } from '../models/types';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { createContext, useContext, useEffect } from 'react';
+import { Artist, Gig, Order, Ticket } from '../models/types';
 
 // Mock data for development purposes
 const MOCK_ARTISTS: Artist[] = [
@@ -152,17 +153,41 @@ interface AppContextType {
   gigs: Gig[];
   orders: Order[];
   tickets: Ticket[];
+  savedArtists: string[];
   getArtistById: (id: string) => Artist | undefined;
   getGigById: (id: string) => Gig | undefined;
   getGigsByArtistId: (artistId: string) => Gig[];
   getOrdersByClientId: (clientId: string) => Order[];
   getOrdersByArtistId: (artistId: string) => Order[];
   getTicketsByArtistId: (artistId: string) => Ticket[];
+  saveArtist: (artistId: string) => void;
+  unsaveArtist: (artistId: string) => void;
+  isArtistSaved: (artistId: string) => boolean;
+  getSavedArtists: () => Artist[];
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // State to track saved artists
+  const [savedArtists, setSavedArtists] = React.useState<string[]>([]);
+  
+  // Load saved artists from AsyncStorage on mount
+  useEffect(() => {
+    const loadSavedArtists = async () => {
+      try {
+        const savedArtistsJson = await AsyncStorage.getItem('@saved_artists');
+        if (savedArtistsJson) {
+          setSavedArtists(JSON.parse(savedArtistsJson));
+        }
+      } catch (error) {
+        console.error('Error loading saved artists:', error);
+      }
+    };
+    
+    loadSavedArtists();
+  }, []);
+  
   // Get artist by ID
   const getArtistById = (id: string) => {
     return MOCK_ARTISTS.find(artist => artist.id === id);
@@ -192,6 +217,90 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const getTicketsByArtistId = (artistId: string) => {
     return MOCK_TICKETS.filter(ticket => ticket.artistId === artistId);
   };
+  
+  // Save artist
+  const saveArtist = async (artistId: string) => {
+    if (!savedArtists.includes(artistId)) {
+      const newSavedArtists = [...savedArtists, artistId];
+      setSavedArtists(newSavedArtists);
+      try {
+        await AsyncStorage.setItem('@saved_artists', JSON.stringify(newSavedArtists));
+      } catch (error) {
+        console.error('Error saving artist:', error);
+      }
+    }
+  };
+  
+  // Unsave artist
+  const unsaveArtist = async (artistId: string) => {
+    const newSavedArtists = savedArtists.filter(id => id !== artistId);
+    setSavedArtists(newSavedArtists);
+    try {
+      await AsyncStorage.setItem('@saved_artists', JSON.stringify(newSavedArtists));
+    } catch (error) {
+      console.error('Error removing saved artist:', error);
+    }
+  };
+  
+  // Check if artist is saved
+  const isArtistSaved = (artistId: string) => {
+    console.log(`Checking if artist ${artistId} is saved. Current savedArtists:`, savedArtists);
+    const isSaved = savedArtists.includes(artistId);
+    console.log(`Artist ${artistId} is ${isSaved ? 'saved' : 'not saved'}`);
+    return isSaved;
+  };
+  
+  // Get all saved artists
+  const getSavedArtists = () => {
+    console.log('Getting saved artists with IDs:', savedArtists);
+    
+    // If there are no saved artists, return an empty array
+    if (!savedArtists || savedArtists.length === 0) {
+      console.log('No saved artists found');
+      return [];
+    }
+    
+    // First try to find artists in the MOCK_ARTISTS array
+    const filteredArtists = MOCK_ARTISTS.filter(artist => savedArtists.includes(artist.id));
+    
+    // If we found all the artists, return them
+    if (filteredArtists.length === savedArtists.length) {
+      console.log('Found all matching artists in mock data:', filteredArtists);
+      return filteredArtists;
+    }
+    
+    // Otherwise, create placeholder artists for any IDs not found in mock data
+    // This ensures that saved Firebase artists still appear even if not in mock data
+    const notFoundIds = savedArtists.filter(id => 
+      !filteredArtists.some(artist => artist.id === id)
+    );
+    
+    console.log('Artists not found in mock data:', notFoundIds);
+    
+    // Create placeholder artists for the not found IDs
+    const placeholderArtists = notFoundIds.map(id => {
+      // Create an artist object that matches the Artist type
+      const artist: Artist = {
+        id,
+        email: `artist-${id}@example.com`,
+        name: `Artist ${id}`,
+        role: 'artist',
+        profileImage: undefined, // Use undefined instead of null to match type
+        bio: 'Artist information',
+        storeId: `store-${id}`,
+        rating: 4.5,
+        categories: ['Art'],
+        location: 'Unknown',
+        featured: false,
+        createdAt: new Date(),
+      };
+      return artist;
+    });
+    
+    const allArtists = [...filteredArtists, ...placeholderArtists];
+    console.log('Returning all artists:', allArtists);
+    return allArtists;
+  };
 
   return (
     <AppContext.Provider
@@ -200,12 +309,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         gigs: MOCK_GIGS,
         orders: MOCK_ORDERS,
         tickets: MOCK_TICKETS,
+        savedArtists,
         getArtistById,
         getGigById,
         getGigsByArtistId,
         getOrdersByClientId,
         getOrdersByArtistId,
         getTicketsByArtistId,
+        saveArtist,
+        unsaveArtist,
+        isArtistSaved,
+        getSavedArtists,
       }}
     >
       {children}

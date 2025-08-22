@@ -1,23 +1,22 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  Image,
-  ScrollView,
-  Dimensions,
-  TextInput,
-  ActivityIndicator,
-  RefreshControl,
-  StatusBar
-} from 'react-native';
-import { useNavigation, useRouter } from 'expo-router';
+import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
-import { Ionicons, MaterialCommunityIcons, Feather } from '@expo/vector-icons';
-import Animated, { 
-  FadeInDown, 
+import { useNavigation, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Dimensions,
+  FlatList,
+  Image,
+  RefreshControl,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
+} from 'react-native';
+import Animated, {
+  FadeInDown,
   FadeInRight,
   useAnimatedScrollHandler,
   useSharedValue

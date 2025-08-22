@@ -1,18 +1,69 @@
 /**
- * Add a new ticket to Firestore under the artist's account
+ * Add a new ticket to Firestore under the artist's account with proper validation
  */
-export const addTicketToFirebase = async (artistId: string, ticket: any) => {
+export const addTicketToFirebase = async (artistId: string, ticket: TicketData) => {
   try {
-    console.log('[addTicketToFirebase] Called with artistId:', artistId, 'ticket:', ticket);
+    console.log('[addTicketToFirebase] Called with artistId:', artistId);
+    
+    // Validate required fields
+    if (!ticket.name) throw new Error('Ticket name is required');
+    if (!ticket.price) throw new Error('Ticket price is required');
+    if (!ticket.location) throw new Error('Event location is required');
+    if (!ticket.category) throw new Error('Ticket category is required');
+    
     const db = getFirestore();
     const ticketsRef = collection(db, 'users', artistId, 'tickets');
+    
+    // Fetch artist info to include in the ticket
+    const artistRef = doc(db, 'users', artistId);
+    const artistSnap = await getDoc(artistRef);
+    let artistInfo = {};
+    
+    if (artistSnap.exists()) {
+      const { displayName, photoURL, email, phoneNumber } = artistSnap.data() || {};
+      artistInfo = {
+        artistName: displayName || 'Unknown Artist',
+        artistPhoto: photoURL || null,
+        artistEmail: email || null,
+        artistPhone: phoneNumber || null,
+      };
+    }
+    
+    // Ensure ticket types have proper format
+    const validatedTicketTypes = Array.isArray(ticket.ticketTypes) 
+      ? ticket.ticketTypes.filter((t: TicketType) => t.type && (t.price || t.price === 0))
+      : [];
+    
+    // Create a clean ticket object
     const newTicket = {
       ...ticket,
+      // Format or clean fields
+      name: String(ticket.name).trim(),
+      price: typeof ticket.price === 'number' ? ticket.price : parseFloat(String(ticket.price)),
+      location: String(ticket.location).trim(),
+      description: ticket.description ? String(ticket.description).trim() : '',
+      ticketTypes: validatedTicketTypes,
+      // Add metadata
       createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
       artistId,
+      // Add artist info
+      ...artistInfo,
+      // Add visibility and status
+      status: 'active',
+      visibility: 'public',
+      saleStart: null, // Will be set by artist later
+      saleEnd: null,   // Will be set by artist later
+      eventDate: null, // Will be set by artist later
+      availableTickets: 100, // Default value
+      soldTickets: 0,
+      viewCount: 0,
     };
+    
     const docRef = await addDoc(ticketsRef, newTicket);
     console.log('[addTicketToFirebase] Ticket added with ID:', docRef.id);
+    
+    // Return the created ticket with its ID
     return { id: docRef.id, ...newTicket };
   } catch (error) {
     console.error('[addTicketToFirebase] Error adding ticket to Firebase:', error);
@@ -34,22 +85,81 @@ export const setUserPersonalInfo = async (artistId: string, info: any) => {
     throw error;
   }
 };
-import { addDoc, collection, doc, getFirestore, serverTimestamp, setDoc } from 'firebase/firestore';
+import {
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  getFirestore,
+  limit,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  where
+} from 'firebase/firestore';
+import { ServiceData, ServiceItem, TicketData, TicketType } from './firebaseTypes';
 /**
- * Add a new service or ticket to Firestore under the artist's account
+ * Add a new service to Firestore under the artist's account with proper validation
  */
-export const addServiceToFirebase = async (artistId: string, service: any) => {
+export const addServiceToFirebase = async (artistId: string, service: ServiceData) => {
   try {
-    console.log('[addServiceToFirebase] Called with artistId:', artistId, 'service:', service);
+    console.log('[addServiceToFirebase] Called with artistId:', artistId);
+    
+    // Validate required fields
+    if (!service.title) throw new Error('Service title is required');
+    if (!service.city) throw new Error('Service city is required');
+    if (!service.category) throw new Error('Service category is required');
+    if (!service.price && service.price !== 0) throw new Error('Service price is required');
+    
     const db = getFirestore();
     const servicesRef = collection(db, 'users', artistId, 'services');
+    
+    // Fetch artist info to include in the service
+    const artistRef = doc(db, 'users', artistId);
+    const artistSnap = await getDoc(artistRef);
+    let artistInfo = {};
+    
+    if (artistSnap.exists()) {
+      const { displayName, photoURL, email, phoneNumber } = artistSnap.data() || {};
+      artistInfo = {
+        artistName: displayName || 'Unknown Artist',
+        artistPhoto: photoURL || null,
+        artistEmail: email || null,
+        artistPhone: phoneNumber || null,
+      };
+    }
+    
+    // Ensure items have proper format
+    const validatedItems = Array.isArray(service.items) 
+      ? service.items.filter((item: ServiceItem) => item.title && (item.price || item.price === 0))
+      : [];
+    
+    // Create a clean service object
     const newService = {
       ...service,
+      // Format or clean fields
+      title: String(service.title).trim(),
+      city: String(service.city).trim(),
+      description: service.description ? String(service.description).trim() : '',
+      items: validatedItems,
+      // Add metadata
       createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
       artistId,
+      // Add artist info
+      ...artistInfo,
+      // Add visibility and status
+      status: 'active',
+      visibility: 'public',
+      viewCount: 0,
     };
+    
     const docRef = await addDoc(servicesRef, newService);
     console.log('[addServiceToFirebase] Service added with ID:', docRef.id);
+    
+    // Return the created service with its ID
     return { id: docRef.id, ...newService };
   } catch (error) {
     console.error('[addServiceToFirebase] Error adding service to Firebase:', error);
@@ -61,7 +171,6 @@ export const addServiceToFirebase = async (artistId: string, service: any) => {
  * Fetches real artists from Firestore users collection
  */
 
-import { getDocs, query, where } from 'firebase/firestore';
 import { Artist } from '../models/types';
 
 const db = getFirestore();
@@ -147,6 +256,76 @@ const generateArtistImage = (name?: string): string => {
   
   // Create avatar URL with UI Avatars service
   return `https://ui-avatars.com/api/?name=${firstLetter}&background=${backgroundColor.substring(1)}&color=fff&size=400&font-size=0.6&bold=true`;
+};
+
+/**
+ * Fetch a specific artist by ID from Firebase
+ */
+export const fetchArtistById = async (artistId: string): Promise<Artist | null> => {
+  try {
+    console.log(`🎨 Fetching artist with ID: ${artistId} from Firebase...`);
+    
+    const db = getFirestore();
+    const artistRef = doc(db, 'users', artistId);
+    const artistSnapshot = await getDoc(artistRef);
+    
+    if (!artistSnapshot.exists()) {
+      console.log(`⚠️ No artist found with ID: ${artistId}`);
+      return null;
+    }
+    
+    const userData = artistSnapshot.data();
+    console.log(`👨‍🎨 Processing artist: ${userData.name || 'Unknown'}`);
+    
+    // Use real profile image if available, otherwise use default placeholder
+    const artistName = userData.name || userData.fullName || userData.displayName || 'Professional Artist';
+    const profileImage = userData.profileImage || 
+                        userData.image || 
+                        userData.avatar || 
+                        generateArtistImage(artistName);
+    
+    // Transform Firebase user data to Artist format
+    // Handle different date formats safely
+    let createdAtDate = new Date();
+    try {
+      if (userData.signupDate && typeof userData.signupDate.toDate === 'function') {
+        createdAtDate = userData.signupDate.toDate();
+      } else if (userData.createdAt) {
+        if (typeof userData.createdAt.toDate === 'function') {
+          createdAtDate = userData.createdAt.toDate();
+        } else if (userData.createdAt instanceof Date) {
+          createdAtDate = userData.createdAt;
+        } else if (typeof userData.createdAt === 'string') {
+          createdAtDate = new Date(userData.createdAt);
+        }
+      }
+    } catch (dateError) {
+      console.warn('Date conversion error:', dateError);
+      // Fall back to current date
+    }
+
+    const artist: Artist = {
+      id: artistSnapshot.id,
+      email: userData.email || '',
+      name: artistName,
+      role: 'artist',
+      profileImage: profileImage,
+      bio: generateArtistBio(userData.specialization, userData),
+      storeId: userData.storeId || `store-${artistSnapshot.id}`,
+      rating: userData.rating || generateRandomRating(),
+      categories: parseCategories(userData.specialization, userData.categories),
+      location: formatLocation(userData.region, userData.location, userData.city, userData.country),
+      featured: userData.featured || userData.isVerified || Math.random() > 0.7,
+      createdAt: createdAtDate,
+    };
+    
+    console.log(`✅ Successfully fetched artist: ${artist.name} from Firebase`);
+    return artist;
+    
+  } catch (error) {
+    console.error('❌ Error fetching artist from Firebase:', error);
+    throw error;
+  }
 };
 
 /**
@@ -277,51 +456,103 @@ const generateRandomRating = (): number => {
 };
 
 /**
- * Fetch single artist by ID
+ * Note: A duplicate implementation of fetchArtistById was removed here.
+ * The implementation at line ~155 is being used instead which uses a direct document reference.
  */
-export const fetchArtistById = async (artistId: string): Promise<Artist | null> => {
+
+/**
+ * Fetch dashboard statistics for an artist
+ */
+export const fetchArtistDashboardStats = async (artistId: string) => {
   try {
-    console.log(`🔍 Fetching artist ${artistId} from Firebase...`);
+    const db = getFirestore();
+    const servicesRef = collection(db, 'users', artistId, 'services');
+    const ticketsRef = collection(db, 'users', artistId, 'tickets');
+    const ordersRef = collection(db, 'users', artistId, 'orders');
     
-    const usersRef = collection(db, 'users');
-    const artistQuery = query(usersRef, where('id', '==', artistId));
-    const querySnapshot = await getDocs(artistQuery);
+    // Get services count
+    const servicesQuery = query(servicesRef, where('status', '==', 'active'));
+    const servicesSnapshot = await getDocs(servicesQuery);
+    const activeServices = servicesSnapshot.docs.length;
     
-    if (querySnapshot.empty) {
-      console.log(`⚠️ Artist ${artistId} not found`);
-      return null;
-    }
+    // Get upcoming events
+    const today = new Date();
+    const ticketsQuery = query(
+      ticketsRef, 
+      where('eventDate', '>=', today),
+      orderBy('eventDate', 'asc'),
+      limit(5)
+    );
+    const ticketsSnapshot = await getDocs(ticketsQuery);
+    const upcomingEvents = ticketsSnapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        name: data.name,
+        date: data.eventDate ? new Date(data.eventDate.toDate()).toLocaleDateString() : 'Date TBD',
+        location: data.location || 'Location TBD'
+      };
+    });
     
-    const doc = querySnapshot.docs[0];
-    const userData = doc.data();
+    // Get pending orders
+    const pendingOrdersQuery = query(ordersRef, where('status', '==', 'pending'));
+    const pendingOrdersSnapshot = await getDocs(pendingOrdersQuery);
+    const pendingOrders = pendingOrdersSnapshot.docs.length;
     
-    // Use real profile image if available, otherwise use default placeholder
-    const artistName = userData.name || userData.fullName || userData.displayName || 'Professional Artist';
-    const profileImage = userData.profileImage || 
-                        userData.image || 
-                        userData.avatar || 
-                        generateArtistImage(artistName);
+    // Calculate earnings (last 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     
-    const artist: Artist = {
-      id: doc.id,
-      email: userData.email || '',
-      name: artistName,
-      role: 'artist',
-      profileImage: profileImage,
-      bio: generateArtistBio(userData.specialization, userData),
-      storeId: userData.storeId || `store-${doc.id}`,
-      rating: userData.rating || generateRandomRating(),
-      categories: parseCategories(userData.specialization, userData.categories),
-      location: formatLocation(userData.region, userData.location, userData.city, userData.country),
-      featured: userData.featured || userData.isVerified || false,
-      createdAt: userData.signupDate?.toDate() || userData.createdAt?.toDate() || new Date(),
+    const completedOrdersQuery = query(
+      ordersRef, 
+      where('status', '==', 'completed'),
+      where('completedAt', '>=', thirtyDaysAgo)
+    );
+    const completedOrdersSnapshot = await getDocs(completedOrdersQuery);
+    let earnings = 0;
+    
+    completedOrdersSnapshot.forEach(doc => {
+      const orderData = doc.data();
+      if (orderData.totalAmount) {
+        earnings += orderData.totalAmount;
+      }
+    });
+    
+    // Get recent orders
+    const recentOrdersQuery = query(
+      ordersRef,
+      orderBy('createdAt', 'desc'),
+      limit(5)
+    );
+    const recentOrdersSnapshot = await getDocs(recentOrdersQuery);
+    const recentOrders = recentOrdersSnapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        service: data.serviceName || 'Unknown Service',
+        client: data.clientName || 'Anonymous Client',
+        date: data.createdAt ? new Date(data.createdAt.toDate()).toLocaleDateString() : 'Recent',
+        status: data.status || 'unknown',
+        amount: data.totalAmount || 0
+      };
+    });
+    
+    return {
+      activeServices,
+      upcomingEvents,
+      pendingOrders,
+      earnings,
+      recentOrders
     };
     
-    console.log(`✅ Found artist: ${artist.name}`);
-    return artist;
-    
   } catch (error) {
-    console.error(`❌ Error fetching artist ${artistId}:`, error);
-    return null;
+    console.error('[fetchArtistDashboardStats] Error:', error);
+    return {
+      activeServices: 0,
+      upcomingEvents: [],
+      pendingOrders: 0,
+      earnings: 0,
+      recentOrders: []
+    };
   }
 };

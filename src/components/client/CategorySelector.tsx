@@ -3,21 +3,46 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import Icon from 'react-native-vector-icons/Feather';
 import { Theme } from '../../constants/theme';
 
+// Import both service and ticket categories
+import { SERVICE_CATEGORIES } from '../artist/ServiceCategorySelector';
+import { TICKET_CATEGORIES } from '../artist/TicketCategorySelector';
+
+// Combine both category types and map to the format needed by this component
 const CATEGORIES = [
-  { name: 'Mariage', icon: 'heart' },
-  { name: 'Anniversaire', icon: 'gift' },
-  { name: 'Traiteur', icon: 'coffee' },
-  { name: 'Musique', icon: 'music' },
-  { name: 'Neggafa', icon: 'user' },
-  { name: 'Conference', icon: 'briefcase' },
-  { name: "Evenement d'entreprise", icon: 'users' },
-  { name: 'Kermesse', icon: 'smile' },
-  { name: 'Henna', icon: 'award' },
-  { name: 'Photographie', icon: 'camera' },
-  { name: 'Animation', icon: 'film' },
-  { name: 'Decoration', icon: 'award' },
-  { name: 'Buffet', icon: 'coffee' },
+  ...SERVICE_CATEGORIES.map(cat => ({
+    name: cat.id, // Use id for consistency with search.tsx which compares with service.category
+    displayName: cat.name, // The human-readable name for display
+    icon: mapIconName(cat.icon), // Map Ionicons names to Feather icon names
+    type: 'service'
+  })),
+  ...TICKET_CATEGORIES.map(cat => ({
+    name: cat.id,
+    displayName: cat.name,
+    icon: mapIconName(cat.icon),
+    type: 'ticket'
+  }))
 ];
+
+// Helper function to map Ionicons names to Feather icon names
+function mapIconName(ioniconsName: string): string {
+  const iconMap: Record<string, string> = {
+    'heart': 'heart',
+    'gift': 'gift',
+    'restaurant': 'coffee',
+    'musical-notes': 'music',
+    'person': 'user',
+    'business': 'briefcase',
+    'people': 'users',
+    'happy': 'smile',
+    'flower': 'award', // No direct equivalent in Feather
+    'camera': 'camera',
+    'film': 'film',
+    'color-palette': 'award', // No direct equivalent in Feather
+    // Add more mappings as needed
+  };
+  
+  return iconMap[ioniconsName] || 'circle'; // Default to 'circle' if no mapping exists
+}
 
 interface CategorySelectorProps {
   onSelectCategory: (category: string) => void;
@@ -83,8 +108,10 @@ export const CategorySelector: React.FC<CategorySelectorProps> = ({
                 styles.categoryText,
                 selectedCategory === category.name && styles.selectedCategoryText,
               ]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
             >
-              {category.name}
+              {category.displayName}
             </Text>
           </TouchableOpacity>
         ))}

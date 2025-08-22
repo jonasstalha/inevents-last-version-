@@ -1,43 +1,67 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, Image } from 'react-native';
 import { Theme } from '@/src/constants/theme';
+import { useApp } from '@/src/context/AppContext';
+import { useRouter } from 'expo-router';
 import { Heart } from 'lucide-react-native';
-
-// Dummy saved artists data (replace with real data from backend or context)
-const savedArtists = [
-  {
-    id: '1',
-    name: 'Emma Johnson',
-    image: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=600',
-    category: 'Music',
-  },
-  {
-    id: '2',
-    name: 'James Wilson',
-    image: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=600',
-    category: 'Photography',
-  },
-];
+import React from 'react';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function SavedArtistsScreen() {
+  const { getSavedArtists, unsaveArtist, savedArtists: savedArtistIds } = useApp();
+  const router = useRouter();
+  const [savedArtists, setSavedArtists] = React.useState<any[]>([]);
+  
+  // Debug output
+  console.log('Saved Artist IDs:', savedArtistIds);
+  
+  // Update saved artists when component mounts and when savedArtistIds changes
+  React.useEffect(() => {
+    const artists = getSavedArtists();
+    console.log('Retrieved saved artists:', artists);
+    setSavedArtists(artists);
+  }, [savedArtistIds, getSavedArtists]);
+  
+  const handleViewArtist = (artistId: string) => {
+    router.push(`/(artist)/public-profile?id=${artistId}`);
+  };
+  
+  const handleUnsaveArtist = (artistId: string) => {
+    unsaveArtist(artistId);
+  };
+  
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       <View style={styles.header}>
         <Heart size={40} color={Theme.colors.primary} />
         <Text style={styles.title}>Saved Artists</Text>
+        <Text style={styles.subtitle}>Found {savedArtists.length} saved artists</Text>
       </View>
       <View style={styles.list}>
         {savedArtists.length === 0 ? (
           <Text style={styles.empty}>You have not saved any artists yet.</Text>
         ) : (
-          savedArtists.map((artist) => (
-            <View key={artist.id} style={styles.artistCard}>
-              <Image source={{ uri: artist.image }} style={styles.artistImage} />
+          savedArtists.map((artist: any) => (
+            <TouchableOpacity 
+              key={artist.id} 
+              style={styles.artistCard}
+              onPress={() => handleViewArtist(artist.id)}
+            >
+              <Image 
+                source={{ uri: artist.profileImage || 'https://ui-avatars.com/api/?name=' + artist.name }} 
+                style={styles.artistImage} 
+              />
               <View style={styles.artistInfo}>
                 <Text style={styles.artistName}>{artist.name}</Text>
-                <Text style={styles.artistCategory}>{artist.category}</Text>
+                <Text style={styles.artistCategory}>
+                  {artist.categories?.length > 0 ? artist.categories[0] : 'Artist'}
+                </Text>
               </View>
-            </View>
+              <TouchableOpacity 
+                style={styles.unsaveButton}
+                onPress={() => handleUnsaveArtist(artist.id)}
+              >
+                <Heart size={20} color={Theme.colors.error} fill={Theme.colors.error} />
+              </TouchableOpacity>
+            </TouchableOpacity>
           ))
         )}
       </View>
@@ -63,6 +87,12 @@ const styles = StyleSheet.create({
     fontSize: Theme.typography.fontSize.xl,
     color: Theme.colors.textDark,
     marginTop: Theme.spacing.md,
+  },
+  subtitle: {
+    fontFamily: Theme.typography.fontFamily.medium,
+    fontSize: Theme.typography.fontSize.md,
+    color: Theme.colors.textLight,
+    marginTop: Theme.spacing.xs,
   },
   list: {
     marginTop: Theme.spacing.lg,
@@ -95,7 +125,11 @@ const styles = StyleSheet.create({
     fontSize: Theme.typography.fontSize.sm,
     color: Theme.colors.textLight,
   },
+  unsaveButton: {
+    padding: 10,
+  },
   empty: {
+    fontFamily: Theme.typography.fontFamily.regular,
     fontSize: Theme.typography.fontSize.md,
     color: Theme.colors.textLight,
     textAlign: 'center',

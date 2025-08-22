@@ -5,6 +5,8 @@ export interface User {
   name: string;
   password?: string; // Added password field
   profileImage?: string;
+  phoneNumber?: string;
+  isPhoneVerified?: boolean;
   createdAt: Date;
 }
 
@@ -40,6 +42,19 @@ export interface Gig {
   reviewCount: number;
   createdAt: Date;
   orders?: Order[]; // Added orders property for analytics/stat grid
+  // Enhanced UI properties
+  image?: string; // Single image path for search screen
+  providerName?: string; // Name of the service provider
+  ordersCount?: number; // Number of orders
+}
+
+// Input type for creating or updating a gig/service
+export interface GigInput {
+  title: string;
+  description: string;
+  basePrice: number;
+  category: string;
+  options: GigOption[];
 }
 
 export interface GigOption {

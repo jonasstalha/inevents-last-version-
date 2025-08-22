@@ -1,122 +1,292 @@
-import React, { useState, useRef } from 'react';
+import { Theme } from '@/src/constants/theme';
+import { fetchArtistById } from '@/src/firebase/artistsService';
+import { fetchServiceByIdFromFirebase } from '@/src/firebase/fetchAllServices';
+import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { getAuth } from 'firebase/auth';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  Image,
-  ScrollView,
-  TouchableOpacity,
-  TextInput,
-  Modal,
-  StyleSheet,
+  ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Dimensions,
   Animated,
+  Dimensions,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
   StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const isSmallScreen = screenWidth < 375;
 
-export default function EventDetailScreen() {
+// Default image to show when no images are available
+const DEFAULT_SERVICE_IMAGE = 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
+const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/149/149071.png';
+
+export default function ServiceDetailScreen() {
+  const { gigId } = useLocalSearchParams();
   const router = useRouter();
   const [selectedImage, setSelectedImage] = useState(0);
-  const [serviceQuantities, setServiceQuantities] = useState({ eventPlanning: 1 });
-  const [extras, setExtras] = useState({ urgentDelivery: false, extraRevisions: 0, sourceFiles: false });
+  const [serviceQuantities, setServiceQuantities] = useState<{[key: string]: number}>({ 
+    service: 1
+  });
   const [customMessage, setCustomMessage] = useState('');
   const [showOfferForm, setShowOfferForm] = useState(false);
   const [showReviewForm, setShowReviewForm] = useState(false);
   const [reviewText, setReviewText] = useState('');
   const [reviewRating, setReviewRating] = useState(5);
-  const [reviews, setReviews] = useState([
-    { user: 'Alex Thompson', text: 'Amazing event planning! The team perfectly captured our vision. Super fast execution too!', rating: 5, date: '2 days ago' },
-    { user: 'Jamie Chen', text: 'Very professional and creative agency. Great communication throughout the process.', rating: 4, date: '1 week ago' },
-    { user: 'Marcus Rodriguez', text: 'Exceeded expectations! The additional services were handled quickly and professionally.', rating: 5, date: '2 weeks ago' }
-  ]);
+  const [reviews, setReviews] = useState<Array<{
+    user: string;
+    text: string;
+    rating: number;
+    date: string;
+  }>>([]);
   const [saved, setSaved] = useState(false);
   const [coupon, setCoupon] = useState('');
   const [couponApplied, setCouponApplied] = useState(false);
   const [discount, setDiscount] = useState(0);
   const [showAllReviews, setShowAllReviews] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [serviceData, setServiceData] = useState<any>(null);
+  const [providerData, setProviderData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
   
   const scrollY = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
-  React.useEffect(() => {
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 800,
-      useNativeDriver: true,
-    }).start();
-  }, []);
+  // Fetch service details when component mounts
+  useEffect(() => {
+    const fetchData = async () => {
+      if (!gigId) {
+        setError('No service ID provided');
+        setIsLoading(false);
+        return;
+      }
 
-  const eventData = {
-    title: 'Premium Event Planning & Coordination',
-    description: 'Make your event unforgettable! We offer full-service event planning, coordination, and creative solutions for weddings, corporate events, birthdays, and more. Enjoy stress-free planning, professional execution, and a memorable experience for you and your guests.',
-    images: [
-      'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=600&h=400&fit=crop',
-      'https://images.unsplash.com/photo-1515168833906-d2a3b82b1a48?w=600&h=400&fit=crop',
-      'https://images.unsplash.com/photo-1464983953574-0892a716854b?w=600&h=400&fit=crop',
-      'https://images.unsplash.com/photo-1521737852567-6949f3f9f2b5?w=600&h=400&fit=crop'
-    ],
+      try {
+        setIsLoading(true);
+        // Fetch service data
+        const service = await fetchServiceByIdFromFirebase(String(gigId));
+        setServiceData(service);
+
+        // If service has a userId, fetch the provider/artist details
+        if (service.userId) {
+          try {
+            const artist = await fetchArtistById(service.userId);
+            if (artist) {
+              setProviderData(artist);
+            } else {
+              // Set default provider data if artist not found
+              setProviderData({
+                name: (service as any).artistName || "Service Provider",
+                avatar: DEFAULT_AVATAR,
+                level: "Service Provider",
+                responseTime: "24 hours",
+                completedOrders: "0",
+              });
+            }
+          } catch (artistError) {
+            console.error("Error fetching provider details:", artistError);
+            // Set default provider data if artist fetch fails
+            setProviderData({
+              name: (service as any).artistName || "Service Provider",
+              avatar: DEFAULT_AVATAR,
+              level: "Service Provider",
+              responseTime: "24 hours",
+              completedOrders: "0",
+            });
+          }
+        }
+
+        // Set reviews from comments if available
+        if (service.comments && Array.isArray(service.comments)) {
+          const formattedReviews = service.comments.map(comment => {
+            // Using type assertion to handle dynamic comment structure
+            const commentAny = comment as any;
+            return {
+              user: commentAny.userName || commentAny.user || "Anonymous User",
+              text: commentAny.text || commentAny.content || "",
+              rating: commentAny.rating || 5,
+              date: commentAny.createdAt 
+                ? (typeof commentAny.createdAt === 'string' 
+                    ? new Date(commentAny.createdAt).toLocaleDateString() 
+                    : commentAny.createdAt.toDate?.()?.toLocaleDateString() || "Recently")
+                : "Recently"
+            };
+          });
+          setReviews(formattedReviews);
+        }
+
+        // Start fade-in animation
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 800,
+          useNativeDriver: true,
+        }).start();
+      } catch (error) {
+        console.error("Error fetching service details:", error);
+        setError("Failed to load service details. Please try again.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [gigId]);
+
+  // Set up default service data structure
+  const defaultServiceData = {
+    title: serviceData?.title || "Loading...",
+    description: serviceData?.description || "Loading service details...",
+    images: serviceData?.images?.length > 0 
+      ? serviceData.images 
+      : serviceData?.image 
+        ? [serviceData.image] 
+        : [DEFAULT_SERVICE_IMAGE],
     provider: {
-      name: 'Elite Events Agency',
-      avatar: 'https://images.unsplash.com/photo-1511367461989-f85a21fda167?w=100&h=100&fit=crop&crop=face',
-      level: 'Top Event Planner',
-      responseTime: '2 hours',
-      completedOrders: '200+',
+      name: providerData?.name || serviceData?.artistName || "Service Provider",
+      avatar: providerData?.profilePicture || providerData?.avatar || DEFAULT_AVATAR,
+      level: providerData?.level || "Service Provider",
+      responseTime: providerData?.responseTime || "24 hours",
+      completedOrders: providerData?.completedOrders || "0+",
     },
-    basePrice: 500,
-    rating: 4.9,
-    reviewCount: 87,
-    deliveryTime: 'Flexible',
-    tags: ['Event Planning', 'Weddings', 'Corporate', 'Birthday', 'Full Service']
+    basePrice: serviceData?.price || serviceData?.basePrice || 0,
+    rating: serviceData?.rating || 4.5,
+    reviewCount: reviews.length || 0,
+    deliveryTime: serviceData?.deliveryTime || "Standard",
+    tags: serviceData?.categories || serviceData?.tags || ["Service"]
   };
 
+  // Set up main service
   const services = {
-    eventPlanning: { name: 'Event Planning', basePrice: 500, min: 1, max: 10 }
+    service: { 
+      name: serviceData?.title || "Service", 
+      basePrice: serviceData?.price || serviceData?.basePrice || 0, 
+      min: 1, 
+      max: 10 
+    }
   };
 
-  const extraServices = {
-    urgentDelivery: { name: '24-hour express delivery', price: 25, icon: 'flash' },
-    extraRevisions: { name: 'Additional revision', price: 10, icon: 'refresh' },
-    sourceFiles: { name: 'Source files (AI, PSD)', price: 15, icon: 'document' }
-  };
+  // Extra services removed
 
-  const handleServiceChange = (change) => {
+  const handleServiceChange = (change: number) => {
     setServiceQuantities((prev) => {
-      const newQty = Math.max(services.eventPlanning.min, Math.min(services.eventPlanning.max, prev.eventPlanning + change));
-      return { eventPlanning: newQty };
+      const newQty = Math.max(services.service.min, Math.min(services.service.max, prev.service + change));
+      return { ...prev, service: newQty };
+    });
+  };
+  
+  const handleItemQuantityChange = (itemKey: string, change: number) => {
+    setServiceQuantities((prev) => {
+      const currentValue = prev[itemKey as keyof typeof prev] as number || 0;
+      const newValue = Math.max(0, currentValue + change);
+      return {
+        ...prev,
+        [itemKey]: newValue
+      };
     });
   };
 
+  // No longer need toggle function since service items are removed
+
   const calculatePrice = () => {
-    let total = services.eventPlanning.basePrice * serviceQuantities.eventPlanning;
-    if (extras.urgentDelivery) total += extraServices.urgentDelivery.price;
-    if (extras.extraRevisions > 0) total += extras.extraRevisions * extraServices.extraRevisions.price;
-    if (extras.sourceFiles) total += extraServices.sourceFiles.price;
+    // Calculate base price for all selected items
+    let total = 0;
+    
+    // Add prices for each selected service item from Firebase
+    if (serviceData?.items) {
+      serviceData.items.forEach((item: any, index: number) => {
+        const itemId = `item_${index}`;
+        const quantity = serviceQuantities[itemId] || 0;
+        if (quantity > 0 && item.price) {
+          const itemPrice = typeof item.price === 'number' ? item.price : parseFloat(String(item.price));
+          total += itemPrice * quantity;
+        }
+      });
+    }
+    
+    // Apply discount if coupon is applied
     if (couponApplied) total -= discount;
+    
     return Math.max(total, 0);
   };
 
-  const handleSendOffer = () => {
-    Alert.alert('🎉 Offer Sent!', `Your custom offer has been sent to ${eventData.provider.name}!\n\nTotal: $${calculatePrice()}\n\nYou'll receive a response within ${eventData.provider.responseTime}.`);
-    setShowOfferForm(false);
+  const handleSendOffer = async () => {
+    try {
+      // Get current user ID
+      const auth = getAuth();
+      const currentUser = auth.currentUser;
+      
+      if (!currentUser) {
+        Alert.alert('Error', 'You need to be logged in to place an order.');
+        return;
+      }
+      
+      // Create order object
+      const newOrder = {
+        id: `order_${Date.now()}`,
+        clientId: currentUser.uid,
+        artistId: serviceData.userId || serviceData.artistId,
+        gigId: String(gigId),
+        gigTitle: serviceData.title || defaultServiceData.title,
+        message: customMessage,
+        items: Object.entries(serviceQuantities).map(([key, quantity]) => {
+          // For service items from Firebase
+          if (key.startsWith('item_')) {
+            const index = parseInt(key.replace('item_', ''));
+            const item = serviceData?.items?.[index];
+            if (item) {
+              return {
+                id: item.id || key,
+                title: item.title,
+                quantity,
+                price: typeof item.price === 'number' ? item.price : parseFloat(String(item.price))
+              };
+            }
+          }
+          return null;
+        }).filter(Boolean),
+        totalPrice: calculatePrice(),
+        status: 'pending', // pending, accepted, declined
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      
+      // Save order to Firebase
+      const { addDoc, collection } = await import('firebase/firestore');
+      const { getFirestore } = await import('firebase/firestore');
+      const db = getFirestore();
+      
+      await addDoc(collection(db, 'orders'), newOrder);
+
+      // Show success message
+      Alert.alert('🎉 Offer Sent!', `Your custom offer has been sent to ${defaultServiceData.provider.name}!\n\nTotal: ${calculatePrice()} MAD\n\nYou'll receive a response within ${defaultServiceData.provider.responseTime}.`);
+      setShowOfferForm(false);
+      
+      // Navigate back to client home
+      router.push('/(client)');
+    } catch (error) {
+      console.error('Error sending offer:', error);
+      Alert.alert('Error', 'There was a problem sending your offer. Please try again.');
+    }
   };
 
   const handleApplyCoupon = () => {
     if (coupon.trim().toUpperCase() === 'SAVE10') {
-      setDiscount(10);
+      setDiscount(100);
       setCouponApplied(true);
-      Alert.alert('✅ Coupon Applied!', 'You saved $10 on your order!');
+      Alert.alert('✅ Coupon Applied!', 'You saved 100 MAD on your order!');
     } else if (coupon.trim().toUpperCase() === 'WELCOME20') {
-      setDiscount(20);
+      setDiscount(200);
       setCouponApplied(true);
-      Alert.alert('✅ Welcome Bonus!', 'You saved $20 as a new customer!');
+      Alert.alert('✅ Welcome Bonus!', 'You saved 200 MAD as a new customer!');
     } else {
       setDiscount(0);
       setCouponApplied(false);
@@ -124,7 +294,7 @@ export default function EventDetailScreen() {
     }
   };
 
-  const renderStars = (rating, size = 16) => {
+  const renderStars = (rating: number, size = 16) => {
     const stars = [];
     for (let i = 1; i <= 5; i++) {
       stars.push(
@@ -146,6 +316,29 @@ export default function EventDetailScreen() {
     extrapolate: 'clamp',
   });
 
+  // Show loading screen while fetching data
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={Theme.colors.primary} />
+        <Text style={styles.loadingText}>Loading service details...</Text>
+      </View>
+    );
+  }
+
+  // Show error screen if there was a problem
+  if (error) {
+    return (
+      <View style={styles.errorContainer}>
+        <Ionicons name="alert-circle-outline" size={60} color="#f43f5e" />
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity style={styles.errorButton} onPress={() => router.back()}>
+          <Text style={styles.errorButtonText}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
@@ -156,7 +349,7 @@ export default function EventDetailScreen() {
           <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>
-          {eventData.title}
+          {defaultServiceData.title}
         </Text>
         <TouchableOpacity style={styles.headerButton} onPress={() => setSaved(!saved)}>
           <Ionicons name={saved ? 'bookmark' : 'bookmark-outline'} size={24} color={saved ? '#6366f1' : '#1a1a1a'} />
@@ -178,13 +371,13 @@ export default function EventDetailScreen() {
             
             {/* Hero Image Gallery */}
             <View style={styles.imageSection}>
-              <Image source={{ uri: eventData.images[selectedImage] }} style={styles.mainImage} />
+              <Image source={{ uri: defaultServiceData.images[selectedImage] }} style={styles.mainImage} />
               <TouchableOpacity style={styles.saveButton} onPress={() => setSaved(!saved)}>
                 <Ionicons name={saved ? 'bookmark' : 'bookmark-outline'} size={20} color={saved ? '#6366f1' : '#fff'} />
               </TouchableOpacity>
               
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.thumbnailContainer}>
-                {eventData.images.map((img, index) => (
+                {defaultServiceData.images.map((img: string, index: number) => (
                   <TouchableOpacity
                     key={index}
                     onPress={() => setSelectedImage(index)}
@@ -201,9 +394,9 @@ export default function EventDetailScreen() {
               
               {/* Title and Tags */}
               <View style={styles.titleSection}>
-                <Text style={styles.title}>{eventData.title}</Text>
+                <Text style={styles.title}>{defaultServiceData.title}</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tagsContainer}>
-                  {eventData.tags.map((tag, index) => (
+                  {defaultServiceData.tags.map((tag: string, index: number) => (
                     <View key={index} style={styles.tag}>
                       <Text style={styles.tagText}>{tag}</Text>
                     </View>
@@ -214,17 +407,17 @@ export default function EventDetailScreen() {
               {/* Provider Info */}
               <View style={styles.providerSection}>
                 <View style={styles.providerLeft}>
-                  <Image source={{ uri: eventData.provider.avatar }} style={styles.providerAvatar} />
+                  <Image source={{ uri: defaultServiceData.provider.avatar }} style={styles.providerAvatar} />
                   <View style={styles.providerInfo}>
                     <View style={styles.providerNameRow}>
-                      <Text style={styles.providerName}>{eventData.provider.name}</Text>
+                      <Text style={styles.providerName}>{defaultServiceData.provider.name}</Text>
                       <View style={styles.levelBadge}>
-                        <Text style={styles.levelText}>{eventData.provider.level}</Text>
+                        <Text style={styles.levelText}>{defaultServiceData.provider.level}</Text>
                       </View>
                     </View>
                     <View style={styles.ratingRow}>
-                      {renderStars(eventData.rating)}
-                      <Text style={styles.ratingText}>{eventData.rating} ({eventData.reviewCount} reviews)</Text>
+                      {renderStars(defaultServiceData.rating)}
+                      <Text style={styles.ratingText}>{defaultServiceData.rating} ({defaultServiceData.reviewCount} reviews)</Text>
                     </View>
                   </View>
                 </View>
@@ -237,55 +430,77 @@ export default function EventDetailScreen() {
               <View style={styles.statsRow}>
                 <View style={styles.statItem}>
                   <Ionicons name="time-outline" size={16} color="#6366f1" />
-                  <Text style={styles.statText}>Delivery: {eventData.deliveryTime}</Text>
+                  <Text style={styles.statText}>Delivery: {defaultServiceData.deliveryTime}</Text>
                 </View>
                 <View style={styles.statItem}>
                   <Ionicons name="flash-outline" size={16} color="#6366f1" />
-                  <Text style={styles.statText}>Response: {eventData.provider.responseTime}</Text>
+                  <Text style={styles.statText}>Response: {defaultServiceData.provider.responseTime}</Text>
                 </View>
                 <View style={styles.statItem}>
                   <Ionicons name="checkmark-circle-outline" size={16} color="#6366f1" />
-                  <Text style={styles.statText}>{eventData.provider.completedOrders} events planned</Text>
+                  <Text style={styles.statText}>{defaultServiceData.provider.completedOrders} services completed</Text>
                 </View>
               </View>
 
               {/* Description */}
               <View style={styles.descriptionSection}>
-                <Text style={styles.sectionTitle}>About This Event</Text>
-                <Text style={styles.description}>{eventData.description}</Text>
+                <Text style={styles.sectionTitle}>About This Service</Text>
+                <Text style={styles.description}>{defaultServiceData.description}</Text>
               </View>
+              
+              {/* Service Items section removed */}
 
               {/* Pricing Section */}
               <View style={styles.pricingSection}>
                 <Text style={styles.sectionTitle}>Customize Your Order</Text>
                 
-                <View style={styles.serviceCard}>
-                  <View style={styles.serviceHeader}>
-                    <Text style={styles.serviceName}>{services.eventPlanning.name}</Text>
-                    <Text style={styles.servicePrice}>${services.eventPlanning.basePrice} each</Text>
-                  </View>
+                {/* List of service items from Firebase that can be added/removed */}
+                <Text style={styles.subsectionTitle}>Service Items:</Text>
+                
+                {serviceData?.items && serviceData.items.map((item: any, index: number) => {
+                  const itemId = `item_${index}`;
+                  const quantity = serviceQuantities[itemId] || 0;
+                  const itemPrice = typeof item.price === 'number' ? item.price : parseFloat(String(item.price));
                   
-                  <View style={styles.quantitySelector}>
-                    <Text style={styles.quantityLabel}>Quantity:</Text>
-                    <View style={styles.quantityControls}>
-                      <TouchableOpacity
-                        style={[styles.quantityButton, serviceQuantities.eventPlanning <= services.eventPlanning.min && styles.quantityButtonDisabled]}
-                        onPress={() => handleServiceChange(-1)}
-                        disabled={serviceQuantities.eventPlanning <= services.eventPlanning.min}
-                      >
-                        <Ionicons name="remove" size={20} color={serviceQuantities.eventPlanning <= services.eventPlanning.min ? '#9ca3af' : '#6366f1'} />
-                      </TouchableOpacity>
-                      <Text style={styles.quantityText}>{serviceQuantities.eventPlanning}</Text>
-                      <TouchableOpacity
-                        style={[styles.quantityButton, serviceQuantities.eventPlanning >= services.eventPlanning.max && styles.quantityButtonDisabled]}
-                        onPress={() => handleServiceChange(1)}
-                        disabled={serviceQuantities.eventPlanning >= services.eventPlanning.max}
-                      >
-                        <Ionicons name="add" size={20} color={serviceQuantities.eventPlanning >= services.eventPlanning.max ? '#9ca3af' : '#6366f1'} />
-                      </TouchableOpacity>
+                  return (
+                    <View key={index} style={styles.serviceCard}>
+                      <View style={styles.serviceHeader}>
+                        <Text style={styles.serviceName}>{item.title}</Text>
+                        <Text style={styles.servicePrice}>
+                          {quantity > 0 ? `${quantity} × ` : ''}{itemPrice} MAD
+                        </Text>
+                      </View>
+                      {item.description && (
+                        <Text style={styles.serviceDescription}>{item.description}</Text>
+                      )}
+                      <View style={styles.quantitySelector}>
+                        <View style={styles.quantityControls}>
+                          <TouchableOpacity
+                            style={styles.quantityButton}
+                            onPress={() => handleItemQuantityChange(itemId, -1)}
+                          >
+                            <Ionicons name="remove" size={20} color="#6366f1" />
+                          </TouchableOpacity>
+                          <Text style={styles.quantityText}>{quantity}</Text>
+                          <TouchableOpacity
+                            style={styles.quantityButton}
+                            onPress={() => handleItemQuantityChange(itemId, 1)}
+                          >
+                            <Ionicons name="add" size={20} color="#6366f1" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
                     </View>
+                  );
+                })}
+                
+                {(!serviceData?.items || serviceData.items.length === 0) && (
+                  <View style={styles.serviceCard}>
+                    <Text style={styles.serviceDescription}>No service items available.</Text>
                   </View>
-                </View>
+                )}
+
+                {/* Additional services section removed */}
 
                 {/* Coupon Section */}
                 <View style={styles.couponSection}>
@@ -311,7 +526,7 @@ export default function EventDetailScreen() {
                   {couponApplied && (
                     <View style={styles.discountRow}>
                       <Ionicons name="checkmark-circle" size={16} color="#10b981" />
-                      <Text style={styles.discountText}>Discount applied: -${discount}</Text>
+                      <Text style={styles.discountText}>Discount applied: -{discount} MAD</Text>
                     </View>
                   )}
                 </View>
@@ -320,7 +535,7 @@ export default function EventDetailScreen() {
               {/* Reviews Section */}
               <View style={styles.reviewsSection}>
                 <View style={styles.reviewsHeader}>
-                  <Text style={styles.sectionTitle}>Reviews ({eventData.reviewCount})</Text>
+                  <Text style={styles.sectionTitle}>Reviews ({defaultServiceData.reviewCount})</Text>
                   <TouchableOpacity
                     style={styles.addReviewButton}
                     onPress={() => setShowReviewForm(true)}
@@ -364,7 +579,7 @@ export default function EventDetailScreen() {
         <View style={styles.actionBar}>
           <View style={styles.priceSection}>
             <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalPrice}>${calculatePrice()}</Text>
+            <Text style={styles.totalPrice}>{calculatePrice()} MAD</Text>
           </View>
           <TouchableOpacity style={styles.continueButton} onPress={() => setShowOfferForm(true)}>
             <Text style={styles.continueButtonText}>Continue</Text>
@@ -384,7 +599,7 @@ export default function EventDetailScreen() {
               </View>
               
               <Text style={styles.modalSubtitle}>
-                Tell {eventData.provider.name} about your event requirements
+                Tell {defaultServiceData.provider.name} about your service requirements
               </Text>
               
               <TextInput
@@ -398,7 +613,7 @@ export default function EventDetailScreen() {
               
               <View style={styles.modalPriceRow}>
                 <Text style={styles.modalPriceLabel}>Total Amount:</Text>
-                <Text style={styles.modalPriceValue}>${calculatePrice()}</Text>
+                <Text style={styles.modalPriceValue}>{calculatePrice()} MAD</Text>
               </View>
               
               <View style={styles.modalActions}>
@@ -1188,5 +1403,111 @@ const styles = StyleSheet.create({
   
   starButton: {
     padding: 4,
+  },
+  
+  // Loading state styles
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f9fafb',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#6366f1',
+    fontWeight: '500',
+  },
+  
+  // Error state styles
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f9fafb',
+    padding: 20,
+  },
+  errorText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#f43f5e',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  errorButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    backgroundColor: '#6366f1',
+    borderRadius: 8,
+  },
+  errorButtonText: {
+    color: '#ffffff',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  
+  // Service Item Selection Styles
+  serviceItemsSelection: {
+    marginBottom: 20,
+  },
+  
+  serviceItemCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  
+  serviceItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  
+  serviceItemInfo: {
+    flex: 1,
+  },
+  
+  serviceItemDescription: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginTop: 8,
+    lineHeight: 20,
+  },
+  
+  serviceItemToggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f9ff',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#6366f1',
+  },
+  
+  serviceItemToggleButtonSelected: {
+    backgroundColor: '#ecfdf5',
+    borderColor: '#10b981',
+  },
+  
+  serviceItemToggleText: {
+    marginLeft: 4,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6366f1',
+  },
+  
+  serviceItemToggleTextSelected: {
+    color: '#10b981',
+  },
+  
+  serviceDescription: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginTop: 2,
+    marginBottom: 12,
   },
 });

@@ -1,11 +1,10 @@
-import { Tabs } from 'expo-router';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { View, Text, TouchableOpacity, Animated, Easing, StyleSheet, Platform } from 'react-native';
+import { useAuth } from '@/src/context/AuthContext';
+import { useNavigation } from '@react-navigation/native';
+import { Tabs, useRouter } from 'expo-router';
+import { Bell, Home, LogIn, Search, Ticket, User } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
-import { Home, Search, Ticket, User, Bell, LogIn } from 'lucide-react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
-import { BlurView } from 'expo-blur';
-import { useRouter } from 'expo-router';
+import { Animated, Easing, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 const Theme = {
   colors: {
@@ -62,29 +61,36 @@ const Theme = {
 function Header({ title }) {
   const navigation = useNavigation();
   const router = useRouter();
+  const { user } = useAuth();
 
-  const handleLogout = () => {
-    router.push('/auth'); // ✅ this navigates to /app/auth.tsx
+  // Clean simple handler for auth navigation
+  const handleAuthNavigation = () => {
+    console.log('Navigating to auth page for login/registration');
+    
+    // Simple push to auth page
+    router.push('/auth');
   };
 
   const handleNotificationsPress = () => {
-    navigation.navigate('(hidden)/notifications');
+    // Use router.push with a valid route
+    router.push('/');
+    // For a hidden route, this could be implemented properly once we know what route to use
   };
   
   return (
     <SafeAreaView edges={['top']} style={styles.headerContainer}>
       <View style={styles.header}>
-        <View style={styles.headerTitleContainer}>
+        <View>
           <Text style={styles.headerTitle}>{title}</Text>
         </View>
         <View style={styles.headerRightIcons}>
           <TouchableOpacity 
-            onPress={handleLogout} 
-            style={styles.headerIconButton}
-            activeOpacity={0.7}
+            onPress={handleAuthNavigation} 
+            style={[styles.headerIconButton, styles.loginButton]}
+            activeOpacity={0.5}
           >
             <View style={styles.iconWrapper}>
-              <LogIn color={Theme.colors.textSecondary} size={22} />
+              <LogIn color={Theme.colors.primary} size={23} strokeWidth={2.5} />
             </View>
           </TouchableOpacity>
           <TouchableOpacity 
@@ -92,7 +98,7 @@ function Header({ title }) {
             style={styles.headerIconButton}
             activeOpacity={0.7}
           >
-            <View style={styles.iconWrapper} onclick={handleNotificationsPress}>
+            <View style={styles.iconWrapper}>
               <Bell color={Theme.colors.textSecondary} size={22} />
               <View style={styles.notificationBadge} />
             </View>
@@ -163,17 +169,14 @@ function TabBarButton({ onPress, children, isFocused }) {
 }
 
 function CustomTabBar({ state, descriptors, navigation }) {
+  // Get only the non-hidden routes
+  const visibleRoutes = state.routes.filter((route) => !route.name.startsWith('(hidden)'));
+  
   return (
-    <SafeAreaView edges={['bottom']} style={styles.tabBarContainer}>
-      <BlurView 
-        intensity={90} 
-        tint="light" 
-        style={styles.blurView}
-      >
+    <View style={styles.tabBarContainer}>
+      <SafeAreaView edges={['bottom']} style={{flex: 1}}>
         <View style={styles.tabBar}>
-          {state.routes
-            .filter((route) => !route.name.startsWith('(hidden)')) // Exclude hidden folder routes
-            .map((route, index) => {
+          {visibleRoutes.map((route, index) => {
               const { options } = descriptors[route.key];
               const label = options.title || route.name;
               const isFocused = state.index === index;
@@ -198,9 +201,19 @@ function CustomTabBar({ state, descriptors, navigation }) {
               const Icon = options.tabBarIcon ? options.tabBarIcon(iconProps) : null;
 
               return (
-                <TabBarButton key={route.key} onPress={onPress} isFocused={isFocused}>
-                  <View style={styles.tabButtonContent}>
-                    {isFocused && <View style={styles.tabIndicator} />}
+                <TabBarButton key={`tab-${route.name}`} onPress={onPress} isFocused={isFocused}>
+                  <View style={{
+                    alignItems: 'center', 
+                    justifyContent: 'center',
+                    paddingVertical: 6
+                  }}>
+                    {isFocused && <View style={{
+                      width: 30,
+                      height: 3,
+                      backgroundColor: Theme.colors.primary,
+                      borderRadius: 1.5,
+                      marginBottom: 4
+                    }} />}
                     {Icon}
                     <Text style={[
                       styles.tabLabel, 
@@ -214,8 +227,8 @@ function CustomTabBar({ state, descriptors, navigation }) {
               );
             })}
         </View>
-      </BlurView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
@@ -242,8 +255,11 @@ export default function Layout() {
         screenOptions={({ route }) => ({
           headerShown: true,
           header: () => <Header title={getPageTitle(route.name)} />,
-          tabBarStyle: { display: 'none' },
-          contentStyle: { backgroundColor: Theme.colors.background },
+          tabBarStyle: { display: 'none' }, // Hide default tab bar
+          contentStyle: { 
+            backgroundColor: Theme.colors.background,
+            paddingBottom: Platform.OS === 'ios' ? 100 : 90 // Increase padding to ensure content is visible above tab bar
+          },
         })}
         tabBar={(props) => <CustomTabBar {...props} />}
       >
@@ -251,28 +267,28 @@ export default function Layout() {
           name="index"
           options={{
             title: 'Home',
-            tabBarIcon: ({ color, size, strokeWidth }) => <Home color={color} size={size} strokeWidth={strokeWidth} />,
+            tabBarIcon: ({ color, size }) => <Home color={color} size={size} strokeWidth={2} />,
           }}
         />
         <Tabs.Screen
           name="search"
           options={{
             title: 'marketplace',
-            tabBarIcon: ({ color, size, strokeWidth }) => <Search color={color} size={size} strokeWidth={strokeWidth} />,
+            tabBarIcon: ({ color, size }) => <Search color={color} size={size} strokeWidth={2} />,
           }}
         />
         <Tabs.Screen
           name="tickets"
           options={{
             title: 'Tickets',
-            tabBarIcon: ({ color, size, strokeWidth }) => <Ticket color={color} size={size} strokeWidth={strokeWidth} />,
+            tabBarIcon: ({ color, size }) => <Ticket color={color} size={size} strokeWidth={2} />,
           }}
         />
         <Tabs.Screen
           name="profile"
           options={{
             title: 'Profile',
-            tabBarIcon: ({ color, size, strokeWidth }) => <User color={color} size={size} strokeWidth={strokeWidth} />,
+            tabBarIcon: ({ color, size }) => <User color={color} size={size} strokeWidth={2} />,
           }}
         />
       </Tabs>
@@ -322,6 +338,12 @@ const styles = StyleSheet.create({
     backgroundColor: Theme.colors.card,
     borderTopWidth: 1,
     borderTopColor: Theme.colors.border,
+    paddingBottom: Platform.OS === 'ios' ? 20 : 8, // Increased padding for iOS devices for better safe area
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 999, // Ensure tab bar is above other elements
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -336,18 +358,47 @@ const styles = StyleSheet.create({
   },
   tabBar: {
     flexDirection: 'row',
-    height: 55,
+    height: 64, // Increased height for better touch targets
     justifyContent: 'space-around',
     alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.95)', // Make background more visible
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
   },
   tabButton: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 50,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
   tabLabel: {
     fontSize: 11,
     fontFamily: Theme.typography.fontFamily.medium,
     marginTop: 4,
+  },
+  iconWrapper: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Theme.colors.error,
+    borderWidth: 1,
+    borderColor: '#fff',
+  },
+  loginButton: {
+    backgroundColor: 'rgba(67, 97, 238, 0.15)',
+    borderRadius: 8,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(67, 97, 238, 0.2)',
   },
 });

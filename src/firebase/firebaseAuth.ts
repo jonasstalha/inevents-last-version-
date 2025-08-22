@@ -1,31 +1,38 @@
 // src/firebase/firebaseAuth.ts
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getApp, getApps } from 'firebase/app';
-import { createUserWithEmailAndPassword, getReactNativePersistence, initializeAuth, signInWithEmailAndPassword, signOut, updateProfile } from 'firebase/auth';
-import './firebaseConfig';
-
-const app = getApps().length ? getApp() : undefined;
-
-const auth = app ? initializeAuth(app, {
-  persistence: getReactNativePersistence(AsyncStorage),
-}) : undefined;
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateProfile } from 'firebase/auth';
+import { auth } from './firebaseConfig';
 
 export const loginWithEmail = async (email: string, password: string) => {
-  if (!auth) throw new Error('Firebase Auth not initialized');
-  const userCredential = await signInWithEmailAndPassword(auth, email, password);
-  return userCredential;
+  try {
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    console.log('Firebase login successful:', userCredential.user.uid);
+    return userCredential;
+  } catch (error) {
+    console.error('Firebase login error:', error);
+    throw error;
+  }
 };
 
 export const registerWithEmail = async (email: string, password: string, name: string) => {
-  if (!auth) throw new Error('Firebase Auth not initialized');
-  const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-  if (auth.currentUser) {
-    await updateProfile(auth.currentUser, { displayName: name });
+  try {
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    if (auth.currentUser) {
+      await updateProfile(auth.currentUser, { displayName: name });
+    }
+    console.log('Firebase registration successful:', userCredential.user.uid);
+    return userCredential;
+  } catch (error) {
+    console.error('Firebase registration error:', error);
+    throw error;
   }
-  return userCredential;
 };
 
 export const logout = async () => {
-  if (!auth) throw new Error('Firebase Auth not initialized');
-  await signOut(auth);
+  try {
+    await signOut(auth);
+    console.log('Firebase logout successful');
+  } catch (error) {
+    console.error('Firebase logout error:', error);
+    throw error;
+  }
 };
