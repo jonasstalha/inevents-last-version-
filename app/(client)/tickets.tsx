@@ -21,6 +21,7 @@ import Animated, {
   useAnimatedScrollHandler,
   useSharedValue
 } from 'react-native-reanimated';
+import { fetchAllTickets } from '../../src/firebase/clientTicketsService';
 const ticket1 = require('../../assets/images/first.jpeg');
 const ticket2 = require('../../assets/images/fourth.jpeg');
 const ticket3 = require('../../assets/images/secend.jpg');
@@ -33,72 +34,80 @@ const AnimatedFlatList = Animated.createAnimatedComponent(FlatList);
 
 // Define the Ticket type for strong typing
 interface Ticket {
-  id: number;
-  title: string;
+  id: string;
+  eventName?: string;
+  title?: string;
   city: string;
   venue: string;
   price: number;
   date: string;
   time: string;
-  image: any;
+  image?: any;
+  flyer?: string;
   popular: boolean;
   availableTickets: number;
-  rating: number;
+  // Firebase fields
+  name?: string;
+  location?: string;
+  description?: string;
+  artistId?: string;
+  artistName?: string;
+  artistPhoto?: string;
+  eventDate?: any;
+  createdAt?: any;
+  status?: string;
+  ticketTypes?: { type: string; price: string | number }[];
 }
 
-// Enhanced dummy data with more details
+// Enhanced dummy data with more details (fallback data)
 const dummyTickets: Ticket[] = [
   {
-    id: 1,
+    id: '1',
     title: 'DJ Party Casablanca',
     city: 'Casablanca',
     venue: 'Ocean Club',
     price: 150,
     date: '2025-06-01',
     time: '22:00',
-    image: ticket1, // Correctly referenced static asset
+    image: ticket1,
     popular: true,
     availableTickets: 45,
-    rating: 4.7,
   },
   {
-    id: 2,
+    id: '2',
     title: 'Art Expo Marrakech',
     city: 'Marrakech',
     venue: 'Bahia Palace',
     price: 80,
     date: '2025-06-15',
     time: '10:00',
-    image: ticket2, // Correctly referenced static asset
+    image: ticket2,
     popular: false,
     availableTickets: 120,
-    rating: 4.2,
   },
   {
-    id: 3,
+    id: '3',
     title: 'Jazz Night Rabat',
     city: 'Rabat',
     venue: 'Jazz Club',
     price: 100,
     date: '2025-07-05',
     time: '20:00',
-    image: ticket3, // Correctly referenced static asset
+    image: ticket3,
     popular: true,
     availableTickets: 30,
-    rating: 4.8,
   },
   {
-    id: 4,
+    id: '4',
     title: 'Food & Wine Festival',
     city: 'Agadir',
     venue: 'Beach Resort',
     price: 200,
     date: '2025-08-12',
     time: '12:00',
-    image: ticket4, // Correctly referenced static asset
+    image: ticket4,
     popular: false,
     availableTickets: 80,
-    rating: 4.5,
   },
 ];
 
@@ -133,16 +142,120 @@ const TicketsScreen = () => {
   }, []);
 
   const fetchTickets = async () => {
-    // Simulate API fetch delay
-    setTimeout(() => {
+    setLoading(true);
+    try {
+      console.log('🎫 Fetching real tickets from Firebase...');
+      // Fetch real tickets from Firebase
+      const firebaseTickets = await fetchAllTickets();
+      console.log(`📊 Found ${firebaseTickets.length} tickets from Firebase`);
+      
+      // Transform Firebase tickets to UI format
+      const transformedTickets: Ticket[] = firebaseTickets.map((ticket: any) => {
+        console.log('🔄 Processing ticket:', {
+          id: ticket.id,
+          name: ticket.name,
+          eventName: ticket.eventName,
+          title: ticket.title,
+          price: ticket.price,
+          location: ticket.location,
+          flyer: ticket.flyer?.substring(0, 50) + '...' // Truncate for logging
+        });
+
+        // Extract city and venue from location if available
+        const locationParts = ticket.location?.split(',') || [];
+        const city = locationParts[0]?.trim() || 'Unknown City';
+        const venue = locationParts[1]?.trim() || locationParts[0]?.trim() || 'Unknown Venue';
+        
+        // Format date
+        let eventDate = '';
+        let eventTime = '20:00'; // Default time
+        if (ticket.eventDate) {
+          const date = ticket.eventDate.toDate ? ticket.eventDate.toDate() : new Date(ticket.eventDate);
+          eventDate = date.toISOString().split('T')[0];
+          eventTime = date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+        } else {
+          eventDate = new Date().toISOString().split('T')[0]; // Default to today
+        }
+        
+        // Determine if popular based on price (remove rating logic)
+        const popular = ticket.price > 150;
+        
+        // Handle image/flyer - skip local file paths
+        let imageSource = getRandomPlaceholderImage();
+        if (ticket.flyer && ticket.flyer.startsWith('http')) {
+          imageSource = { uri: ticket.flyer };
+        }
+        
+        return {
+          id: ticket.id,
+          title: ticket.name || ticket.eventName || ticket.title || 'Unnamed Event',
+          city,
+          venue,
+          price: typeof ticket.price === 'number' ? ticket.price : parseFloat(ticket.price) || 0,
+          date: eventDate,
+          time: eventTime,
+          image: imageSource,
+          flyer: ticket.flyer,
+          popular,
+          availableTickets: 100 - (ticket.soldTickets || 0), // Default calculation
+          // Keep original Firebase fields
+          eventName: ticket.name || ticket.eventName,
+          location: ticket.location,
+          description: ticket.description,
+          artistId: ticket.artistId,
+          artistName: ticket.artistName,
+          artistPhoto: ticket.artistPhoto,
+          eventDate: ticket.eventDate,
+          createdAt: ticket.createdAt,
+          status: ticket.status,
+          ticketTypes: ticket.ticketTypes
+        };
+      });
+      
+      console.log(`✅ Successfully transformed ${transformedTickets.length} tickets`);
+      
+      // If no Firebase tickets or all are invalid, show fallback tickets
+      if (transformedTickets.length === 0) {
+        console.log('⚠️ No valid Firebase tickets found, using fallback data');
+        setTickets(dummyTickets);
+      } else {
+        // Combine real tickets with some dummy tickets for better UX
+        const combinedTickets = [...transformedTickets, ...dummyTickets.slice(0, 2)];
+        setTickets(combinedTickets);
+        console.log(`🎉 Total tickets displayed: ${combinedTickets.length} (${transformedTickets.length} real + ${Math.min(2, dummyTickets.length)} demo)`);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching tickets:', error);
+      console.log('🔄 Falling back to dummy data');
+      // Fallback to dummy data if Firebase fails
       setTickets(dummyTickets);
+    } finally {
       setLoading(false);
-    }, 800);
+    }
   };
 
-  const onRefresh = useCallback(() => {
+  // Helper function to get image source with fallback
+  const getImageSource = (ticket: Ticket) => {
+    // Priority: flyer URL > image prop > random placeholder
+    if (ticket.flyer && typeof ticket.flyer === 'string') {
+      return { uri: ticket.flyer };
+    }
+    if (ticket.image) {
+      return ticket.image;
+    }
+    return getRandomPlaceholderImage();
+  };
+
+  // Helper function to get random placeholder image
+  const getRandomPlaceholderImage = () => {
+    const placeholders = [ticket1, ticket2, ticket3, ticket4];
+    return placeholders[Math.floor(Math.random() * placeholders.length)];
+  };
+
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    fetchTickets().finally(() => setRefreshing(false));
+    await fetchTickets();
+    setRefreshing(false);
   }, []);
 
   const scrollHandler = useAnimatedScrollHandler((event) => {
@@ -150,7 +263,7 @@ const TicketsScreen = () => {
   });
 
   const filteredTickets = tickets.filter((ticket) =>
-    ticket.title.toLowerCase().includes(searchQuery.toLowerCase())
+    (ticket.title || ticket.eventName || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const getFilteredTickets = () => {
@@ -158,7 +271,7 @@ const TicketsScreen = () => {
     // In a real app, you would filter by actual categories
     // This is just a simulation
     const categoryMap: Record<string, string[]> = {
-      musique: ['Musique', 'DJ', 'Concert'],
+      musique: ['Musique', 'DJ', 'Concert', 'Jazz'],
       theatre: ['Theatre'],
       comedie: ['Comedie'],
       sport: ['Sport'],
@@ -170,7 +283,8 @@ const TicketsScreen = () => {
     
     return filteredTickets.filter(ticket => {
       const keywords = categoryMap[selectedCategory] || [];
-      return keywords.some(keyword => ticket.title.includes(keyword));
+      const searchText = (ticket.title || ticket.eventName || '').toLowerCase();
+      return keywords.some(keyword => searchText.includes(keyword.toLowerCase()));
     });
   };
 
@@ -180,12 +294,18 @@ const TicketsScreen = () => {
       entering={FadeInRight.delay(index * 100).springify()}
       style={styles.popularTicketCard}
     >
-      <Image source={item.image} style={styles.popularTicketImage} />
+      <Image 
+        source={getImageSource(item)} 
+        style={styles.popularTicketImage}
+        defaultSource={getRandomPlaceholderImage()}
+      />
       <View style={styles.popularTicketOverlay}>
         <BlurView intensity={70} style={styles.blurContainer}>
           <View style={styles.popularTicketContent}>
             <View>
-              <Text style={styles.popularTicketTitle}>{item.title}</Text>
+              <Text style={styles.popularTicketTitle}>
+                {item.title || item.eventName || item.name || 'Unnamed Event'}
+              </Text>
               <View style={styles.ticketMeta}>
                 <MaterialCommunityIcons name="map-marker" size={16} color="#FFFFFF" />
                 <Text style={styles.metaText}>{item.city}</Text>
@@ -199,7 +319,7 @@ const TicketsScreen = () => {
               <Text style={styles.popularTicketPrice}>{item.price} MAD</Text>
               <TouchableOpacity 
                 style={styles.viewDetailsButton}
-                onPress={() => router.push({ pathname: '/(client)/(hidden)/ticket/[ticket]', params: { ticket: item.id.toString() } })}
+                onPress={() => router.push({ pathname: '/(client)/(hidden)/ticket/[ticket]', params: { ticket: item.id } })}
               >
                 <Text style={styles.viewDetailsText}>View</Text>
                 <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
@@ -217,15 +337,17 @@ const TicketsScreen = () => {
       entering={FadeInDown.delay(index * 100).springify()}
       style={styles.ticketCard}
     >
-      <Image source={item.image} style={styles.ticketImage} />
+      <Image 
+        source={getImageSource(item)} 
+        style={styles.ticketImage}
+        defaultSource={getRandomPlaceholderImage()}
+      />
       <View style={styles.ticketDetails}>
         <View style={styles.ticketContent}>
           <View style={styles.titleRow}>
-            <Text style={styles.ticketTitle}>{item.title}</Text>
-            <View style={styles.ratingContainer}>
-              <Ionicons name="star" size={14} color="#FFD700" />
-              <Text style={styles.ratingText}>{item.rating}</Text>
-            </View>
+            <Text style={styles.ticketTitle}>
+              {item.title || item.eventName || item.name || 'Unnamed Event'}
+            </Text>
           </View>
           
           <View style={styles.infoRow}>
@@ -239,6 +361,21 @@ const TicketsScreen = () => {
               <Text style={styles.ticketDate}>{formatDate(item.date)}</Text>
             </View>
           </View>
+
+          {/* Add artist info if available */}
+          {item.artistName && (
+            <View style={styles.artistInfo}>
+              <Ionicons name="person-outline" size={14} color="#64748B" />
+              <Text style={styles.artistName}>by {item.artistName}</Text>
+            </View>
+          )}
+          
+          {/* Add description if available */}
+          {item.description && (
+            <Text style={styles.ticketDescription} numberOfLines={2}>
+              {item.description}
+            </Text>
+          )}
           
           <View style={styles.ticketFooter}>
             <Text style={styles.ticketPrice}>{item.price} MAD</Text>
@@ -248,7 +385,7 @@ const TicketsScreen = () => {
               </Text>
               <TouchableOpacity
                 style={styles.buyButton}
-                onPress={() => router.push({ pathname: '/(client)/(hidden)/ticket/[ticket]', params: { ticket: item.id.toString() } })}
+                onPress={() => router.push({ pathname: '/(client)/(hidden)/ticket/[ticket]', params: { ticket: item.id } })}
               >
                 <Text style={styles.buyButtonText}>Buy</Text>
               </TouchableOpacity>
@@ -342,9 +479,9 @@ const TicketsScreen = () => {
           <Ionicons name="flame" size={20} color="#FF4757" /> Popular Events
         </Text>
         
-        <AnimatedFlatList
+        <FlatList
           data={tickets.filter((ticket) => ticket.popular)}
-          keyExtractor={(item) => item.id.toString()}
+          keyExtractor={(item) => item.id}
           renderItem={renderPopularTicketCard}
           horizontal
           pagingEnabled
@@ -366,7 +503,7 @@ const TicketsScreen = () => {
         {getFilteredTickets().length > 0 ? (
           <FlatList
             data={getFilteredTickets()}
-            keyExtractor={(item) => item.id.toString()}
+            keyExtractor={(item) => item.id}
             renderItem={renderTicketCard}
             scrollEnabled={false}
             contentContainerStyle={styles.ticketsList}
@@ -709,6 +846,25 @@ const styles = StyleSheet.create({
   activeTabText: {
     color: '#6C63FF',
     fontWeight: '500',
+  },
+  
+  // New styles for artist info and description
+  artistInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  artistName: {
+    fontSize: 12,
+    color: '#64748B',
+    marginLeft: 4,
+    fontStyle: 'italic',
+  },
+  ticketDescription: {
+    fontSize: 12,
+    color: '#64748B',
+    marginBottom: 8,
+    lineHeight: 16,
   },
 });
 

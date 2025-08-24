@@ -1,17 +1,18 @@
+import { Heart, MapPin, Star } from 'lucide-react-native';
 import React from 'react';
-import { StyleSheet, View, Text, Image, TouchableOpacity, Button } from 'react-native';
-import { Star, MapPin } from 'lucide-react-native';
-import { Card } from '../common/Card';
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Theme } from '../../constants/theme';
 import { Artist } from '../../models/types';
+import { Card } from '../common/Card';
 
 interface ArtistCardProps {
   artist: Artist;
   onPress: (artistId: string) => void;
   onHire: (artistId: string) => void;
+  isSaved?: boolean;
 }
 
-export const ArtistCard: React.FC<ArtistCardProps> = ({ artist, onPress, onHire }) => {
+export const ArtistCard: React.FC<ArtistCardProps> = ({ artist, onPress, onHire, isSaved = false }) => {
   return (
     <TouchableOpacity onPress={() => onPress(artist.id)} activeOpacity={0.9}>
       <Card variant="elevated" style={styles.container}>
@@ -46,7 +47,19 @@ export const ArtistCard: React.FC<ArtistCardProps> = ({ artist, onPress, onHire 
             <MapPin size={14} color={Theme.colors.textLight} />
             <Text style={styles.locationText}>{artist.location}</Text>
           </View>
-          <Button title="Hire" onPress={() => onHire(artist.id)} color={Theme.colors.primary} />
+          <TouchableOpacity 
+            onPress={() => onHire(artist.id)} 
+            style={[styles.saveButton, isSaved && styles.savedButton]}
+          >
+            <Heart 
+              size={16} 
+              color={isSaved ? '#fff' : Theme.colors.primary} 
+              fill={isSaved ? '#fff' : 'transparent'}
+            />
+            <Text style={[styles.saveButtonText, isSaved && styles.savedButtonText]}>
+              {isSaved ? 'Saved' : 'Save'}
+            </Text>
+          </TouchableOpacity>
         </View>
         
         {artist.featured && <View style={styles.featuredBadge}><Text style={styles.featuredText}>Featured</Text></View>}
@@ -141,6 +154,29 @@ const styles = StyleSheet.create({
   featuredText: {
     fontFamily: Theme.typography.fontFamily.medium,
     fontSize: Theme.typography.fontSize.xs,
+    color: Theme.colors.secondary,
+  },
+  saveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: Theme.colors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: Theme.borderRadius.sm,
+  },
+  savedButton: {
+    backgroundColor: Theme.colors.primary,
+    borderColor: Theme.colors.primary,
+  },
+  saveButtonText: {
+    fontFamily: Theme.typography.fontFamily.medium,
+    fontSize: Theme.typography.fontSize.sm,
+    color: Theme.colors.primary,
+    marginLeft: 4,
+  },
+  savedButtonText: {
     color: Theme.colors.secondary,
   },
 });

@@ -88,7 +88,7 @@ export const CategorySelector: React.FC<CategorySelectorProps> = ({
         </TouchableOpacity>
         {CATEGORIES.map((category) => (
           <TouchableOpacity
-            key={category.name}
+            key={`${category.type}-${category.name}`}
             style={[
               styles.categoryButton,
               selectedCategory === category.name && styles.selectedCategory,

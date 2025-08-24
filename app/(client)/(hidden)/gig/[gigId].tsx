@@ -1,6 +1,8 @@
 import { Theme } from '@/src/constants/theme';
 import { fetchArtistById } from '@/src/firebase/artistsService';
 import { fetchServiceByIdFromFirebase } from '@/src/firebase/fetchAllServices';
+import { validatePromoCode } from '@/src/firebase/promoService';
+import { addServiceReview } from '@/src/firebase/reviewService';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getAuth } from 'firebase/auth';
@@ -47,11 +49,15 @@ export default function ServiceDetailScreen() {
     text: string;
     rating: number;
     date: string;
+    userId?: string;
   }>>([]);
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [coupon, setCoupon] = useState('');
   const [couponApplied, setCouponApplied] = useState(false);
   const [discount, setDiscount] = useState(0);
+  const [promoError, setPromoError] = useState<string | null>(null);
   const [showAllReviews, setShowAllReviews] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [serviceData, setServiceData] = useState<any>(null);
@@ -108,10 +114,10 @@ export default function ServiceDetailScreen() {
         // Set reviews from comments if available
         if (service.comments && Array.isArray(service.comments)) {
           const formattedReviews = service.comments.map(comment => {
-            // Using type assertion to handle dynamic comment structure
             const commentAny = comment as any;
             return {
               user: commentAny.userName || commentAny.user || "Anonymous User",
+              userId: commentAny.userId,
               text: commentAny.text || commentAny.content || "",
               rating: commentAny.rating || 5,
               date: commentAny.createdAt 
@@ -141,27 +147,40 @@ export default function ServiceDetailScreen() {
     fetchData();
   }, [gigId]);
 
+  // Calculate real average rating from reviews/comments
+  const realAvgRating = reviews.length > 0
+    ? (reviews.reduce((sum, r) => sum + (typeof r.rating === 'number' ? r.rating : 0), 0) / reviews.length).toFixed(1)
+    : '0.0';
+
   // Set up default service data structure
   const defaultServiceData = {
     title: serviceData?.title || "Loading...",
+
     description: serviceData?.description || "Loading service details...",
-    images: serviceData?.images?.length > 0 
-      ? serviceData.images 
-      : serviceData?.image 
-        ? [serviceData.image] 
-        : [DEFAULT_SERVICE_IMAGE],
+
+    images: serviceData?.images?.length > 0
+      ? serviceData.images
+      : serviceData?.image
+      ? [serviceData.image]
+      : [DEFAULT_SERVICE_IMAGE],
+
+    basePrice: serviceData?.price || serviceData?.basePrice || 0,
+
+    rating: parseFloat(realAvgRating),
+
+    reviewCount: reviews.length || 0,
+
+    deliveryTime: serviceData?.deliveryTime || "Standard",
+
+    tags: serviceData?.categories || serviceData?.tags || ["Service"],
+
     provider: {
       name: providerData?.name || serviceData?.artistName || "Service Provider",
-      avatar: providerData?.profilePicture || providerData?.avatar || DEFAULT_AVATAR,
+      avatar: providerData?.avatar || DEFAULT_AVATAR,
       level: providerData?.level || "Service Provider",
       responseTime: providerData?.responseTime || "24 hours",
-      completedOrders: providerData?.completedOrders || "0+",
+      completedOrders: providerData?.completedOrders || "0",
     },
-    basePrice: serviceData?.price || serviceData?.basePrice || 0,
-    rating: serviceData?.rating || 4.5,
-    reviewCount: reviews.length || 0,
-    deliveryTime: serviceData?.deliveryTime || "Standard",
-    tags: serviceData?.categories || serviceData?.tags || ["Service"]
   };
 
   // Set up main service
@@ -278,19 +297,26 @@ export default function ServiceDetailScreen() {
     }
   };
 
-  const handleApplyCoupon = () => {
-    if (coupon.trim().toUpperCase() === 'SAVE10') {
-      setDiscount(100);
-      setCouponApplied(true);
-      Alert.alert('✅ Coupon Applied!', 'You saved 100 MAD on your order!');
-    } else if (coupon.trim().toUpperCase() === 'WELCOME20') {
-      setDiscount(200);
-      setCouponApplied(true);
-      Alert.alert('✅ Welcome Bonus!', 'You saved 200 MAD as a new customer!');
-    } else {
-      setDiscount(0);
-      setCouponApplied(false);
-      Alert.alert('❌ Invalid Coupon', 'This coupon code is not valid. Try SAVE10 or WELCOME20!');
+  const handleApplyCoupon = async () => {
+    setPromoError(null);
+    const code = coupon.trim();
+    if (!code) {
+      setPromoError('Please enter a promo code.');
+      return;
+    }
+    try {
+      const discountValue = await validatePromoCode(code);
+      if (discountValue > 0) {
+        setDiscount(discountValue);
+        setCouponApplied(true);
+        Alert.alert('✅ Promo Applied!', `You saved ${discountValue} MAD on your order!`);
+      } else {
+        setDiscount(0);
+        setCouponApplied(false);
+        setPromoError('❌ Invalid promo code.');
+      }
+    } catch (err) {
+      setPromoError('Error validating promo code.');
     }
   };
 
@@ -332,7 +358,7 @@ export default function ServiceDetailScreen() {
       <View style={styles.errorContainer}>
         <Ionicons name="alert-circle-outline" size={60} color="#f43f5e" />
         <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.errorButton} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.errorButton} onPress={() => router.push('/(client)/search')}>
           <Text style={styles.errorButtonText}>Go Back</Text>
         </TouchableOpacity>
       </View>
@@ -345,7 +371,7 @@ export default function ServiceDetailScreen() {
       
       {/* Animated Header */}
       <Animated.View style={[styles.header, { opacity: headerOpacity }]}>
-        <TouchableOpacity style={styles.headerButton} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.headerButton} onPress={() => router.push('/(client)/search')}>
           <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>
@@ -359,7 +385,7 @@ export default function ServiceDetailScreen() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <Animated.ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={{ paddingBottom: 120 }}
+          contentContainerStyle={{ paddingBottom: 200 }} // Increased padding to allow more scrolling
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
             { useNativeDriver: false }
@@ -405,8 +431,10 @@ export default function ServiceDetailScreen() {
               </View>
 
               {/* Provider Info */}
-              <View style={styles.providerSection}>
-                <View style={styles.providerLeft}>
+
+              {/* Provider Info & Stats Row - Enhanced Placement */}
+              <View style={[styles.providerSection, { flexDirection: 'column', alignItems: 'flex-start', gap: 12 }]}> 
+                <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%' }}>
                   <Image source={{ uri: defaultServiceData.provider.avatar }} style={styles.providerAvatar} />
                   <View style={styles.providerInfo}>
                     <View style={styles.providerNameRow}>
@@ -420,25 +448,6 @@ export default function ServiceDetailScreen() {
                       <Text style={styles.ratingText}>{defaultServiceData.rating} ({defaultServiceData.reviewCount} reviews)</Text>
                     </View>
                   </View>
-                </View>
-                <TouchableOpacity style={styles.contactButton}>
-                  <Ionicons name="chatbubble-outline" size={18} color="#6366f1" />
-                </TouchableOpacity>
-              </View>
-
-              {/* Stats Row */}
-              <View style={styles.statsRow}>
-                <View style={styles.statItem}>
-                  <Ionicons name="time-outline" size={16} color="#6366f1" />
-                  <Text style={styles.statText}>Delivery: {defaultServiceData.deliveryTime}</Text>
-                </View>
-                <View style={styles.statItem}>
-                  <Ionicons name="flash-outline" size={16} color="#6366f1" />
-                  <Text style={styles.statText}>Response: {defaultServiceData.provider.responseTime}</Text>
-                </View>
-                <View style={styles.statItem}>
-                  <Ionicons name="checkmark-circle-outline" size={16} color="#6366f1" />
-                  <Text style={styles.statText}>{defaultServiceData.provider.completedOrders} services completed</Text>
                 </View>
               </View>
 
@@ -523,7 +532,13 @@ export default function ServiceDetailScreen() {
                       </Text>
                     </TouchableOpacity>
                   </View>
-                  {couponApplied && (
+                  {promoError && (
+                    <View style={styles.discountRow}>
+                      <Ionicons name="alert-circle" size={16} color="#ef4444" />
+                      <Text style={[styles.discountText, { color: '#ef4444' }]}>{promoError}</Text>
+                    </View>
+                  )}
+                  {couponApplied && !promoError && (
                     <View style={styles.discountRow}>
                       <Ionicons name="checkmark-circle" size={16} color="#10b981" />
                       <Text style={styles.discountText}>Discount applied: -{discount} MAD</Text>
@@ -672,23 +687,57 @@ export default function ServiceDetailScreen() {
                   <Text style={styles.modalCancelText}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => {
-                    setReviews(prev => [{
-                      user: 'You',
-                      text: reviewText,
-                      rating: reviewRating,
-                      date: 'Just now'
-                    }, ...prev]);
-                    setReviewText('');
-                    setReviewRating(5);
-                    setShowReviewForm(false);
+                  onPress={async () => {
+                    setReviewSubmitting(true);
+                    setReviewError(null);
+                    try {
+                      const auth = getAuth();
+                      const currentUser = auth.currentUser;
+                      if (!currentUser) {
+                        setReviewError('You must be logged in to submit a review.');
+                        setReviewSubmitting(false);
+                        return;
+                      }
+                      if (!serviceData?.userId || !serviceData?.id) {
+                        setReviewError('Service data missing.');
+                        setReviewSubmitting(false);
+                        return;
+                      }
+                      await addServiceReview(
+                        serviceData.userId,
+                        serviceData.id,
+                        {
+                          userId: currentUser.uid,
+                          userName: currentUser.displayName || 'You',
+                          rating: reviewRating,
+                          text: reviewText,
+                        }
+                      );
+                      setReviews(prev => [{
+                        user: currentUser.displayName || 'You',
+                        userId: currentUser.uid,
+                        text: reviewText,
+                        rating: reviewRating,
+                        date: 'Just now'
+                      }, ...prev]);
+                      setReviewText('');
+                      setReviewRating(5);
+                      setShowReviewForm(false);
+                    } catch (err) {
+                      setReviewError('Failed to submit review.');
+                    } finally {
+                      setReviewSubmitting(false);
+                    }
                   }}
-                  style={[styles.modalSend, !reviewText.trim() && styles.modalSendDisabled]}
-                  disabled={!reviewText.trim()}
+                  style={[styles.modalSend, (!reviewText.trim() || reviewSubmitting) && styles.modalSendDisabled]}
+                  disabled={!reviewText.trim() || reviewSubmitting}
                 >
-                  <Text style={styles.modalSendText}>Submit Review</Text>
+                  <Text style={styles.modalSendText}>{reviewSubmitting ? 'Submitting...' : 'Submit Review'}</Text>
                   <Ionicons name="checkmark" size={16} color="#fff" />
                 </TouchableOpacity>
+                {reviewError && (
+                  <Text style={{ color: '#ef4444', marginTop: 8 }}>{reviewError}</Text>
+                )}
               </View>
             </View>
           </View>
@@ -1236,7 +1285,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 16,
-    paddingBottom: Platform.OS === 'ios' ? 32 : 16,
+    paddingBottom: Platform.OS === 'ios' ? 50 : 120,
     borderTopWidth: 1,
     borderTopColor: '#e2e8f0',
     shadowColor: '#000',

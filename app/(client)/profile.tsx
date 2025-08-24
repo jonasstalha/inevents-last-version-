@@ -1,31 +1,55 @@
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { Award, ChevronRight, CreditCard, Heart, CircleHelp as HelpCircle, LogOut } from 'lucide-react-native';
-import React, { useState } from 'react';
-import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { Card } from '@/src/components/common/Card';
 import { Theme } from '@/src/constants/theme';
 import { useApp } from '@/src/context/AppContext';
 import { useAuth } from '@/src/context/AuthContext';
+import { getUserStatistics, UserStats } from '@/src/firebase/userStatsService';
 
 export default function ProfileScreen() {
   const { user, logout } = useAuth();
   const { getOrdersByClientId } = useApp();
   const router = useRouter();
 
-  // Add state for profile image URI
+  // Add state for profile image URI and real statistics
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [showRewards, setShowRewards] = useState(false);
   const [showSavedArtists, setShowSavedArtists] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<UserStats>({
+    orders: 0,
+    tickets: 0,
+    points: 0,
+    totalSpent: 0
+  });
 
-  // Get real orders and tickets for the logged-in user
-  const orders = user ? getOrdersByClientId(user.id) : [];
-  // For demo: assume each order = 1 ticket (customize if you have real ticket logic)
-  const tickets = orders.filter(order => order.status === 'confirmed');
+  // Fetch real user statistics from Firebase
+  useEffect(() => {
+    if (user?.id) {
+      fetchUserStatistics();
+    } else {
+      setLoading(false);
+    }
+  }, [user?.id]);
 
-  // Reward system: 10 points per order, 5 per ticket (customize as needed)
-  const points = orders.length * 10 + tickets.length * 5;
+  const fetchUserStatistics = async () => {
+    if (!user?.id) return;
+    
+    try {
+      setLoading(true);
+      const userStats = await getUserStatistics(user.id);
+      setStats(userStats);
+    } catch (error) {
+      console.error('Error fetching user statistics:', error);
+      // Keep default stats on error
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLogout = () => {
     Alert.alert(
@@ -98,7 +122,7 @@ export default function ProfileScreen() {
     {
       title: 'Rewards Program',
       icon: <Award size={20} color={Theme.colors.primary} />,
-      badge: `${points} pts`,
+      badge: `${stats.points} pts`,
       onPress: () => setShowRewards(true),
     },
     {
@@ -174,20 +198,27 @@ export default function ProfileScreen() {
       </View>
 
       <Card variant="elevated" style={styles.statsCard}>
-        <View style={styles.statsRow}>
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{orders.length}</Text>
-            <Text style={styles.statLabel}>Orders</Text>
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="small" color={Theme.colors.primary} />
+            <Text style={styles.loadingText}>Loading stats...</Text>
           </View>
-          <View style={[styles.statItem, styles.statDivider]}>
-            <Text style={styles.statValue}>{tickets.length}</Text>
-            <Text style={styles.statLabel}>Tickets</Text>
+        ) : (
+          <View style={styles.statsRow}>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{stats.orders}</Text>
+              <Text style={styles.statLabel}>Orders</Text>
+            </View>
+            <View style={[styles.statItem, styles.statDivider]}>
+              <Text style={styles.statValue}>{stats.tickets}</Text>
+              <Text style={styles.statLabel}>Tickets</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{stats.points}</Text>
+              <Text style={styles.statLabel}>Points</Text>
+            </View>
           </View>
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{points}</Text>
-            <Text style={styles.statLabel}>Points</Text>
-          </View>
-        </View>
+        )}
       </Card>
 
       <View style={styles.menuContainer}>
@@ -370,5 +401,17 @@ const styles = StyleSheet.create({
     color: Theme.colors.textLight,
     textAlign: 'center',
     marginTop: Theme.spacing.xl,
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Theme.spacing.lg,
+  },
+  loadingText: {
+    marginLeft: Theme.spacing.sm,
+    fontFamily: Theme.typography.fontFamily.regular,
+    fontSize: Theme.typography.fontSize.sm,
+    color: Theme.colors.textLight,
   },
 });

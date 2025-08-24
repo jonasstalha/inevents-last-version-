@@ -22,21 +22,11 @@ const transformGigData = (gig: any) => ({
   id: gig.id,
   title: gig.title,
   description: gig.description || gig.location || '',
-  // Don't use a default image - only use actual image if available
-  image: gig.image || gig.cover || null,
-  // Add empty properties to match the Gig interface
-  artistId: gig.artistId || gig.userId || '',
-  basePrice: 0, // Remove price by setting it to 0
+  image: Array.isArray(gig.images) && gig.images.length > 0 ? gig.images[0] : (gig.image || gig.cover || null),
   category: gig.category || '',
-  // Enhanced information for UI
-  providerName: gig.artistName || gig.userName || 'Service Provider',
-  ordersCount: gig.ordersCount || Math.floor(Math.random() * 50) + 5, // Use real count or a placeholder
-  rating: parseFloat(gig.rating || 0) || Math.floor((Math.random() * 2 + 3) * 10) / 10, // Use real rating or a reasonable placeholder
-  reviewCount: gig.reviewCount || Math.floor(Math.random() * 30) + 2, // Use real count or a placeholder
-  options: gig.options || [],
-  createdAt: gig.createdAt || new Date(),
-  // Add images array (will be empty but GigCard can handle this)
-  images: gig.images || [],
+  providerName: gig.artistName || gig.userName || gig.providerName || 'Service Provider',
+  city: gig.city || gig.location || '',
+  location: gig.location || gig.city || '',
 });
 
 export default function SearchScreen() {
@@ -131,7 +121,7 @@ export default function SearchScreen() {
             return gig.category.toLowerCase() === selectedCategory.toLowerCase();
           }
           if (Array.isArray(gig.categories)) {
-            return gig.categories.map((c) => c.toLowerCase()).includes(selectedCategory.toLowerCase());
+            return (gig.categories as string[]).map((c: string) => c.toLowerCase()).includes(selectedCategory.toLowerCase());
           }
           return false;
         });
@@ -298,8 +288,8 @@ export default function SearchScreen() {
           {filteredGigs.length > 0 ? (
             <AnimatedFlatList
               data={filteredGigs}
-              keyExtractor={(item) => String(item.id)}
-              renderItem={({ item }) => (
+              keyExtractor={(item: any) => String(item.id)}
+              renderItem={({ item }: { item: any }) => (
                 <Animatable.View
                   animation="fadeInUp"
                   duration={300}
@@ -354,7 +344,7 @@ export default function SearchScreen() {
                   <ArtistCard 
                     artist={item} 
                     onPress={handleArtistPress} 
-                    onSave={handleSaveArtist}
+                    onHire={handleSaveArtist}
                     isSaved={isArtistSaved(item.id)}
                   />
                 </Animatable.View>

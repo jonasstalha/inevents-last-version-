@@ -7,7 +7,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 
 const { width, height } = Dimensions.get('window');
@@ -18,6 +18,18 @@ export default function WelcomeScreen() {
   // Animation refs
   const logoAnim = useRef(new Animated.Value(0)).current;
   const sloganAnim = useRef(new Animated.Value(0)).current;
+
+  // Open the local client folder in development: tries browser window.open, then Linking, then fallback to in-app route
+  const openClientFolder = () => {
+    // Directly open the client area inside the app. Use a known client route (search) which exists.
+    try {
+      router.replace('/(client)/search');
+      return;
+    } catch (e) {
+      // As a final fallback, try the root client route
+      router.replace('/(client)');
+    }
+  };
 
   useEffect(() => {
     Animated.sequence([
@@ -34,9 +46,7 @@ export default function WelcomeScreen() {
     ]).start();
   }, []);
 
-  const handlePress = () => {
-    router.replace({ pathname: '/(admin)' }); // Go directly to admin panel, bypassing client and authentication
-  };
+
 
   return (
     <View style={styles.container}>
@@ -79,15 +89,8 @@ export default function WelcomeScreen() {
         >
           Discover. Connect. Experience.
         </Animated.Text>
-        <TouchableOpacity style={styles.button} onPress={() => router.replace({ pathname: '/(client)' })}>
+  <TouchableOpacity style={styles.button} onPress={openClientFolder}>
           <Text style={styles.buttonText}>Enter App</Text>
-        </TouchableOpacity>
-        {/* Admin Button restored: goes directly to admin panel, no authentication */}
-        <TouchableOpacity
-          style={[styles.button, { marginTop: 16, backgroundColor: '#22223b' }]}
-          onPress={() => router.replace({ pathname: '/(admin)' })}
-        >
-          <Text style={styles.buttonText}>Admin Panel</Text>
         </TouchableOpacity>
       </View>
     </View>
