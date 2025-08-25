@@ -167,6 +167,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         
         // Log the role specifically for debugging
         console.log('AuthContext: User role from Firestore:', userData.role);
+        console.log('AuthContext: Checking if role is admin:', userData.role === 'admin');
         
         // Set user with data from Firestore
         const userToSet: User = {
@@ -239,11 +240,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLoading(true);
       console.log('AuthContext: Attempting registration with email:', email);
       
-      // Check if phone is verified before proceeding
-      if (!isPhoneVerified) {
-        throw new Error('Phone number must be verified before registration');
-      }
-      
       const userCredential = await registerWithEmail(email, password, name);
       const firebaseUser = userCredential.user;
       
@@ -255,7 +251,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         email: firebaseUser.email || '',
         name: name,
         phoneNumber: phoneNumber,
-        isPhoneVerified: isPhoneVerified,
+        isPhoneVerified: false, // Default to false since verification is not required
         role: role,
         createdAt: new Date(firebaseUser.metadata.creationTime || Date.now()),
       };
@@ -278,7 +274,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         email: firebaseUser.email || '',
         name: name,
         phoneNumber: phoneNumber,
-        isPhoneVerified: isPhoneVerified,
+        isPhoneVerified: false, // Default to false since verification is not required
         role: role,
         createdAt: Timestamp.now(), // Use Firestore Timestamp instead of Date
         signupDate: Timestamp.now(), // Add signupDate as a backup

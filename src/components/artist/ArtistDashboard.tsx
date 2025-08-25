@@ -8,6 +8,7 @@ import { Alert, Image, Modal, ScrollView, StatusBar, StyleSheet, Text, TextInput
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchServicesByArtistId } from '../../firebase/artistServices';
 import { addServiceToFirebase, addTicketToFirebase, fetchArtistById } from '../../firebase/artistsService';
+import AnalyticsPage from './AnalyticsPage';
 import { useArtistStore } from './ArtistStore';
 import CalendarPage from './CalendarPage';
 
@@ -158,7 +159,7 @@ const ArtistMobileApp = () => {
   const [serviceOptions, setServiceOptions] = useState([
     { title: '', price: '', description: '' }
   ]);
-  const [serviceLocation, setServiceLocation] = useState('');
+  const [serviceLocation, setServiceLocation] = useState({ city: '' });
   const [addOns, setAddOns] = useState([
     { name: '', price: '', type: 'checkbox' },
   ]);
@@ -217,6 +218,14 @@ const ArtistMobileApp = () => {
     setAddOns(updated);
   };
 
+  // Improve error handling
+  const getErrorMessage = (error: unknown): string => {
+    if (typeof error === 'object' && error !== null && 'message' in error) {
+      return (error as { message: string }).message;
+    }
+    return 'An unknown error occurred.';
+  };
+
   const addService = async () => {
     const auth = getAuth();
     const currentUser = auth.currentUser;
@@ -241,7 +250,15 @@ const ArtistMobileApp = () => {
       Alert.alert('Error', 'Please fill in all required fields.');
       return;
     }
-    const serviceData = {
+    // Validate basePrice
+    if (!newService.basePrice || isNaN(Number(newService.basePrice))) {
+      setServiceError('Service price is required and must be a valid number.');
+      Alert.alert('Error', 'Service price is required and must be a valid number.');
+      return;
+    }
+
+    // Log serviceData for debugging
+    console.log('Constructed serviceData:', {
       title: newService.title,
       description: newService.description,
       category: selectedCategory.name,
@@ -253,7 +270,35 @@ const ArtistMobileApp = () => {
         price: Number(opt.price),
         description: opt.description,
       })),
-      location: serviceLocation,
+      location: serviceLocation.city || 'Unknown City',
+      rating: 0,
+      reviewCount: 0,
+      createdAt: new Date(),
+      artistId: currentUser.uid,
+    });
+
+    // Add missing properties to serviceData
+    const serviceData = {
+      title: newService.title,
+      description: newService.description,
+      category: selectedCategory.name,
+      basePrice: Number(newService.basePrice),
+      price: Number(newService.basePrice), // Add price field for compatibility
+      images: serviceImages,
+      options: serviceOptions.map(opt => ({
+        id: Date.now().toString() + Math.random(),
+        title: opt.title,
+        price: Number(opt.price),
+        description: opt.description,
+      })),
+      location: serviceLocation.city || 'Unknown City',
+      city: serviceLocation.city || 'Unknown City',
+      items: serviceOptions.map(opt => ({
+        id: Date.now().toString() + Math.random(),
+        title: opt.title,
+        price: Number(opt.price),
+        description: opt.description,
+      })),
       rating: 0,
       reviewCount: 0,
       createdAt: new Date(),
@@ -304,12 +349,12 @@ const ArtistMobileApp = () => {
       });
       setServiceImages([]);
       setServiceOptions([{ title: '', price: '', description: '' }]);
-      setServiceLocation('');
+      setServiceLocation({ city: '' });
       setSelectedCategory(null);
     } catch (error) {
       setServiceError('Failed to add service to Firebase.');
       console.error('Failed to add service to Firebase:', error);
-      Alert.alert('Error', 'Failed to add service to Firebase: ' + (error?.message || error));
+      Alert.alert('Error', 'Failed to add service to Firebase: ' + getErrorMessage(error));
     }
   };
 
@@ -811,245 +856,24 @@ const OrderManagementPage = () => {
   );
 } // <-- Add this closing brace to end OrderManagementPage function
 
-
-  // Enhanced Analytics Page Component
-  const [analyticsFilter, setAnalyticsFilter] = useState<'all' | 'services' | 'tickets'>('all');
-  const [showDetails, setShowDetails] = useState(false);
-
-  // --- Analytics Calculations from Real Data ---
-  // Filter gigs by type (assuming 'ticket' or 'service' in category or a type field)
-  const filteredGigs = gigs.filter(gig => {
-    if (analyticsFilter === 'all') return true;
-    if (analyticsFilter === 'services') return gig.category && gig.category.toLowerCase() !== 'ticket';
-    if (analyticsFilter === 'tickets') return gig.category && gig.category.toLowerCase() === 'ticket';
-    return true;
-  });
-
-  // Orders from OrderManagementPage (simulate as global for now)
-  // In a real app, orders should come from a global store or backend
-  // We'll aggregate from all gigs if possible
-  const allOrders = gigs.flatMap((gig: any) => gig.orders || []);
-
-  // Total sales (number of gigs sold/orders)
-  const totalSales: number = allOrders.length;
-  // Total revenue (sum of all order prices)
-  const totalRevenue: number = allOrders.reduce((sum: number, o: any) => sum + (o.price || 0), 0);
-  // Active customers (unique client names)
-  const activeCustomers: number = Array.from(new Set(allOrders.map((o: any) => o.clientName))).length;
-  // Average rating (from gigs)
-  const ratings: number[] = gigs.map((g: any) => g.rating).filter((r: any) => typeof r === 'number');
-  const avgRating: string = ratings.length ? (ratings.reduce((a: number, b: number) => a + b, 0) / ratings.length).toFixed(1) : 'N/A';
-  // Conversion rate (orders/gigs, as a placeholder)
-  const conversionRate: string = gigs.length ? ((allOrders.length / gigs.length) * 100).toFixed(1) + '%' : '0%';
-  // Average order value
-  const avgOrderValue: string = allOrders.length ? (totalRevenue / allOrders.length).toFixed(2) : '0.00';
-
-  // Revenue trend (last 6 months)
-  const now = new Date();
-  const months = Array.from({length: 6}, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1);
-    return d;
-  });
-  const revenueByMonth: number[] = months.map(month => {
-    const monthOrders = allOrders.filter((o: any) => {
-      if (!o.date) return false;
-      const d = new Date(o.date);
-      return d.getFullYear() === month.getFullYear() && d.getMonth() === month.getMonth();
-    });
-    return monthOrders.reduce((sum: number, o: any) => sum + (o.price || 0), 0);
-  });
-
-  // Most popular service/ticket
-  const serviceSales: Record<string, number> = {};
-  const ticketSales: Record<string, number> = {};
-  allOrders.forEach((o: any) => {
-    if (o.type === 'service') {
-      serviceSales[o.service] = (serviceSales[o.service] || 0) + 1;
-    } else if (o.type === 'ticket') {
-      ticketSales[o.ticketType] = (ticketSales[o.ticketType] || 0) + (o.quantity || 1);
-    }
-  });
-  const mostPopularService = Object.entries(serviceSales as Record<string, number>).sort((a, b) => b[1] - a[1])[0];
-  const mostPopularTicket = Object.entries(ticketSales as Record<string, number>).sort((a, b) => b[1] - a[1])[0];
-
-  // Recent orders (last 3)
-  const recentOrders = allOrders.slice(-3).reverse();
-
-  // Popular events (top gig by orders)
-  const eventSales = gigs.map((gig: any) => ({
-    gig,
-    sales: gig.orders ? gig.orders.length : 0,
-    revenue: gig.orders ? gig.orders.reduce((sum: number, o: any) => sum + (o.price || 0), 0) : 0
-  })).sort((a, b) => b.sales - a.sales);
-  const popularEvent = eventSales[0];
-
-  const AnalyticsPage = () => (
-    <ScrollView style={[styles.container, { paddingTop: insets.top }]}> 
-      {/* Filter Options */}
-      <View style={{flexDirection:'row',justifyContent:'center',marginBottom:18}}>
-        {['all','services','tickets'].map(opt => (
-          <TouchableOpacity
-            key={opt}
-            style={{
-              backgroundColor: analyticsFilter === opt ? '#6a0dad' : '#fff',
-              paddingVertical:10,paddingHorizontal:22,borderRadius:22,marginHorizontal:6,
-              borderWidth:1,
-              borderColor: analyticsFilter === opt ? '#6a0dad' : '#e0e0e0',
-              shadowColor: analyticsFilter === opt ? '#6a0dad' : '#000',
-              shadowOpacity: analyticsFilter === opt ? 0.15 : 0.05,
-              shadowRadius: 4,
-              elevation: analyticsFilter === opt ? 3 : 1,
-            }}
-            onPress={() => setAnalyticsFilter(opt as any)}
-            activeOpacity={0.85}
-          >
-            <Text style={{color: analyticsFilter === opt ? 'white' : '#6a0dad',fontWeight:'bold',fontSize:15}}>
-              {opt.charAt(0).toUpperCase() + opt.slice(1)}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-      {/* Overview Stats */}
-      <View style={{
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        justifyContent: 'center',
-        marginBottom: 18,
-      }}>
-        {/* Stat boxes with real data */}
-        <View style={[styles.statCard, {alignItems:'center',backgroundColor:'#fff',borderRadius:16,margin:8,minWidth:'44%',maxWidth:'44%',flexBasis:'44%',elevation:2,shadowColor:'#6a0dad',shadowOpacity:0.08,shadowRadius:8}]}> 
-          <View style={styles.statIconContainer}><Ionicons name="ticket" size={24} color="#6a0dad" /></View>
-          <Text style={styles.statNumber}>{totalSales}</Text>
-          <Text style={styles.statLabel}>{`Total ${analyticsFilter === 'services' ? 'Services' : analyticsFilter === 'tickets' ? 'Tickets' : 'Sales'}`}</Text>
-        </View>
-        <View style={[styles.statCard, {alignItems:'center',backgroundColor:'#fff',borderRadius:16,margin:8,minWidth:'44%',maxWidth:'44%',flexBasis:'44%',elevation:2,shadowColor:'#6a0dad',shadowOpacity:0.08,shadowRadius:8}]}> 
-          <View style={styles.statIconContainer}><Ionicons name="cash" size={24} color="#4CAF50" /></View>
-          <Text style={styles.statNumber}>{`$${totalRevenue}`}</Text>
-          <Text style={styles.statLabel}>Total Revenue</Text>
-        </View>
-        <View style={[styles.statCard, {alignItems:'center',backgroundColor:'#fff',borderRadius:16,margin:8,minWidth:'44%',maxWidth:'44%',flexBasis:'44%',elevation:2,shadowColor:'#6a0dad',shadowOpacity:0.08,shadowRadius:8}]}> 
-          <View style={styles.statIconContainer}><Ionicons name="people" size={24} color="#2196F3" /></View>
-          <Text style={styles.statNumber}>{activeCustomers}</Text>
-          <Text style={styles.statLabel}>Active Customers</Text>
-        </View>
-        <View style={[styles.statCard, {alignItems:'center',backgroundColor:'#fff',borderRadius:16,margin:8,minWidth:'44%',maxWidth:'44%',flexBasis:'44%',elevation:2,shadowColor:'#6a0dad',shadowOpacity:0.08,shadowRadius:8}]}> 
-          <View style={styles.statIconContainer}><Ionicons name="star" size={24} color="#FFC107" /></View>
-          <Text style={styles.statNumber}>{avgRating}</Text>
-          <Text style={styles.statLabel}>Average Rating</Text>
-        </View>
-        <View style={[styles.statCard, {alignItems:'center',backgroundColor:'#fff',borderRadius:16,margin:8,minWidth:'44%',maxWidth:'44%',flexBasis:'44%',elevation:2,shadowColor:'#6a0dad',shadowOpacity:0.08,shadowRadius:8}]}> 
-          <View style={styles.statIconContainer}><Ionicons name="trending-up" size={24} color="#00b894" /></View>
-          <Text style={styles.statNumber}>{conversionRate}</Text>
-          <Text style={styles.statLabel}>Conversion Rate</Text>
-        </View>
-        <View style={[styles.statCard, {alignItems:'center',backgroundColor:'#fff',borderRadius:16,margin:8,minWidth:'44%',maxWidth:'44%',flexBasis:'44%',elevation:2,shadowColor:'#6a0dad',shadowOpacity:0.08,shadowRadius:8}]}> 
-          <View style={styles.statIconContainer}><Ionicons name="pricetag" size={24} color="#fdcb6e" /></View>
-          <Text style={styles.statNumber}>{`$${avgOrderValue}`}</Text>
-          <Text style={styles.statLabel}>Avg. Order Value</Text>
-        </View>
-      </View>
-      <View style={{height:1,backgroundColor:'#eee',marginVertical:10}} />
-      {/* Revenue Trend Chart */}
-      <View style={[styles.sectionCard, {marginBottom:18, shadowColor:'#6a0dad', shadowOpacity:0.08, shadowRadius:8, elevation:2}]}> 
-        <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
-          <Text style={[styles.sectionTitle, {fontSize:17}]}>Revenue Trend (Last 6 Months)</Text>
-          <TouchableOpacity onPress={()=>setShowDetails(v=>!v)}>
-            <Text style={{color:'#6a0dad',fontWeight:'bold',fontSize:14}}>{showDetails ? 'Hide Details' : 'Show Details'}</Text>
-          </TouchableOpacity>
-        </View>
-        <View style={[styles.chartContainer, {paddingVertical:8}]}> 
-          {revenueByMonth.map((h, i) => (
-            <View key={i} style={[styles.chartBar, {marginHorizontal:4}]}> 
-              <View style={{
-                height: `${h / Math.max(...revenueByMonth, 1) * 100}%`,
-                backgroundColor: i === revenueByMonth.length - 1 ? '#00b894' : '#6a0dad',
-                borderTopLeftRadius: 8,
-                borderTopRightRadius: 8,
-                shadowColor: '#6a0dad',
-                shadowOpacity: 0.12,
-                shadowRadius: 4,
-                elevation: 2,
-                width: 22,
-                alignSelf:'center',
-              }} />
-              <Text style={[styles.chartLabel, {fontSize:12,marginTop:4}]}>{months[i].toLocaleString('default', { month: 'short' })}</Text>
-            </View>
-          ))}
-        </View>
-        {showDetails && (
-          <View style={{marginTop:12}}>
-            <Text style={{color:'#888',fontSize:13,marginBottom:2}}>Highest: ${Math.max(...revenueByMonth)} • Lowest: ${Math.min(...revenueByMonth)}</Text>
-            <Text style={{color:'#888',fontSize:13}}>Growth: {revenueByMonth[0] ? `+${(((revenueByMonth[revenueByMonth.length-1] - revenueByMonth[0]) / revenueByMonth[0]) * 100).toFixed(1)}%` : 'N/A'} since {months[0].toLocaleString('default', { month: 'short' })}</Text>
-          </View>
-        )}
-      </View>
-      <View style={{height:1,backgroundColor:'#eee',marginVertical:10}} />
-      {/* Most Popular Service/Ticket */}
-      <View style={[styles.sectionCard, {marginBottom:18, shadowColor:'#6a0dad', shadowOpacity:0.08, shadowRadius:8, elevation:2}]}> 
-        <Text style={[styles.sectionTitle, {fontSize:17,marginBottom:8}]}>Most Popular</Text>
-        {mostPopularService && (
-          <View style={{flexDirection:'row',alignItems:'center',marginBottom:12}}>
-            <Ionicons name="musical-notes" size={22} color="#6a0dad" style={{marginRight:8}} />
-            <Text style={{fontWeight:'bold',fontSize:15}}>{mostPopularService[0]}</Text>
-            <Text style={{marginLeft:8,color:'#888',fontSize:13}}>• {mostPopularService[1]} sales</Text>
-          </View>
-        )}
-        {mostPopularTicket && (
-          <View style={{flexDirection:'row',alignItems:'center'}}>
-            <Ionicons name="ticket" size={22} color="#fdcb6e" style={{marginRight:8}} />
-            <Text style={{fontWeight:'bold',fontSize:15}}>{mostPopularTicket[0]}</Text>
-            <Text style={{marginLeft:8,color:'#888',fontSize:13}}>• {mostPopularTicket[1]} sold</Text>
-          </View>
-        )}
-      </View>
-      <View style={{height:1,backgroundColor:'#eee',marginVertical:10}} />
-      {/* Recent Orders/Sales */}
-      <View style={[styles.sectionCard, {marginBottom:18, shadowColor:'#6a0dad', shadowOpacity:0.08, shadowRadius:8, elevation:2}]}> 
-        <Text style={[styles.sectionTitle, {fontSize:17,marginBottom:8}]}>Recent Orders</Text>
-        <View style={{marginBottom:12}}>
-          {recentOrders.map((order, idx) => (
-            <View key={idx} style={{flexDirection:'row',alignItems:'center',marginBottom:8}}>
-              <Ionicons name="person" size={18} color="#6a0dad" style={{marginRight:6}} />
-              <Text style={{fontWeight:'bold',fontSize:14}}>{order.clientName}</Text>
-              <Text style={{marginLeft:8,color:'#888',fontSize:13}}>{order.type === 'service' ? `${order.service} • $${order.price}` : `${order.ticketType} • $${order.price}`}</Text>
-              <Text style={{marginLeft:8,color:order.status === 'accepted' ? '#34c759' : order.status === 'pending' ? '#ff9500' : '#ff3b30',fontSize:13}}>{order.status.charAt(0).toUpperCase() + order.status.slice(1)}</Text>
-            </View>
-          ))}
-        </View>
-        <TouchableOpacity style={{alignSelf:'flex-end',padding:8}}>
-          <Text style={{color:'#6a0dad',fontWeight:'bold',fontSize:14}}>View All</Text>
-        </TouchableOpacity>
-      </View>
-      <View style={{height:1,backgroundColor:'#eee',marginVertical:10}} />
-      {/* Popular Events */}
-      <View style={[styles.sectionCard, {marginBottom:24, shadowColor:'#6a0dad', shadowOpacity:0.08, shadowRadius:8, elevation:2}]}> 
-        <Text style={[styles.sectionTitle, {fontSize:17,marginBottom:8}]}>Popular Events</Text>
-        {popularEvent && (
-          <View style={styles.popularEventCard}>
-            <Image 
-              source={{ uri: popularEvent.gig.images && popularEvent.gig.images[0] ? popularEvent.gig.images[0] : 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3' }}
-              style={styles.popularEventImage}
-            />
-            <View style={styles.popularEventInfo}>
-              <Text style={[styles.popularEventTitle, {fontSize:15}]}>{popularEvent.gig.title}</Text>
-              <Text style={[styles.popularEventStats, {fontSize:13}]}>{popularEvent.sales} tickets sold • ${popularEvent.revenue} revenue</Text>
-            </View>
-          </View>
-        )}
-      </View>
-    </ScrollView>
-  );
-
   // Settings Page Component
   const SettingsPage = () => {
     const router = useRouter();
+
+    // Update settingsPaths to match expo-router structure
+    const settingsPaths = {
+      profile: '/(artist)/settings/profile' as const,
+      notifications: '/(artist)/settings/notifications' as const,
+      payment: '/(artist)/settings/payment' as const,
+      language: '/(artist)/settings/language' as const,
+    };
 
     return (
       <ScrollView style={[styles.container, { paddingTop: insets.top }]}> 
         {/* Profile Settings */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Profile Settings</Text>
-          <TouchableOpacity style={styles.settingItem} onPress={() => router.push('/artist/settings/profile')}>
+          <TouchableOpacity style={styles.settingItem} onPress={() => router.push(settingsPaths.profile)}>
             <Ionicons name="person" size={24} color="#6a0dad" />
             <View style={styles.settingInfo}>
               <Text style={styles.settingLabel}>Edit Profile</Text>
@@ -1057,7 +881,7 @@ const OrderManagementPage = () => {
             </View>
             <Ionicons name="chevron-forward" size={24} color="#666" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.settingItem} onPress={() => router.push('/artist/settings/notifications')}>
+          <TouchableOpacity style={styles.settingItem} onPress={() => router.push(settingsPaths.notifications)}>
             <Ionicons name="notifications" size={24} color="#6a0dad" />
             <View style={styles.settingInfo}>
               <Text style={styles.settingLabel}>Notifications</Text>
@@ -1069,7 +893,7 @@ const OrderManagementPage = () => {
         {/* Account Settings */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Account Settings</Text>
-          <TouchableOpacity style={styles.settingItem} onPress={() => router.push('/artist/settings/payment')}>
+          <TouchableOpacity style={styles.settingItem} onPress={() => router.push(settingsPaths.payment)}>
             <Ionicons name="card" size={24} color="#6a0dad" />
             <View style={styles.settingInfo}>
               <Text style={styles.settingLabel}>Payment Methods</Text>
@@ -1081,7 +905,7 @@ const OrderManagementPage = () => {
         {/* App Settings */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>App Settings</Text>
-          <TouchableOpacity style={styles.settingItem} onPress={() => router.push('/artist/settings/language')}>
+          <TouchableOpacity style={styles.settingItem} onPress={() => router.push(settingsPaths.language)}>
             <Ionicons name="language" size={24} color="#6a0dad" />
             <View style={styles.settingInfo}>
               <Text style={styles.settingLabel}>Language</Text>
@@ -1136,7 +960,7 @@ const OrderManagementPage = () => {
           );
         }
       case 'analytics':
-        return <AnalyticsPage />;
+        return <AnalyticsPage gigs={gigs} />;
       case 'settings':
         return <SettingsPage />;
       default:
@@ -1829,7 +1653,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#34c759',
     flexDirection: 'row',
-    alignItems: 'center',
+       alignItems: 'center',
     justifyContent: 'center',
     padding: 12,
     borderRadius: 8,
@@ -1903,7 +1727,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderRadius: 12,
-    marginBottom: 8,
+       marginBottom: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,

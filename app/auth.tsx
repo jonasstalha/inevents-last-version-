@@ -235,13 +235,17 @@ export default function AuthScreen() {
       const adminPassword = 'admin123456';
       const adminName = 'System Administrator';
       
-      console.log('Checking admin account...');
-      await register(adminEmail, adminPassword, adminName, '', true, 'admin');
+      console.log('🔧 Creating/checking admin account...');
+      console.log('📧 Admin email:', adminEmail);
+      console.log('👤 Admin role: admin');
+      
+      await register(adminEmail, adminPassword, adminName, '', false, 'admin');
       console.log('✅ Admin account created successfully');
       
     } catch (error: any) {
       if (error.message && error.message.includes('auth/email-already-in-use')) {
         console.log('✅ Admin account already exists and ready');
+        console.log('📧 You can login with: admin@inevents.com / admin123456');
       } else {
         console.log('⚠️ Admin account setup issue:', error.message);
       }
@@ -271,12 +275,23 @@ export default function AuthScreen() {
         if (userRole) {
           console.log(`✅ Login successful! User role: ${userRole}`);
           
-          // Navigate based on role
+          // Navigate based on role with additional debugging
           if (userRole === 'admin') {
-            router.replace('/(admin)');
+            console.log('🔄 Redirecting to admin panel: /(admin)');
+            Alert.alert('Admin Login', 'Welcome Admin! Redirecting to admin panel...', [
+              { 
+                text: 'Go to Admin Panel', 
+                onPress: () => {
+                  console.log('🚀 Manually navigating to admin panel');
+                  router.replace('/(admin)');
+                }
+              }
+            ]);
           } else if (userRole === 'artist') {
+            console.log('🔄 Redirecting to artist panel: /(artist)');
             router.replace('/(artist)');
           } else {
+            console.log('🔄 Redirecting to client panel: /(client)');
             router.replace('/(client)');
           }
         }
@@ -298,12 +313,15 @@ export default function AuthScreen() {
         
         console.log(`✅ Registration successful! User role: ${userRole}`);
         
-        // Navigate based on role
+        // Navigate based on role with debugging
         if (userRole === 'admin') {
+          console.log('🔄 Redirecting new admin to admin panel: /(admin)');
           router.replace('/(admin)');
         } else if (userRole === 'artist') {
+          console.log('🔄 Redirecting new artist to artist panel: /(artist)');
           router.replace('/(artist)');
         } else {
+          console.log('🔄 Redirecting new client to client panel: /(client)');
           router.replace('/(client)');
         }
       }

@@ -20,9 +20,9 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { useArtistStore } from './ArtistStore';
 import { useAuth } from '../../context/AuthContext';
-import { addTicketToFirebase, addServiceToFirebase } from '../../firebase/artistsService';
+import { addServiceToFirebase, addTicketToFirebase } from '../../firebase/artistsService';
+import { useArtistStore } from './ArtistStore';
 
 // Only import MapView and Marker if not on web
 let MapView: any = () => null;
@@ -55,9 +55,9 @@ export default function Ticket() {
     description: '',
     flyer: '',
     ticketTypes: [
-      { type: 'Normal', price: '' },
-      { type: 'VIP', price: '' },
-      { type: 'VVIP', price: '' },
+      { type: 'Normal', price: '', quantity: '' },
+      { type: 'VIP', price: '', quantity: '' },
+      { type: 'VVIP', price: '', quantity: '' },
     ],
   });
 
@@ -96,37 +96,54 @@ export default function Ticket() {
   const [categoriesError, setCategoriesError] = useState('');
 
   useEffect(() => {
-    // Fetch categories from real backend endpoint (replace with your real API)
     const fetchCategories = async () => {
       setCategoriesLoading(true);
       setCategoriesError('');
       try {
-        // Example: fetch from a real backend endpoint
-        // NOTE: Replace with your actual backend endpoint for categories
-        const response = await fetch('https://your-backend.com/api/categories');
-        if (!response.ok) throw new Error('Failed to fetch categories');
-        const data = await response.json();
-        // Ensure data is an array of { id, name, icon? }
-        setCategories(Array.isArray(data) ? data : []);
-      } catch (err: any) {
+        // Define separate categories for tickets and services
+        const ticketCategories = [
+  { id: 'music', name: 'Music', icon: 'musical-notes' },
+  { id: 'theater', name: 'Theater', icon: 'film' },
+  { id: 'comedy', name: 'Comedy', icon: 'happy' },
+  { id: 'sports', name: 'Sports', icon: 'basketball' },
+  { id: 'concerts', name: 'Concerts', icon: 'mic' },
+  { id: 'festivals', name: 'Festivals', icon: 'star' },
+  { id: 'education', name: 'Education', icon: 'school' },
+  { id: 'family', name: 'Family & Leisure', icon: 'people' },
+        ];
+
+        const serviceCategories = [
+    { id: 'Mariage', name: 'Mariage', icon: 'heart' },
+    { id: 'Anniversaire', name: 'Anniversaire', icon: 'gift' },
+    { id: 'Traiteur', name: 'Traiteur', icon: 'restaurant' },
+    { id: 'Musique', name: 'Musique', icon: 'musical-notes' },
+    { id: 'Neggafa', name: 'Neggafa', icon: 'person' },
+    { id: 'Conference', name: 'Conference', icon: 'business' },
+    { id: 'Evenement d\'entreprise', name: 'Evenement d\'entreprise', icon: 'people' },
+    { id: 'Kermesse', name: 'Kermesse', icon: 'happy' },
+    { id: 'Henna', name: 'Henna', icon: 'flower' },
+    { id: 'Photographie', name: 'Photographie', icon: 'camera' },
+    { id: 'Animation', name: 'Animation', icon: 'film' },
+    { id: 'Decoration', name: 'Decoration', icon: 'color-palette' },
+    { id: 'Buffet', name: 'Buffet', icon: 'restaurant' },
+        ];
+
+        // Set categories based on the active tab
+        if (activeTab === 'createTicket') {
+          setCategories(ticketCategories);
+        } else {
+          setCategories(serviceCategories);
+        }
+      } catch (err) {
+        console.error('Error fetching categories:', err);
         setCategoriesError('Could not load categories.');
-        // Fallback to static if needed
-        setCategories([
-          { id: 'musique', name: 'Musique', icon: 'musical-notes' },
-          { id: 'theatre', name: 'Theatre', icon: 'film' },
-          { id: 'comedie', name: 'Comedie', icon: 'happy' },
-          { id: 'sport', name: 'Sport', icon: 'basketball' },
-          { id: 'concert', name: 'Concert', icon: 'mic' },
-          { id: 'festival', name: 'Festival', icon: 'star' },
-          { id: 'formation', name: 'Formation', icon: 'school' },
-          { id: 'famille', name: 'Famille & Loisirs', icon: 'people' },
-        ]);
       } finally {
         setCategoriesLoading(false);
       }
     };
+
     fetchCategories();
-  }, []);
+  }, [activeTab]);
 
   // --- IMAGE PICKER ---
   const pickImage = async (forService = false) => {
@@ -210,9 +227,9 @@ export default function Ticket() {
     const items = serviceForm.items.filter((_, i) => i !== idx);
     setServiceForm({ ...serviceForm, items });
   };
-  const handleTicketTypeChange = (idx: number, value: string) => {
+  const handleTicketTypeChange = (idx: number, key: 'price' | 'quantity', value: string) => {
     const ticketTypes = [...form.ticketTypes];
-    ticketTypes[idx].price = value;
+    ticketTypes[idx][key] = value;
     setForm({ ...form, ticketTypes });
   };
 
@@ -269,7 +286,19 @@ export default function Ticket() {
     setServiceSubmitting(true);
     try {
       if (!user?.id) throw new Error('User not authenticated');
-      await addServiceToFirebase(user.id, serviceForm);
+      
+      // Add a base price for the service - use the first item's price or 0
+      const basePrice = serviceForm.items.length > 0 && serviceForm.items[0].price 
+        ? parseFloat(serviceForm.items[0].price) || 0 
+        : 0;
+      
+      const serviceDataWithPrice = {
+        ...serviceForm,
+        price: basePrice,
+        basePrice: basePrice
+      };
+      
+      await addServiceToFirebase(user.id, serviceDataWithPrice);
       setServiceForm({
         title: '',
         city: '',
@@ -626,7 +655,16 @@ export default function Ticket() {
                 placeholder={`Price for ${tt.type}`}
                 placeholderTextColor="#a1a1aa"
                 value={tt.price}
-                onChangeText={v => handleTicketTypeChange(idx, v.replace(/[^0-9]/g, ''))}
+                onChangeText={v => handleTicketTypeChange(idx, 'price', v.replace(/[^0-9]/g, ''))}
+                keyboardType="numeric"
+                maxLength={6}
+              />
+              <TextInput
+                style={[styles.textInput, { flex: 1, marginLeft: 8 }]}
+                placeholder={`Quantity`}
+                placeholderTextColor="#a1a1aa"
+                value={tt.quantity}
+                onChangeText={v => handleTicketTypeChange(idx, 'quantity', v.replace(/[^0-9]/g, ''))}
                 keyboardType="numeric"
                 maxLength={6}
               />
@@ -722,6 +760,34 @@ export default function Ticket() {
       </KeyboardAvoidingView>
     </>
   );
+}
+
+// Define the TicketType interface to include quantity
+interface TicketType {
+  type: string;
+  price: string;
+  quantity: number;
+}
+
+// Helper function to map Ionicons names to Feather icon names
+function mapIconName(ioniconsName: string): string {
+  const iconMap: Record<string, string> = {
+    'heart': 'heart',
+    'gift': 'gift',
+    'restaurant': 'coffee',
+    'musical-notes': 'music',
+    'person': 'user',
+    'business': 'briefcase',
+    'people': 'users',
+    'happy': 'smile',
+    'flower': 'award', // No direct equivalent in Feather
+    'camera': 'camera',
+    'film': 'film',
+    'color-palette': 'award', // No direct equivalent in Feather
+    // Add more mappings as needed
+  };
+
+  return iconMap[ioniconsName] || 'circle'; // Default to 'circle' if no mapping exists
 }
 
 const styles = StyleSheet.create({

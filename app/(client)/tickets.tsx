@@ -112,14 +112,14 @@ const dummyTickets: Ticket[] = [
 ];
 
 const categories = [
-  { id: 'musique', name: 'Musique', icon: 'musical-notes' },
-  { id: 'theatre', name: 'Theatre', icon: 'film' },
-  { id: 'comedie', name: 'Comedie', icon: 'happy' },
-  { id: 'sport', name: 'Sport', icon: 'basketball' },
-  { id: 'concert', name: 'Concert', icon: 'mic' },
-  { id: 'festival', name: 'Festival', icon: 'star' },
-  { id: 'formation', name: 'Formation', icon: 'school' },
-  { id: 'famille', name: 'Famille & Loisirs', icon: 'people' },
+  { id: 'music', name: 'Music', icon: 'musical-notes' },
+  { id: 'theater', name: 'Theater', icon: 'film' },
+  { id: 'comedy', name: 'Comedy', icon: 'happy' },
+  { id: 'sports', name: 'Sports', icon: 'basketball' },
+  { id: 'concerts', name: 'Concerts', icon: 'mic' },
+  { id: 'festivals', name: 'Festivals', icon: 'star' },
+  { id: 'education', name: 'Education', icon: 'school' },
+  { id: 'family', name: 'Family & Leisure', icon: 'people' },
 ];
 
 const formatDate = (dateString: string) => {

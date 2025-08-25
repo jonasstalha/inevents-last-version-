@@ -198,3 +198,16 @@ export const deleteServiceWithImages = async (
     throw error;
   }
 };
+
+// Fetch all orders for a given artist
+export const fetchOrdersByArtistId = async (artistId: string): Promise<any[]> => {
+  const db = getFirestore();
+  const ordersRef = collection(db, 'users', artistId, 'orders');
+  const q = query(ordersRef);
+  const querySnapshot = await getDocs(q);
+  const orders: any[] = [];
+  querySnapshot.forEach((doc) => {
+    orders.push({ id: doc.id, ...doc.data() });
+  });
+  return orders;
+};

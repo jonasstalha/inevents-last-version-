@@ -17,6 +17,8 @@ export interface Artist extends User {
   categories: string[];
   location: string;
   featured: boolean;
+  activeCustomers?: number; // Total active customers
+  conversionRate?: string; // Conversion rate for analytics
 }
 
 export interface Client extends User {
@@ -46,6 +48,9 @@ export interface Gig {
   image?: string; // Single image path for search screen
   providerName?: string; // Name of the service provider
   ordersCount?: number; // Number of orders
+  sales?: number; // Total sales for the gig
+  revenue?: number; // Total revenue for the gig
+  type?: 'service' | 'ticket' | 'event'; // Type of the gig
 }
 
 // Input type for creating or updating a gig/service

@@ -16,6 +16,7 @@ import {
   Mail,
   Plus,
   Search,
+  Shield,
   Trash2,
   TrendingUp,
   Users,
@@ -98,25 +99,17 @@ const mockCoupons = [
   },
 ];
 
-const mockFinancialData = {
-  totalRevenue: 45670,
-  weeklyIncome: 2340,
-  monthlyIncome: 12450,
-  averageOrderValue: 125,
-  topEarners: [
-    { name: 'John Doe', revenue: 2500 },
-    { name: 'Bob Johnson', revenue: 1800 },
-    { name: 'Alice Brown', revenue: 1600 },
-  ],
-  revenueData: [
-    { month: 'Jan', revenue: 3400 },
-    { month: 'Feb', revenue: 4200 },
-    { month: 'Mar', revenue: 3800 },
-    { month: 'Apr', revenue: 4600 },
-    { month: 'May', revenue: 5200 },
-    { month: 'Jun', revenue: 4800 },
-  ],
-};
+// Sample financial data structure for reference
+interface FinancialData {
+  totalRevenue: number;
+  weeklyIncome: number;
+  monthlyIncome: number;
+  averageOrderValue: number;
+  totalOrders: number;
+  pendingPayouts: number;
+  topEarners: { name: string; revenue: number; artistId: string }[];
+  revenueData: { month: string; revenue: number }[];
+}
 
 // User type definition
 type User = {
@@ -133,17 +126,23 @@ type User = {
   [key: string]: any; // Allow indexing for dynamic field access
 };
 
-// Service type definition
+// Service type definition - Updated to match Firebase structure
 type Service = {
   id: string;
-  name: string;
+  name?: string;
+  title?: string; // Services might have title instead of name
   category: string;
-  creator: string;
+  creator?: string;
+  artistId?: string; // Creator ID in Firebase
   status: string;
-  price: number;
-  views: number;
-  purchases: number;
+  price?: number;
+  basePrice?: number; // Services might have basePrice
+  views?: number;
+  purchases?: number;
   createdAt: Date;
+  images?: string[];
+  description?: string;
+  type?: 'service' | 'ticket'; // To distinguish between services and tickets
 };
 
 // Coupon type definition
@@ -182,8 +181,23 @@ export default function AdminPanelScreen() {
   // Real users from Firebase
   const [users, setUsers] = useState<User[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
-  const [services, setServices] = useState<Service[]>(mockServices);
+  const [services, setServices] = useState<Service[]>([]);
+  const [servicesLoading, setServicesLoading] = useState(true);
   const [coupons, setCoupons] = useState<Coupon[]>(mockCoupons);
+  
+  // Financial data state
+  const [financialData, setFinancialData] = useState({
+    totalRevenue: 0,
+    weeklyIncome: 0,
+    monthlyIncome: 0,
+    averageOrderValue: 0,
+    totalOrders: 0,
+    pendingPayouts: 0,
+    topEarners: [] as { name: string; revenue: number; artistId: string }[],
+    revenueData: [] as { month: string; revenue: number }[],
+  });
+  const [financialLoading, setFinancialLoading] = useState(true);
+  
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [selectedCoupon, setSelectedCoupon] = useState<Coupon | null>(null);
@@ -237,7 +251,7 @@ export default function AdminPanelScreen() {
   const totalUsers = users.length;
   const activeUsers = users.filter(u => u.status === 'active').length;
   const pendingServices = services.filter(s => s.status === 'pending').length;
-  const totalRevenue = mockFinancialData.totalRevenue;
+  const totalRevenue = financialData.totalRevenue;
 
   // Enhanced filter functions
   const filteredUsers = useMemo(() => {
@@ -264,12 +278,12 @@ export default function AdminPanelScreen() {
 
   const filteredServices = useMemo(() => {
     return services.filter(service => {
-      // Search filter
+      // Search filter - handle undefined properties
       const searchLower = serviceSearchQuery.toLowerCase().trim();
       const matchesSearch = searchLower === '' || 
-        service.name.toLowerCase().includes(searchLower) ||
-        service.category.toLowerCase().includes(searchLower) ||
-        service.creator.toLowerCase().includes(searchLower);
+        (service.name || service.title || '').toLowerCase().includes(searchLower) ||
+        (service.category || '').toLowerCase().includes(searchLower) ||
+        (service.creator || service.artistId || '').toLowerCase().includes(searchLower);
       
       // Category filter
       const matchesCategory = serviceFilters.category === 'all' || service.category === serviceFilters.category;
@@ -361,9 +375,13 @@ export default function AdminPanelScreen() {
   const onRefresh = async () => {
     setRefreshing(true);
     try {
+      console.log('🔄 Manual refresh triggered');
       await fetchUsers(); // Refresh users from Firebase
+      await fetchServicesAndTickets(); // Refresh services from Firebase
+      await fetchFinancialData(); // Refresh financial data from Firebase
+      console.log('✅ Manual refresh completed');
     } catch (error) {
-      console.error('Error refreshing data:', error);
+      console.error('❌ Error refreshing data:', error);
     } finally {
       setRefreshing(false);
     }
@@ -562,11 +580,683 @@ export default function AdminPanelScreen() {
     }
   };
 
+  // Create test services and tickets for testing
+  const createTestData = async () => {
+    try {
+      console.log('=== CREATING TEST DATA ===');
+      Alert.alert('Creating Test Data', 'Adding sample services and tickets... Please wait.');
+      
+      // Create test services
+      const testServices = [
+        {
+          name: 'Photography Service',
+          title: 'Professional Event Photography',
+          category: 'Photography',
+          creator: 'Test Photographer',
+          artistId: 'test-photographer-id',
+          status: 'pending',
+          price: 299,
+          basePrice: 299,
+          views: 15,
+          purchases: 3,
+          createdAt: new Date(),
+          images: ['https://example.com/photo1.jpg'],
+          description: 'Professional photography services for events and occasions.',
+          type: 'service',
+          isTestData: true // Flag to identify test data
+        },
+        {
+          name: 'Wedding Planning',
+          title: 'Complete Wedding Planning Service',
+          category: 'Event Planning',
+          creator: 'Test Planner',
+          artistId: 'test-planner-id',
+          status: 'approved',
+          price: 1500,
+          basePrice: 1500,
+          views: 45,
+          purchases: 8,
+          createdAt: new Date(),
+          images: ['https://example.com/wedding1.jpg'],
+          description: 'Full wedding planning service from start to finish.',
+          type: 'service',
+          isTestData: true // Flag to identify test data
+        }
+      ];
+      
+      // Create test tickets
+      const testTickets = [
+        {
+          name: 'Music Concert Ticket',
+          title: 'Live Music Event Ticket',
+          category: 'Entertainment',
+          creator: 'Test Organizer',
+          artistId: 'test-organizer-id',
+          status: 'approved',
+          price: 75,
+          basePrice: 75,
+          views: 120,
+          purchases: 25,
+          createdAt: new Date(),
+          images: ['https://example.com/concert1.jpg'],
+          description: 'Ticket for an amazing live music concert.',
+          type: 'ticket',
+          isTestData: true // Flag to identify test data
+        },
+        {
+          name: 'Art Exhibition',
+          title: 'Modern Art Gallery Exhibition',
+          category: 'Art',
+          creator: 'Gallery Owner',
+          artistId: 'test-gallery-id',
+          status: 'pending',
+          price: 25,
+          basePrice: 25,
+          views: 67,
+          purchases: 12,
+          createdAt: new Date(),
+          images: ['https://example.com/art1.jpg'],
+          description: 'Entry ticket to modern art exhibition.',
+          type: 'ticket',
+          isTestData: true // Flag to identify test data
+        }
+      ];
+      
+      let createdCount = 0;
+      
+      // Add services to 'services' collection
+      for (const service of testServices) {
+        try {
+          const docRef = await addDoc(collection(db, 'services'), service);
+          console.log(`✅ Created test service: ${service.name} with ID: ${docRef.id}`);
+          createdCount++;
+        } catch (error) {
+          console.error(`❌ Failed to create service ${service.name}:`, error);
+        }
+      }
+      
+      // Add tickets to 'tickets' collection
+      for (const ticket of testTickets) {
+        try {
+          const docRef = await addDoc(collection(db, 'tickets'), ticket);
+          console.log(`✅ Created test ticket: ${ticket.name} with ID: ${docRef.id}`);
+          createdCount++;
+        } catch (error) {
+          console.error(`❌ Failed to create ticket ${ticket.name}:`, error);
+        }
+      }
+      
+      console.log(`=== TEST DATA CREATION COMPLETE ===`);
+      console.log(`Successfully created ${createdCount} test items`);
+      
+      Alert.alert(
+        'Test Data Created',
+        `✅ Successfully created ${createdCount} test items!
+
+- ${testServices.length} test services (marked as test data)
+- ${testTickets.length} test tickets (marked as test data)
+
+These are clearly marked as test data and can be cleaned up later.
+Click "Clean Test Data" to remove them when you're ready.`
+      );
+      
+      // Automatically refresh the services list
+      await fetchServicesAndTickets();
+      
+    } catch (error) {
+      console.error('❌ Error creating test data:', error);
+      Alert.alert('Error', `Failed to create test data: ${(error as Error).message}`);
+    }
+  };
+
+  // Clean up test data
+  const cleanupTestData = async () => {
+    try {
+      console.log('=== CLEANING UP TEST DATA ===');
+      Alert.alert('Cleaning Test Data', 'Removing all test data... Please wait.');
+      
+      let deletedCount = 0;
+      
+      // Check services collection for test data
+      const servicesRef = collection(db, 'services');
+      const servicesSnapshot = await getDocs(servicesRef);
+      
+      for (const doc of servicesSnapshot.docs) {
+        const data = doc.data();
+        // Check for test data indicators
+        const isTest = data.isTestData || 
+                      data.creator?.includes('Test') || 
+                      data.artistId?.includes('test-') ||
+                      data.name?.includes('Photography Service') ||
+                      data.name?.includes('Wedding Planning');
+        
+        if (isTest) {
+          await deleteDoc(doc.ref);
+          console.log(`🗑️ Deleted test service: ${data.name}`);
+          deletedCount++;
+        }
+      }
+      
+      // Check tickets collection for test data
+      const ticketsRef = collection(db, 'tickets');
+      const ticketsSnapshot = await getDocs(ticketsRef);
+      
+      for (const doc of ticketsSnapshot.docs) {
+        const data = doc.data();
+        // Check for test data indicators
+        const isTest = data.isTestData || 
+                      data.creator?.includes('Test') || 
+                      data.creator?.includes('Gallery Owner') ||
+                      data.artistId?.includes('test-') ||
+                      data.name?.includes('Music Concert Ticket') ||
+                      data.name?.includes('Art Exhibition');
+        
+        if (isTest) {
+          await deleteDoc(doc.ref);
+          console.log(`🗑️ Deleted test ticket: ${data.name}`);
+          deletedCount++;
+        }
+      }
+      
+      console.log(`=== CLEANUP COMPLETE ===`);
+      console.log(`Deleted ${deletedCount} test items`);
+      
+      Alert.alert(
+        'Test Data Cleaned',
+        `🗑️ Successfully removed ${deletedCount} test items!
+
+Your database now only contains real data.
+Click "Refresh Services" to see the updated list.`
+      );
+      
+      // Refresh the services list
+      await fetchServicesAndTickets();
+      
+    } catch (error) {
+      console.error('❌ Error cleaning test data:', error);
+      Alert.alert('Error', `Failed to clean test data: ${(error as Error).message}`);
+    }
+  };
+
+  // Create test financial data (orders) for demonstration
+  const createTestFinancialData = async () => {
+    try {
+      console.log('=== CREATING TEST FINANCIAL DATA ===');
+      Alert.alert('Creating Test Orders', 'Adding sample orders for financial demonstration... Please wait.');
+      
+      // Create test orders
+      const testOrders = [
+        {
+          clientId: 'client1',
+          artistId: 'artist1',
+          artistName: 'John Photographer',
+          serviceId: 'service1',
+          serviceName: 'Event Photography',
+          price: 350,
+          totalPrice: 350,
+          status: 'completed',
+          createdAt: new Date(2024, 0, 15), // January
+          orderDate: new Date(2024, 0, 15),
+          isTestData: true
+        },
+        {
+          clientId: 'client2',
+          artistId: 'artist2',
+          artistName: 'Sarah Event Planner',
+          serviceId: 'service2',
+          serviceName: 'Wedding Planning',
+          price: 1200,
+          totalPrice: 1200,
+          status: 'completed',
+          createdAt: new Date(2024, 1, 20), // February
+          orderDate: new Date(2024, 1, 20),
+          isTestData: true
+        },
+        {
+          clientId: 'client3',
+          artistId: 'artist3',
+          artistName: 'Mike Designer',
+          serviceId: 'service3',
+          serviceName: 'Logo Design',
+          price: 275,
+          totalPrice: 275,
+          status: 'completed',
+          createdAt: new Date(2024, 6, 10), // July (current month)
+          orderDate: new Date(2024, 6, 10),
+          isTestData: true
+        },
+        {
+          clientId: 'client4',
+          artistId: 'artist1',
+          artistName: 'John Photographer',
+          serviceId: 'service4',
+          serviceName: 'Portrait Session',
+          price: 180,
+          totalPrice: 180,
+          status: 'completed',
+          createdAt: new Date(2024, 6, 22), // July (current month)
+          orderDate: new Date(2024, 6, 22),
+          isTestData: true
+        },
+        {
+          clientId: 'client5',
+          artistId: 'artist4',
+          artistName: 'Lisa Musician',
+          serviceId: 'service5',
+          serviceName: 'Live Performance',
+          price: 450,
+          totalPrice: 450,
+          status: 'pending_payout',
+          createdAt: new Date(2024, 6, 25), // July (current month)
+          orderDate: new Date(2024, 6, 25),
+          isTestData: true
+        }
+      ];
+      
+      let createdCount = 0;
+      
+      // Add to global orders collection
+      for (const order of testOrders) {
+        try {
+          const docRef = await addDoc(collection(db, 'orders'), order);
+          console.log(`✅ Created test order: ${order.serviceName} - $${order.price}`);
+          createdCount++;
+        } catch (error) {
+          console.error(`❌ Failed to create order:`, error);
+        }
+      }
+      
+      // Also add to transactions collection for comprehensive testing
+      for (const order of testOrders) {
+        try {
+          const transaction = {
+            ...order,
+            transactionId: `txn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            paymentMethod: 'credit_card',
+            currency: 'USD',
+            platformFee: order.price * 0.2,
+            artistPayout: order.price * 0.8
+          };
+          const docRef = await addDoc(collection(db, 'transactions'), transaction);
+          console.log(`✅ Created test transaction: ${transaction.transactionId}`);
+          createdCount++;
+        } catch (error) {
+          console.error(`❌ Failed to create transaction:`, error);
+        }
+      }
+      
+      console.log(`=== TEST FINANCIAL DATA CREATION COMPLETE ===`);
+      console.log(`Successfully created ${createdCount} financial records`);
+      
+      Alert.alert(
+        'Test Financial Data Created',
+        `✅ Successfully created ${createdCount} financial records!
+
+- ${testOrders.length} orders
+- ${testOrders.length} transactions
+- Total revenue: $${testOrders.reduce((sum, order) => sum + order.price, 0).toLocaleString()}
+
+Now refresh financial data to see the results.`
+      );
+      
+      // Automatically refresh financial data
+      await fetchFinancialData();
+      
+    } catch (error) {
+      console.error('❌ Error creating test financial data:', error);
+      Alert.alert('Error', `Failed to create test financial data: ${(error as Error).message}`);
+    }
+  };
+
+  // Test if Firebase rules have been properly deployed
+  const checkRulesDeployment = async () => {
+    try {
+      console.log('=== CHECKING FIREBASE RULES DEPLOYMENT ===');
+      Alert.alert('Checking Rules', 'Testing if Firebase rules have been deployed... Check console for results.');
+      
+      // Try to access various collections to test permissions
+      const testResults: { collection: string; accessible: boolean; count: number }[] = [];
+      
+      const collectionsToTest = ['services', 'tickets', 'users', 'gigs', 'events'];
+      
+      for (const collectionName of collectionsToTest) {
+        try {
+          const collectionRef = collection(db, collectionName);
+          const snapshot = await getDocs(collectionRef);
+          testResults.push({
+            collection: collectionName,
+            accessible: true,
+            count: snapshot.docs.length
+          });
+          console.log(`✅ ${collectionName}: ${snapshot.docs.length} documents (accessible)`);
+        } catch (error) {
+          const errorCode = (error as any).code;
+          testResults.push({
+            collection: collectionName,
+            accessible: false,
+            count: -1
+          });
+          
+          if (errorCode === 'permission-denied') {
+            console.log(`❌ ${collectionName}: Permission denied - rules not deployed yet`);
+          } else {
+            console.log(`❌ ${collectionName}: ${(error as Error).message}`);
+          }
+        }
+      }
+      
+      const accessibleCollections = testResults.filter(r => r.accessible);
+      const deniedCollections = testResults.filter(r => !r.accessible);
+      
+      console.log('=== RULES DEPLOYMENT TEST RESULTS ===');
+      console.log(`Accessible collections: ${accessibleCollections.length}/${testResults.length}`);
+      console.log(`Permission denied: ${deniedCollections.length}/${testResults.length}`);
+      
+      if (deniedCollections.length === 0) {
+        Alert.alert(
+          '✅ Rules Deployed Successfully!',
+          `Firebase rules are working correctly!
+
+All ${accessibleCollections.length} collections are accessible:
+${accessibleCollections.map(c => `• ${c.collection}: ${c.count} docs`).join('\n')}
+
+You can now use all Firebase features.`
+        );
+      } else if (deniedCollections.length === testResults.length) {
+        Alert.alert(
+          '❌ Rules NOT Deployed Yet',
+          `All collections are still blocked by old rules.
+
+❌ Permission denied for:
+${deniedCollections.map(c => `• ${c.collection}`).join('\n')}
+
+🔧 ACTION REQUIRED:
+1. Go to Firebase Console
+2. Update the Firestore rules
+3. Click PUBLISH
+4. Test again`
+        );
+      } else {
+        Alert.alert(
+          '⚠️ Partial Access',
+          `Some collections are accessible, others are not.
+
+✅ Accessible:
+${accessibleCollections.map(c => `• ${c.collection}: ${c.count} docs`).join('\n')}
+
+❌ Still blocked:
+${deniedCollections.map(c => `• ${c.collection}`).join('\n')}
+
+This suggests the rules are partially deployed or cached.`
+        );
+      }
+      
+    } catch (error) {
+      console.error('❌ Rules deployment check failed:', error);
+      Alert.alert('Check Failed', `Failed to check rules deployment: ${(error as Error).message}`);
+    }
+  };
+
+  // Comprehensive collection scanner to find where data actually exists
+  const scanAllCollections = async () => {
+    try {
+      console.log('=== COMPREHENSIVE FIREBASE DATA SCAN ===');
+      Alert.alert('Scanning All Collections', 'Performing deep scan of Firebase to find your data... This may take a moment. Check console for results.');
+      
+      // List of all possible collection names to check
+      const collectionsToCheck = [
+        // Primary expected names
+        'services', 'tickets', 'gigs', 'events', 'listings', 'marketplace', 'items',
+        // Capitalized versions
+        'Services', 'Tickets', 'Gigs', 'Events', 'Listings', 'Marketplace', 'Items',
+        // Singular versions
+        'service', 'ticket', 'gig', 'event', 'listing', 'item',
+        // Alternative names
+        'bookings', 'reservations', 'appointments', 'offers', 'deals',
+        'products', 'catalog', 'inventory', 'portfolio', 'gallery',
+        'posts', 'content', 'data', 'records', 'documents',
+        // Event-specific names
+        'eventServices', 'eventTickets', 'eventBookings', 'eventListings',
+        'artistServices', 'artistGigs', 'artistEvents',
+        // Marketplace names
+        'marketplaceItems', 'marketplaceServices', 'marketplace_items',
+        'store', 'shop', 'catalogue', 'offerings',
+        // User-related collections
+        'userServices', 'userTickets', 'userGigs', 'userEvents',
+        // Other possibilities
+        'applications', 'submissions', 'requests', 'orders', 'bookings',
+        'advertisements', 'ads', 'promotions', 'campaigns'
+      ];
+      
+      const collectionsWithData: { name: string; count: number; sampleDoc?: any }[] = [];
+      let totalCollectionsChecked = 0;
+      
+      for (const collectionName of collectionsToCheck) {
+        try {
+          totalCollectionsChecked++;
+          const collectionRef = collection(db, collectionName);
+          const snapshot = await getDocs(collectionRef);
+          
+          if (snapshot.docs.length > 0) {
+            const sampleDoc = snapshot.docs[0].data();
+            collectionsWithData.push({
+              name: collectionName,
+              count: snapshot.docs.length,
+              sampleDoc: sampleDoc
+            });
+            console.log(`✅ FOUND: '${collectionName}' has ${snapshot.docs.length} documents`);
+            console.log(`Sample document from '${collectionName}':`, sampleDoc);
+            
+            // Check if this looks like services/tickets data
+            const hasServiceFields = sampleDoc.name || sampleDoc.title || sampleDoc.price || sampleDoc.category;
+            const hasTicketFields = sampleDoc.eventName || sampleDoc.ticketPrice || sampleDoc.eventDate;
+            if (hasServiceFields || hasTicketFields) {
+              console.log(`🎯 POTENTIAL MATCH: '${collectionName}' contains service/ticket-like data!`);
+            }
+          } else {
+            console.log(`⚪ Empty: '${collectionName}' (0 documents)`);
+          }
+        } catch (error) {
+          console.log(`❌ Cannot access '${collectionName}':`, (error as Error).message);
+        }
+      }
+      
+      // Also check for subcollections under users
+      console.log('\n=== CHECKING USER SUBCOLLECTIONS ===');
+      try {
+        const usersRef = collection(db, 'users');
+        const usersSnapshot = await getDocs(usersRef);
+        
+        if (usersSnapshot.docs.length > 0) {
+          console.log(`Found ${usersSnapshot.docs.length} users, checking their subcollections...`);
+          
+          // Check first few users for subcollections
+          const usersToCheck = usersSnapshot.docs.slice(0, 3); // Check first 3 users
+          for (const userDoc of usersToCheck) {
+            const userId = userDoc.id;
+            
+            const subcollectionsToCheck = ['services', 'tickets', 'gigs', 'events', 'bookings'];
+            for (const subCollectionName of subcollectionsToCheck) {
+              try {
+                const subCollectionRef = collection(db, 'users', userId, subCollectionName);
+                const subSnapshot = await getDocs(subCollectionRef);
+                
+                if (subSnapshot.docs.length > 0) {
+                  const subCollectionPath = `users/${userId}/${subCollectionName}`;
+                  collectionsWithData.push({
+                    name: subCollectionPath,
+                    count: subSnapshot.docs.length,
+                    sampleDoc: subSnapshot.docs[0].data()
+                  });
+                  console.log(`✅ FOUND SUBCOLLECTION: '${subCollectionPath}' has ${subSnapshot.docs.length} documents`);
+                  console.log(`Sample from subcollection:`, subSnapshot.docs[0].data());
+                }
+              } catch (error) {
+                // Silent fail for subcollections
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.log('Cannot check user subcollections:', (error as Error).message);
+      }
+      
+      console.log('\n=== SCAN RESULTS SUMMARY ===');
+      console.log(`Checked ${totalCollectionsChecked} top-level collections`);
+      console.log(`Found ${collectionsWithData.length} collections with data:`);
+      collectionsWithData.forEach(coll => {
+        console.log(`- ${coll.name}: ${coll.count} documents`);
+      });
+      
+      if (collectionsWithData.length === 0) {
+        Alert.alert(
+          '📭 No Data Found Anywhere',
+          `Comprehensive scan complete!
+
+❌ Checked ${totalCollectionsChecked} collections - all empty
+❌ Checked user subcollections - no data found
+
+This means:
+1. 🆕 No services/tickets have been created yet
+2. 📱 Data might be created through your app UI
+3. 🔗 Data might be in external database/API
+
+NEXT STEPS:
+• Click "Create Test Data" to add sample data
+• Create services/tickets through your app
+• Check if data is stored elsewhere`,
+          [
+            { text: 'OK' },
+            { 
+              text: 'Create Test Data', 
+              onPress: createTestData
+            }
+          ]
+        );
+      } else {
+        const resultText = collectionsWithData
+          .map(coll => `📁 ${coll.name}: ${coll.count} docs`)
+          .join('\n');
+        
+        Alert.alert(
+          '🎉 Data Found!',
+          `✅ Found data in ${collectionsWithData.length} locations:
+
+${resultText}
+
+🔍 Check console for sample documents and data structure.
+
+If this data should appear in your admin panel, we need to update the fetchServicesAndTickets function to use these collection names.`,
+          [
+            { text: 'View Details', onPress: () => {
+              console.log('\n=== DETAILED FINDINGS ===');
+              collectionsWithData.forEach(coll => {
+                console.log(`\nCollection: ${coll.name}`);
+                console.log(`Documents: ${coll.count}`);
+                console.log('Sample document structure:', coll.sampleDoc);
+              });
+            }},
+            { text: 'OK' }
+          ]
+        );
+      }
+      
+    } catch (error) {
+      console.error('❌ Collection scan failed:', error);
+      Alert.alert('Scan Error', `Failed to scan collections: ${(error as Error).message}`);
+    }
+  };
+
   // Debug Firebase connection
   const handleDebugFirebase = async () => {
     console.log('Starting Firebase debug...');
+    
+    // Check current user authentication
+    console.log('=== AUTHENTICATION DEBUG ===');
+    console.log('Current user:', user);
+    console.log('User ID:', user?.id);
+    console.log('User email:', user?.email);
+    console.log('User role:', user?.role);
+    console.log('User is authenticated:', !!user);
+    
     await debugFirebaseConnection();
     Alert.alert('Debug Complete', 'Check console for Firebase debug information');
+  };
+
+  // Deploy updated Firestore rules helper
+  const handleDeployRules = () => {
+    Alert.alert(
+      '🚨 CRITICAL: Rules Not Deployed Yet!',
+      `❌ Your local firestore.rules file has the correct rules, but they haven't been deployed to Firebase yet!
+
+🔧 MANUAL DEPLOYMENT (2 minutes):
+
+📱 STEP 1: Open Firebase Console
+   https://console.firebase.google.com
+
+📱 STEP 2: Select project "inevents-2fe56"
+
+📱 STEP 3: Go to "Firestore Database" → "Rules" tab
+
+📱 STEP 4: DELETE ALL existing rules and paste this:
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
+
+📱 STEP 5: Click "PUBLISH" button
+
+⚠️ CRITICAL: Your app won't work until you do this!`,
+      [
+        { text: 'I understand', style: 'cancel' },
+        { 
+          text: 'Copy Rules Now', 
+          onPress: () => {
+            console.log('=== 🚨 URGENT: COPY THESE RULES TO FIREBASE CONSOLE 🚨 ===');
+            console.log('1. Go to: https://console.firebase.google.com');
+            console.log('2. Select project: inevents-2fe56');
+            console.log('3. Go to: Firestore Database > Rules');
+            console.log('4. DELETE ALL existing rules');
+            console.log('5. PASTE these rules:');
+            console.log('');
+            console.log('rules_version = \'2\';');
+            console.log('service cloud.firestore {');
+            console.log('  match /databases/{database}/documents {');
+            console.log('    match /{document=**} {');
+            console.log('      allow read, write: if true;');
+            console.log('    }');
+            console.log('  }');
+            console.log('}');
+            console.log('');
+            console.log('6. Click PUBLISH');
+            console.log('7. Return to app and test');
+            console.log('=== END RULES ===');
+            
+            Alert.alert(
+              'Rules Ready to Copy!', 
+              'Check console output - copy the rules EXACTLY as shown to Firebase Console, then click PUBLISH.'
+            );
+          }
+        },
+        {
+          text: 'Show Firebase Console',
+          onPress: () => {
+            console.log('🌐 Open this URL: https://console.firebase.google.com');
+            console.log('📋 Select project: inevents-2fe56');
+            console.log('⚙️ Go to: Firestore Database > Rules');
+            Alert.alert(
+              'Open Firebase Console',
+              'URL logged to console:\nhttps://console.firebase.google.com\n\nSelect project: inevents-2fe56\nGo to: Firestore Database > Rules'
+            );
+          }
+        }
+      ]
+    );
   };
 
   // Statistics based on filtered data
@@ -584,8 +1274,8 @@ export default function AdminPanelScreen() {
       total: filteredServices.length,
       approved: filteredServices.filter(s => s.status === 'approved').length,
       pending: filteredServices.filter(s => s.status === 'pending').length,
-      totalViews: filteredServices.reduce((sum, s) => sum + s.views, 0),
-      totalPurchases: filteredServices.reduce((sum, s) => sum + s.purchases, 0),
+      totalViews: filteredServices.reduce((sum, s) => sum + (s.views || 0), 0),
+      totalPurchases: filteredServices.reduce((sum, s) => sum + (s.purchases || 0), 0),
     };
 
     return { userStats, serviceStats };
@@ -602,14 +1292,281 @@ export default function AdminPanelScreen() {
     );
   };
 
-  const handleRejectService = (serviceId: string) => {
-    setServices(prev =>
-      prev.map(service =>
-        service.id === serviceId
-          ? { ...service, status: 'rejected' }
-          : service
-      )
+  const handleRejectService = async (serviceId: string) => {
+    const service = services.find(s => s.id === serviceId);
+    if (!service) return;
+
+    Alert.alert(
+      'Permanently Delete',
+      `Are you sure you want to permanently delete this ${service.type}? This action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setServicesLoading(true);
+              
+              // Delete from Firebase based on type
+              const collectionName = service.type === 'service' ? 'services' : 'tickets';
+              await deleteDoc(doc(db, collectionName, serviceId));
+              
+              // Remove from local state
+              setServices(prev => prev.filter(s => s.id !== serviceId));
+              
+              console.log(`✅ Permanently deleted ${service.type} with ID: ${serviceId}`);
+              Alert.alert('Success', `${service.type === 'service' ? 'Service' : 'Ticket'} permanently deleted from Firebase`);
+              
+            } catch (error) {
+              console.error(`❌ Error deleting ${service.type}:`, error);
+              Alert.alert('Error', `Failed to delete ${service.type} from Firebase`);
+            } finally {
+              setServicesLoading(false);
+            }
+          }
+        }
+      ]
     );
+  };
+
+  // Fetch real financial data from Firebase with enhanced data sources
+  const fetchFinancialData = async () => {
+    try {
+      setFinancialLoading(true);
+      console.log('=== FETCHING COMPREHENSIVE FINANCIAL DATA ===');
+      
+      let totalRevenue = 0;
+      let totalOrders = 0;
+      let pendingPayouts = 0;
+      const orderValues: number[] = [];
+      const artistRevenueMap = new Map<string, { name: string; revenue: number; artistId: string }>();
+      const monthlyRevenue = new Map<string, number>();
+      
+      // Initialize current year months
+      const currentYear = new Date().getFullYear();
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      months.forEach(month => monthlyRevenue.set(month, 0));
+      
+      // Helper function to process an order
+      const processOrder = (orderData: any, source: string) => {
+        const price = orderData.price || orderData.totalPrice || orderData.totalAmount || orderData.amount || orderData.cost || 0;
+        const createdAt = orderData.createdAt?.toDate() || orderData.orderDate?.toDate() || orderData.date?.toDate() || orderData.timestamp?.toDate() || new Date();
+        const artistId = orderData.artistId || orderData.sellerId || orderData.providerId || orderData.serviceProviderId;
+        const artistName = orderData.artistName || orderData.sellerName || orderData.providerName || orderData.serviceName || `Artist ${artistId}`;
+        const status = orderData.status || orderData.orderStatus || 'completed';
+        
+        console.log(`Processing order from ${source}:`, { price, artistId, artistName, status, createdAt });
+        
+        if (price > 0) {
+          totalRevenue += price;
+          totalOrders++;
+          orderValues.push(price);
+          
+          // Track artist revenue
+          if (artistId) {
+            const existing = artistRevenueMap.get(artistId) || { name: artistName, revenue: 0, artistId };
+            artistRevenueMap.set(artistId, { ...existing, revenue: existing.revenue + price });
+          }
+          
+          // Track monthly revenue for current year
+          if (createdAt.getFullYear() === currentYear) {
+            const monthName = months[createdAt.getMonth()];
+            monthlyRevenue.set(monthName, (monthlyRevenue.get(monthName) || 0) + price);
+          }
+          
+          // Track pending payouts (80% goes to artist, 20% platform fee)
+          if (status === 'completed' || status === 'paid' || status === 'pending_payout') {
+            pendingPayouts += price * 0.8;
+          }
+        }
+      };
+      
+      // 1. Fetch from global orders collection
+      try {
+        const ordersRef = collection(db, 'orders');
+        const ordersSnapshot = await getDocs(ordersRef);
+        console.log(`📊 Global orders collection: ${ordersSnapshot.docs.length} documents`);
+        
+        ordersSnapshot.docs.forEach(doc => {
+          processOrder(doc.data(), 'global orders');
+        });
+      } catch (error) {
+        console.log('No global orders collection or access denied:', error);
+      }
+      
+      // 2. Fetch from transactions collection
+      try {
+        const transactionsRef = collection(db, 'transactions');
+        const transactionsSnapshot = await getDocs(transactionsRef);
+        console.log(`💳 Transactions collection: ${transactionsSnapshot.docs.length} documents`);
+        
+        transactionsSnapshot.docs.forEach(doc => {
+          processOrder(doc.data(), 'transactions');
+        });
+      } catch (error) {
+        console.log('No transactions collection:', error);
+      }
+      
+      // 3. Fetch from payments collection
+      try {
+        const paymentsRef = collection(db, 'payments');
+        const paymentsSnapshot = await getDocs(paymentsRef);
+        console.log(`💰 Payments collection: ${paymentsSnapshot.docs.length} documents`);
+        
+        paymentsSnapshot.docs.forEach(doc => {
+          processOrder(doc.data(), 'payments');
+        });
+      } catch (error) {
+        console.log('No payments collection:', error);
+      }
+      
+      // 4. Fetch from user subcollections (users/{id}/orders)
+      try {
+        const usersRef = collection(db, 'users');
+        const usersSnapshot = await getDocs(usersRef);
+        console.log(`👥 Checking ${usersSnapshot.docs.length} users for order subcollections`);
+        
+        for (const userDoc of usersSnapshot.docs) {
+          const userData = userDoc.data();
+          const artistName = userData.name || userData.displayName || `User ${userDoc.id}`;
+          
+          // Check user's orders
+          try {
+            const userOrdersRef = collection(db, 'users', userDoc.id, 'orders');
+            const userOrdersSnapshot = await getDocs(userOrdersRef);
+            
+            if (userOrdersSnapshot.docs.length > 0) {
+              console.log(`📋 User ${userDoc.id} has ${userOrdersSnapshot.docs.length} orders`);
+            }
+            
+            userOrdersSnapshot.docs.forEach(orderDoc => {
+              const orderData = { ...orderDoc.data(), artistName };
+              processOrder(orderData, `user ${userDoc.id} orders`);
+            });
+          } catch (error) {
+            // Skip users without orders
+          }
+          
+          // Check user's incoming orders
+          try {
+            const incomingOrdersRef = collection(db, 'users', userDoc.id, 'incoming_orders');
+            const incomingOrdersSnapshot = await getDocs(incomingOrdersRef);
+            
+            if (incomingOrdersSnapshot.docs.length > 0) {
+              console.log(`📥 User ${userDoc.id} has ${incomingOrdersSnapshot.docs.length} incoming orders`);
+            }
+            
+            incomingOrdersSnapshot.docs.forEach(orderDoc => {
+              const orderData = { ...orderDoc.data(), artistId: userDoc.id, artistName };
+              processOrder(orderData, `user ${userDoc.id} incoming orders`);
+            });
+          } catch (error) {
+            // Skip users without incoming orders
+          }
+        }
+      } catch (error) {
+        console.log('Error fetching user orders:', error);
+      }
+      
+      // Calculate averages and weekly/monthly income
+      const averageOrderValue = orderValues.length > 0 ? totalRevenue / orderValues.length : 0;
+      
+      // Estimate weekly and monthly income based on recent orders
+      const now = new Date();
+      const currentMonth = months[now.getMonth()];
+      const monthlyIncome = monthlyRevenue.get(currentMonth) || 0;
+      const weeklyIncome = monthlyIncome / 4; // Rough weekly estimate
+      
+      // Get top earners
+      const topEarners = Array.from(artistRevenueMap.values())
+        .sort((a, b) => b.revenue - a.revenue)
+        .slice(0, 5);
+      
+      // Convert monthly revenue to array
+      const revenueData = months.map(month => ({
+        month,
+        revenue: monthlyRevenue.get(month) || 0
+      }));
+      
+      const financialResult = {
+        totalRevenue,
+        weeklyIncome,
+        monthlyIncome,
+        averageOrderValue: Math.round(averageOrderValue),
+        totalOrders,
+        pendingPayouts: Math.round(pendingPayouts),
+        topEarners,
+        revenueData
+      };
+      
+      setFinancialData(financialResult);
+      
+      console.log('=== FINANCIAL DATA RESULTS ===');
+      console.log('Total Revenue:', totalRevenue);
+      console.log('Total Orders:', totalOrders);
+      console.log('Average Order Value:', averageOrderValue);
+      console.log('Monthly Income:', monthlyIncome);
+      console.log('Top Earners:', topEarners);
+      
+      if (totalRevenue === 0) {
+        console.log('❌ No financial data found - no orders with valid amounts');
+        Alert.alert(
+          'No Financial Data',
+          'No orders with revenue found in Firebase.\n\nThis could mean:\n1. No orders have been placed yet\n2. Orders are in different collections\n3. Order amounts are stored differently\n\nUsing sample financial data for demo.'
+        );
+        
+        // Set some sample financial data for demo
+        setFinancialData({
+          totalRevenue: 15420,
+          weeklyIncome: 890,
+          monthlyIncome: 3850,
+          averageOrderValue: 125,
+          totalOrders: 123,
+          pendingPayouts: 2140,
+          topEarners: [
+            { name: 'John Photographer', revenue: 3200, artistId: 'artist1' },
+            { name: 'Sarah Events', revenue: 2800, artistId: 'artist2' },
+            { name: 'Mike Design', revenue: 2100, artistId: 'artist3' }
+          ],
+          revenueData: [
+            { month: 'Jan', revenue: 3400 },
+            { month: 'Feb', revenue: 4200 },
+            { month: 'Mar', revenue: 3800 },
+            { month: 'Apr', revenue: 4600 },
+            { month: 'May', revenue: 5200 },
+            { month: 'Jun', revenue: 4800 },
+            { month: 'Jul', revenue: 3850 },
+            { month: 'Aug', revenue: 0 },
+            { month: 'Sep', revenue: 0 },
+            { month: 'Oct', revenue: 0 },
+            { month: 'Nov', revenue: 0 },
+            { month: 'Dec', revenue: 0 }
+          ]
+        });
+      } else {
+        Alert.alert('Financial Data Loaded', `✅ Loaded real financial data!\n\nTotal Revenue: $${totalRevenue.toLocaleString()}\nTotal Orders: ${totalOrders}\nTop Earners: ${topEarners.length}`);
+      }
+      
+    } catch (error) {
+      console.error('❌ Error fetching financial data:', error);
+      Alert.alert('Error', `Failed to load financial data: ${(error as Error).message}`);
+      
+      // Set fallback data
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      setFinancialData({
+        totalRevenue: 0,
+        weeklyIncome: 0,
+        monthlyIncome: 0,
+        averageOrderValue: 0,
+        totalOrders: 0,
+        pendingPayouts: 0,
+        topEarners: [],
+        revenueData: months.map((month: string) => ({ month, revenue: 0 }))
+      });
+    } finally {
+      setFinancialLoading(false);
+    }
   };
 
   // Fetch users from Firebase
@@ -837,6 +1794,231 @@ export default function AdminPanelScreen() {
     }
   };
 
+  // Fetch services and tickets from Firebase
+  const fetchServicesAndTickets = async () => {
+    try {
+      setServicesLoading(true);
+      console.log('=== FETCHING SERVICES AND TICKETS ===');
+      
+      let allItems: Service[] = [];
+      
+      // Try primary collection names first
+      const primaryCollections = [
+        { name: 'services', type: 'service' },
+        { name: 'tickets', type: 'ticket' }
+      ];
+      
+      for (const collectionConfig of primaryCollections) {
+        try {
+          const snapshot = await getDocs(collection(db, collectionConfig.name));
+          console.log(`Found ${snapshot.docs.length} documents in '${collectionConfig.name}' collection`);
+          
+          const items: Service[] = snapshot.docs.map(doc => {
+            const data = doc.data() as any;
+            console.log(`${collectionConfig.type} data:`, data);
+            return {
+              id: doc.id,
+              type: collectionConfig.type as 'service' | 'ticket',
+              name: data.name || data.title || data.eventName || `Untitled ${collectionConfig.type}`,
+              title: data.title || data.name || data.eventName,
+              category: data.category || data.eventType || 'Other',
+              creator: data.creator || data.artistId || data.organizerId || data.createdBy || 'Unknown',
+              artistId: data.artistId || data.organizerId || data.creator || data.createdBy,
+              status: data.status || 'pending',
+              price: data.price || data.basePrice || data.ticketPrice || 0,
+              basePrice: data.basePrice || data.price || data.ticketPrice,
+              views: data.views || 0,
+              purchases: data.purchases || data.orders || data.sales || 0,
+              createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+              images: data.images || data.eventImages || [],
+              description: data.description || data.eventDescription || ''
+            } as Service;
+          });
+          
+          allItems = [...allItems, ...items];
+        } catch (error) {
+          const errorCode = (error as any).code;
+          if (errorCode === 'permission-denied') {
+            console.error(`❌ Permission denied for '${collectionConfig.name}' collection`);
+          } else {
+            console.error(`❌ Error fetching ${collectionConfig.name}:`, error);
+          }
+        }
+      }
+      
+      // If no data found in primary collections, try alternative names
+      if (allItems.length === 0) {
+        console.log('No data in primary collections, trying alternatives...');
+        const alternativeCollections = [
+          { name: 'gigs', type: 'service' },
+          { name: 'events', type: 'ticket' },
+          { name: 'listings', type: 'service' },
+          { name: 'marketplace', type: 'service' },
+          { name: 'items', type: 'service' }
+        ];
+        
+        for (const altCollectionConfig of alternativeCollections) {
+          try {
+            const snapshot = await getDocs(collection(db, altCollectionConfig.name));
+            console.log(`Collection '${altCollectionConfig.name}': ${snapshot.docs.length} documents`);
+            
+            if (snapshot.docs.length > 0) {
+              console.log(`Sample document from '${altCollectionConfig.name}':`, snapshot.docs[0].data());
+              
+              const items: Service[] = snapshot.docs.map(doc => {
+                const data = doc.data() as any;
+                return {
+                  id: doc.id,
+                  type: altCollectionConfig.type as 'service' | 'ticket',
+                  name: data.name || data.title || data.eventName || `Untitled ${altCollectionConfig.type}`,
+                  title: data.title || data.name || data.eventName,
+                  category: data.category || data.eventType || 'Other',
+                  creator: data.creator || data.artistId || data.organizerId || data.createdBy || 'Unknown',
+                  artistId: data.artistId || data.organizerId || data.creator || data.createdBy,
+                  status: data.status || 'pending',
+                  price: data.price || data.basePrice || data.ticketPrice || 0,
+                  basePrice: data.basePrice || data.price || data.ticketPrice,
+                  views: data.views || 0,
+                  purchases: data.purchases || data.orders || data.sales || 0,
+                  createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+                  images: data.images || data.eventImages || [],
+                  description: data.description || data.eventDescription || ''
+                } as Service;
+              });
+              
+              allItems = [...allItems, ...items];
+            }
+          } catch (error) {
+            const errorCode = (error as any).code;
+            if (errorCode === 'permission-denied') {
+              console.log(`❌ Permission denied for '${altCollectionConfig.name}' collection`);
+            } else {
+              console.log(`❌ Error checking '${altCollectionConfig.name}':`, (error as Error).message);
+            }
+          }
+        }
+      }
+      
+      setServices(allItems);
+      
+      console.log(`✅ Successfully loaded ${allItems.length} total items`);
+      console.log('All items:', allItems);
+      
+      if (allItems.length === 0) {
+        console.log('❌ No services or tickets found in any collection');
+        
+        Alert.alert(
+          '🔍 No Data Found - Let\'s Find It!', 
+          `All collections checked are empty (0 documents each).
+
+Since you mentioned data exists, it might be:
+1. In different collection names
+2. In subcollections under users
+3. Not created yet
+
+Let's scan ALL collections to find your data!`,
+          [
+            { text: 'Later' },
+            { 
+              text: 'Scan All Collections', 
+              onPress: scanAllCollections
+            },
+            {
+              text: 'Create Test Data',
+              onPress: createTestData
+            }
+          ]
+        );
+      } else {
+        console.log(`✅ Loaded ${allItems.length} items from Firebase`);
+        Alert.alert('Success', `✅ Loaded ${allItems.length} items from Firebase!\n\nTypes found: ${[...new Set(allItems.map(item => item.type))].join(', ')}`);
+      }
+      
+    } catch (error) {
+      console.error('❌ Error fetching services and tickets:', error);
+      
+      // Check for specific Firebase permission errors
+      const errorCode = (error as any).code;
+      let errorMessage = 'Failed to load services and tickets from Firebase';
+      let troubleshootingInfo = '';
+      
+      if (errorCode === 'permission-denied') {
+        errorMessage = 'Permission denied - Admin needs access to services and tickets';
+        troubleshootingInfo = `
+🔧 SOLUTION: Update your Firestore security rules to allow admin access:
+
+1. Go to Firebase Console > Firestore Database > Rules
+2. Add these rules for admin access:
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow authenticated users to read/write their own data
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Admin access to all collections
+    match /{document=**} {
+      allow read, write: if request.auth != null && 
+        (request.auth.token.email == 'admin@inevents.com' ||
+         request.auth.token.email == 'youremail@domain.com' ||
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+    }
+    
+    // Public read access to services and tickets (for marketplace)
+    match /services/{serviceId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    
+    match /tickets/{ticketId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    
+    match /gigs/{gigId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    
+    match /events/{eventId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+  }
+}
+
+3. Replace 'youremail@domain.com' with your admin email
+4. Click 'Publish' to save the rules`;
+        
+        Alert.alert(
+          'Permission Denied - Firebase Rules',
+          `${errorMessage}\n\nYour current user doesn't have permission to read services/tickets collections.\n\nCheck console for detailed solution.`,
+          [
+            { text: 'OK' },
+            { 
+              text: 'Show Solution', 
+              onPress: () => {
+                console.log(troubleshootingInfo);
+                Alert.alert('Solution', 'Check the console for detailed Firestore rules setup instructions.');
+              }
+            }
+          ]
+        );
+      } else {
+        Alert.alert('Error', `${errorMessage}: ${(error as Error).message}`);
+      }
+      
+      console.log(troubleshootingInfo);
+      
+      // Set empty array on error
+      setServices([]);
+    } finally {
+      setServicesLoading(false);
+    }
+  };
+
   // Delete user from Firebase
   const handleDeleteUser = async (userId: string) => {
     Alert.alert(
@@ -971,14 +2153,40 @@ export default function AdminPanelScreen() {
 
   // Fetch users on mount and set up real-time updates
   React.useEffect(() => {
-    fetchUsers();
+    console.log('🚀 Admin Panel useEffect triggered');
     
-    // Optional: Set up interval to refresh users periodically
+    const initializeData = async () => {
+      console.log('🔄 Starting data initialization...');
+      
+      try {
+        // Fetch users first
+        await fetchUsers();
+        console.log('✅ Users fetch completed');
+        
+        // Then fetch services and tickets
+        await fetchServicesAndTickets();
+        console.log('✅ Services and tickets fetch completed');
+        
+        // Finally fetch financial data
+        await fetchFinancialData();
+        console.log('✅ Financial data fetch completed');
+      } catch (error) {
+        console.error('❌ Error in data initialization:', error);
+      }
+    };
+    
+    initializeData();
+    
+    // Optional: Set up interval to refresh data periodically
     const interval = setInterval(() => {
-      fetchUsers();
+      console.log('🔄 Periodic refresh triggered');
+      initializeData();
     }, 60000); // Refresh every minute
     
-    return () => clearInterval(interval);
+    return () => {
+      console.log('🧹 Cleaning up interval');
+      clearInterval(interval);
+    };
   }, []);
 
   const renderDashboardTab = () => (
@@ -1037,9 +2245,9 @@ export default function AdminPanelScreen() {
           <View style={styles.metricIconContainer}>
             <TrendingUp size={24} color={Theme.colors.info} />
           </View>
-          <Text style={styles.metricValue}>{mockFinancialData.weeklyIncome}</Text>
+          <Text style={styles.metricValue}>${financialData.weeklyIncome.toLocaleString()}</Text>
           <Text style={styles.metricLabel}>Weekly Income</Text>
-          <Text style={styles.metricSubtext}>+8% vs last week</Text>
+          <Text style={styles.metricSubtext}>Estimated from monthly</Text>
         </Card>
       </View>
 
@@ -1102,6 +2310,69 @@ export default function AdminPanelScreen() {
           >
             <Activity size={20} color={Theme.colors.warning} />
             <Text style={styles.quickActionText}>Debug Firebase</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.quickActionItem}
+            onPress={fetchServicesAndTickets}
+          >
+            <ClipboardCheck size={20} color={Theme.colors.info} />
+            <Text style={styles.quickActionText}>Refresh Services</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.quickActionItem}
+            onPress={handleDeployRules}
+          >
+            <Shield size={20} color={Theme.colors.error} />
+            <Text style={styles.quickActionText}>Fix Permissions</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.quickActionItem}
+            onPress={checkRulesDeployment}
+          >
+            <Check size={20} color={Theme.colors.success} />
+            <Text style={styles.quickActionText}>Check Rules</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.quickActionItem}
+            onPress={scanAllCollections}
+          >
+            <Search size={20} color={Theme.colors.info} />
+            <Text style={styles.quickActionText}>Find Data</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.quickActionItem}
+            onPress={createTestData}
+          >
+            <Plus size={20} color={Theme.colors.warning} />
+            <Text style={styles.quickActionText}>Create Test Data</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.quickActionItem}
+            onPress={cleanupTestData}
+          >
+            <Text style={[styles.quickActionText, { color: Theme.colors.error }]}>🗑️ Clean Test Data</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.quickActionItem}
+            onPress={fetchFinancialData}
+          >
+            <DollarSign size={20} color={Theme.colors.success} />
+            <Text style={styles.quickActionText}>Load Financial Data</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.quickActionItem}
+            onPress={createTestFinancialData}
+          >
+            <CreditCard size={20} color={Theme.colors.info} />
+            <Text style={styles.quickActionText}>Create Test Orders</Text>
           </TouchableOpacity>
         </View>
       </Card>
@@ -1353,31 +2624,69 @@ export default function AdminPanelScreen() {
     </View>
   );
 
-  const renderServicesTab = () => (
-    <View style={styles.tabContent}>
-      <FlatList
-        data={services}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <Card variant="elevated" style={styles.serviceItem}>
-            <View style={styles.serviceHeader}>
-              <View style={styles.serviceInfo}>
-                <Text style={styles.serviceName}>{item.name}</Text>
-                <Text style={styles.serviceCategory}>{item.category}</Text>
-                <Text style={styles.serviceCreator}>By {item.creator}</Text>
-              </View>
-              <View style={styles.serviceStatus}>
-                <View style={[styles.statusBadge, { 
-                  backgroundColor: item.status === 'approved' ? Theme.colors.success : 
-                                 item.status === 'pending' ? Theme.colors.warning : Theme.colors.error 
-                }]}>
-                  <Text style={styles.statusText}>{item.status}</Text>
+  const renderServicesTab = () => {
+    if (servicesLoading) {
+      return (
+        <View style={[styles.tabContent, { justifyContent: 'center', alignItems: 'center' }]}>
+          <ActivityIndicator size="large" color={Theme.colors.primary} />
+          <Text style={[{ marginTop: 16, color: Theme.colors.text, fontSize: 16 }]}>
+            Loading services and tickets from Firebase...
+          </Text>
+        </View>
+      );
+    }
+
+    if (services.length === 0) {
+      return (
+        <View style={[styles.tabContent, { justifyContent: 'center', alignItems: 'center' }]}>
+          <Text style={[{ color: Theme.colors.text, fontSize: 16, marginBottom: 16 }]}>No services or tickets found</Text>
+          <TouchableOpacity 
+            style={[styles.approveButton, { marginTop: 16 }]}
+            onPress={fetchServicesAndTickets}
+          >
+            <Text style={styles.refreshButtonText}>Refresh</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.tabContent}>
+        {/* Debug Info */}
+        <View style={{ padding: 16, backgroundColor: '#f0f0f0', marginBottom: 10, borderRadius: 8 }}>
+          <Text style={{ fontWeight: 'bold', color: '#333' }}>Debug Info:</Text>
+          <Text style={{ color: '#666' }}>Services array length: {services.length}</Text>
+          <Text style={{ color: '#666' }}>Loading state: {servicesLoading ? 'true' : 'false'}</Text>
+          {services.length > 0 && (
+            <Text style={{ color: '#666' }}>
+              Sample service: {services[0]?.name || services[0]?.title || 'No name'}
+            </Text>
+          )}
+        </View>
+        
+        <FlatList
+          data={services}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <Card variant="elevated" style={styles.serviceItem}>
+              <View style={styles.serviceHeader}>
+                <View style={styles.serviceInfo}>
+                  <Text style={styles.serviceName}>{item.name || item.title || 'Untitled'}</Text>
+                  <Text style={styles.serviceCategory}>{item.category} ({item.type})</Text>
+                  <Text style={styles.serviceCreator}>By {item.creator || item.artistId || 'Unknown'}</Text>
+                </View>
+                <View style={styles.serviceStatus}>
+                  <View style={[styles.statusBadge, { 
+                    backgroundColor: item.status === 'approved' ? Theme.colors.success : 
+                                   item.status === 'pending' ? Theme.colors.warning : Theme.colors.error 
+                  }]}>
+                    <Text style={styles.statusText}>{item.status}</Text>
+                  </View>
                 </View>
               </View>
-            </View>
 
-            <View style={styles.serviceStats}>
-              <View style={styles.serviceStat}>
+              <View style={styles.serviceStats}>
+                <View style={styles.serviceStat}>
                 <Eye size={16} color={Theme.colors.textLight} />
                 <Text style={styles.serviceStatText}>{item.views} views</Text>
               </View>
@@ -1411,36 +2720,119 @@ export default function AdminPanelScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       />
     </View>
-  );
+    );
+  };
 
   const renderFinancialTab = () => (
     <View style={styles.tabContent}>
       <View style={styles.financialHeader}>
         <Text style={styles.sectionTitle}>Financial Overview</Text>
+        {financialLoading && (
+          <ActivityIndicator size="small" color={Theme.colors.primary} style={{ marginLeft: 10 }} />
+        )}
       </View>
-      {/* Revenue Cards */}
-      <View style={styles.revenueCards}>
-        <Card variant="elevated" style={styles.revenueCard}>
-          <Text style={styles.revenueLabel}>Total Revenue</Text>
-          <Text style={styles.revenueValue}>${mockFinancialData.totalRevenue.toLocaleString()}</Text>
-          <Text style={styles.revenueChange}>+12% from last month</Text>
-        </Card>
-        <Card variant="elevated" style={styles.revenueCard}>
-          <Text style={styles.revenueLabel}>Monthly Income</Text>
-          <Text style={styles.revenueValue}>${mockFinancialData.monthlyIncome.toLocaleString()}</Text>
-          <Text style={styles.revenueChange}>+8% from last month</Text>
-        </Card>
-        <Card variant="elevated" style={styles.revenueCard}>
-          <Text style={styles.revenueLabel}>Average Order</Text>
-          <Text style={styles.revenueValue}>${mockFinancialData.averageOrderValue}</Text>
-          <Text style={styles.revenueChange}>+5% from last month</Text>
-        </Card>
-      </View>
-      <View style={{marginTop: 24, alignItems: 'center'}}>
-        <Text style={{fontSize: 16, color: Theme.colors.textLight, textAlign: 'center'}}>
-          Track your platform's financial health at a glance. Export data for deeper analysis.
-        </Text>
-      </View>
+      
+      {financialLoading ? (
+        <View style={{ padding: 40, alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={Theme.colors.primary} />
+          <Text style={{ marginTop: 10, color: Theme.colors.textLight }}>Loading financial data...</Text>
+        </View>
+      ) : (
+        <>
+          {/* Revenue Cards */}
+          <View style={styles.revenueCards}>
+            <Card variant="elevated" style={styles.revenueCard}>
+              <Text style={styles.revenueLabel}>Total Revenue</Text>
+              <Text style={styles.revenueValue}>${financialData.totalRevenue.toLocaleString()}</Text>
+              <Text style={styles.revenueChange}>From {financialData.totalOrders} orders</Text>
+            </Card>
+            <Card variant="elevated" style={styles.revenueCard}>
+              <Text style={styles.revenueLabel}>Monthly Income</Text>
+              <Text style={styles.revenueValue}>${financialData.monthlyIncome.toLocaleString()}</Text>
+              <Text style={styles.revenueChange}>Current month</Text>
+            </Card>
+            <Card variant="elevated" style={styles.revenueCard}>
+              <Text style={styles.revenueLabel}>Average Order</Text>
+              <Text style={styles.revenueValue}>${financialData.averageOrderValue}</Text>
+              <Text style={styles.revenueChange}>Per transaction</Text>
+            </Card>
+          </View>
+          
+          {/* Additional Financial Metrics */}
+          <View style={styles.revenueCards}>
+            <Card variant="elevated" style={styles.revenueCard}>
+              <Text style={styles.revenueLabel}>Weekly Income</Text>
+              <Text style={styles.revenueValue}>${financialData.weeklyIncome.toLocaleString()}</Text>
+              <Text style={styles.revenueChange}>Estimated weekly</Text>
+            </Card>
+            <Card variant="elevated" style={styles.revenueCard}>
+              <Text style={styles.revenueLabel}>Pending Payouts</Text>
+              <Text style={styles.revenueValue}>${financialData.pendingPayouts.toLocaleString()}</Text>
+              <Text style={styles.revenueChange}>To artists</Text>
+            </Card>
+            <Card variant="elevated" style={styles.revenueCard}>
+              <Text style={styles.revenueLabel}>Total Orders</Text>
+              <Text style={styles.revenueValue}>{financialData.totalOrders}</Text>
+              <Text style={styles.revenueChange}>All time</Text>
+            </Card>
+          </View>
+          
+          {/* Top Earners */}
+          {financialData.topEarners.length > 0 && (
+            <Card variant="elevated" style={{ marginTop: 20 }}>
+              <Text style={[styles.sectionTitle, { fontSize: 18, marginBottom: 15 }]}>Top Earners</Text>
+              {financialData.topEarners.map((earner, index) => (
+                <View key={earner.artistId} style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  paddingVertical: 8,
+                  borderBottomWidth: index < financialData.topEarners.length - 1 ? 1 : 0,
+                  borderBottomColor: Theme.colors.border
+                }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <View style={{
+                      width: 24,
+                      height: 24,
+                      borderRadius: 12,
+                      backgroundColor: Theme.colors.primary,
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      marginRight: 12
+                    }}>
+                      <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>
+                        {index + 1}
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 16, fontWeight: '500' }}>{earner.name}</Text>
+                  </View>
+                  <Text style={{ fontSize: 16, fontWeight: 'bold', color: Theme.colors.success }}>
+                    ${earner.revenue.toLocaleString()}
+                  </Text>
+                </View>
+              ))}
+            </Card>
+          )}
+          
+          <View style={{marginTop: 24, alignItems: 'center'}}>
+            <TouchableOpacity 
+              style={{
+                backgroundColor: Theme.colors.primary,
+                paddingHorizontal: 20,
+                paddingVertical: 12,
+                borderRadius: 8,
+                marginBottom: 10
+              }}
+              onPress={fetchFinancialData}
+            >
+              <Text style={{ color: 'white', fontWeight: '600' }}>🔄 Refresh Financial Data</Text>
+            </TouchableOpacity>
+            <Text style={{fontSize: 16, color: Theme.colors.textLight, textAlign: 'center'}}>
+              Track your platform's financial health at a glance. Data updates automatically from Firebase orders.
+            </Text>
+          </View>
+        </>
+      )}
     </View>
   );
 

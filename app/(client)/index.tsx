@@ -17,8 +17,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { dummyTickets } from './tickets';
 // Update the import path below to the correct location of your api file
 // Example: If api.ts is in app/src/api.ts, use '../src/api'
-import { fetchArtists } from '../../src/api';
-import { fetchAllServices, fetchAllTickets } from '../../src/firebase/clientTicketsService';
+import { fetchArtists, fetchServices, fetchTickets } from '../../src/api';
 import { useMarketplaceStore } from '../../stores/useMarketplaceStore';
 
 const { width, height } = Dimensions.get('window');
@@ -43,7 +42,6 @@ interface Service {
   reviews: string;
   orders: string;
   price: string;
-  rating?: number | string;
   image?: string;
 }
 
@@ -208,45 +206,11 @@ export default function EventApp() {
     setActiveSection(sectionName);
   };
 
-    // For top-rated services: prefer real services fetched from Firebase, fall back to store
-    const topRatedServices = useMemo(() => {
-      const source = (realServices && realServices.length > 0) ? realServices : services;
-      return source
-        .filter(s => {
-          const rating = typeof (s as any).rating === 'number'
-            ? (s as any).rating
-            : ((s as any).reviews ? parseFloat((s as any).reviews as any) : NaN);
-          return !isNaN(rating) && rating >= 4.5;
-        })
-        .sort((a, b) => {
-          const ra = typeof (a as any).rating === 'number' ? (a as any).rating : ((a as any).reviews ? parseFloat((a as any).reviews as any) : 0);
-          const rb = typeof (b as any).rating === 'number' ? (b as any).rating : ((b as any).reviews ? parseFloat((b as any).reviews as any) : 0);
-          return rb - ra;
-        });
-    }, [services, realServices]);
-
-    // If the filtered list is empty, fall back to top items by rating/orders/recency
-    const resolvedTopServices = useMemo(() => {
-      if (topRatedServices && topRatedServices.length > 0) return topRatedServices;
-      const source = (realServices && realServices.length > 0) ? realServices : services;
-      if (!source || source.length === 0) return [];
-
-      // Try to sort by numeric rating first, then by parseInt(orders) if present, then by createdAt if present
-      const withScore = source.map(s => {
-        const rating = typeof (s as any).rating === 'number' ? (s as any).rating : ((s as any).reviews ? parseFloat((s as any).reviews as any) : NaN);
-        let orders = 0;
-        if ((s as any).orders) {
-          const parsed = parseInt(String((s as any).orders).replace(/[^0-9]/g, ''), 10);
-          orders = isNaN(parsed) ? 0 : parsed;
-        }
-        const createdAt = (s as any).createdAt ? new Date((s as any).createdAt).getTime() : 0;
-        const score = (!isNaN(rating) ? rating * 10 : 0) + orders / 100 + createdAt / (1000 * 60 * 60 * 24 * 365);
-        return { s, score };
-      });
-
-      const sorted = withScore.sort((a, b) => b.score - a.score).map(x => x.s);
-      return sorted.slice(0, 8);
-    }, [topRatedServices, services, realServices]);
+  // For top-rated services:
+  const topRatedServices = useMemo(() =>
+    services.filter(s => (typeof s.rating === 'number' ? s.rating >= 4.5 : (parseFloat(s.reviews) >= 4.5)))
+      .sort((a, b) => (b.rating || parseFloat(b.reviews)) - (a.rating || parseFloat(a.reviews)))
+  , [services]);
 
   // Navigation items with proper hooks
   const navigationItems = useMemo(() => [
@@ -560,85 +524,56 @@ export default function EventApp() {
   const renderServiceCard = (service: Service, index: number) => {
     const gradientIndex = index % cardGradients.length;
 
-    const pickImage = (s: any) => {
-      const resolveCandidate = (candidate: any) => {
-        if (!candidate) return null;
-        if (typeof candidate === 'string') return candidate;
-        if (typeof candidate === 'number') return candidate;
-        if (typeof candidate === 'object') {
-          return candidate.url || candidate.downloadURL || candidate.fullPath || candidate.path || candidate.fileUrl || null;
-        }
-        return null;
-      };
-
-      // images can be array of strings or array of objects
-      let imgs = null;
-      if (s?.images && Array.isArray(s.images)) imgs = s.images;
-      else if (s?.image && Array.isArray(s.image)) imgs = s.image;
-      else if (s?.image) imgs = [s.image];
-
-      if (imgs && imgs.length > 0) {
-        const first = resolveCandidate(imgs[0]);
-        if (first) return typeof first === 'number' ? first : { uri: first };
-      }
-
-      // try other common fields
-      const candidate = resolveCandidate(s?.cover) || resolveCandidate(s?.flyer) || resolveCandidate(s?.flyerUrl) || resolveCandidate(s?.file) || resolveCandidate(s?.image);
-      if (candidate) return typeof candidate === 'number' ? candidate : { uri: candidate };
-
-      return null;
-    };
-
-    const imageSource = pickImage(service as any);
-    console.log(`🔧 Service ${service.title} image source:`, imageSource);
-
     return (
       <TouchableOpacity
         key={service.id}
-        style={[styles.enhancedServiceCard, { width: 260 }]}
-        onPress={() => router.push(`/(client)/(hidden)/gig/${service.id.toString()}`)}
+        style={styles.enhancedServiceCard}
+        onPress={() => { }}
         activeOpacity={0.95}
       >
         <View style={styles.serviceCardHeader}>
-          <View style={[styles.serviceImageContainer, { backgroundColor: cardGradients[gradientIndex][0], height: 200, borderRadius: 20 }]}>
-            {imageSource ? (
-              <Animated.Image
-                source={imageSource as any}
-                style={[styles.coverImage, { borderRadius: 20 }]}
-                resizeMode="cover"
-                onError={() => {}}
-              />
-            ) : (
-              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', borderRadius: 20 }}>
-                <Icon name="package" size={48} color="#ffffff" />
+          <View style={[styles.serviceImageContainer, { backgroundColor: cardGradients[gradientIndex][0] }]}>
+            {/* Show real service image if available */}
+            {service.image && typeof service.image === 'string' && service.image.startsWith('http') ? (
+              <View style={{ width: '100%', height: '100%', borderRadius: 20, overflow: 'hidden' }}>
+                <Animated.Image
+                  source={{ uri: service.image }}
+                  style={{ width: '100%', height: '100%', borderRadius: 20 }}
+                  resizeMode="cover"
+                  onError={() => {}}
+                />
               </View>
+            ) : (
+              <Icon name="package" size={20} color="#ffffff" />
             )}
-            <View style={[styles.imageGradientOverlay, { borderBottomLeftRadius: 20, borderBottomRightRadius: 20 }]} />
-            <View style={[styles.floatingBadge, { backgroundColor: (service as any).available === 'Available' ? '#10b981' : '#f59e0b' }]}>
-              <Text style={styles.floatingBadgeText}>{(service as any).available}</Text>
-            </View>
-            <View style={[styles.servicePriceBadge, { top: 12, right: 12 }]}>
-              <Text style={styles.servicePriceText}>{service.price}</Text>
-            </View>
+            <View style={styles.serviceCardOverlay} />
+          </View>
+          <View style={styles.servicePriceBadge}>
+            <Text style={styles.servicePriceText}>{service.price}</Text>
+          </View>
+          <View style={styles.serviceAvailabilityBadge}>
+            <View style={[styles.availabilityDot, {
+              backgroundColor: service.available === 'Available' ? '#10b981' : '#f59e0b'
+            }]} />
+            <Text style={styles.availabilityText}>{service.available}</Text>
           </View>
         </View>
-        <View style={[styles.enhancedServiceDetails, { padding: 20 }]}>
-          <Text style={[styles.enhancedServiceTitle, { fontSize: 18, marginBottom: 8 }]} numberOfLines={2}>{service.title}</Text>
-          <View style={[styles.serviceMetrics, { gap: 12 }]}>
+        <View style={styles.enhancedServiceDetails}>
+          <Text style={styles.enhancedServiceTitle}>{service.title}</Text>
+          <View style={styles.serviceMetrics}>
             <View style={styles.serviceMetric}>
-              <Icon name="map-pin" size={14} color="#6b7280" />
-              <Text style={[styles.serviceMetricText, { fontSize: 14 }]}>{service.location}</Text>
+              <Icon name="map-pin" size={12} color="#6b7280" />
+              <Text style={styles.serviceMetricText}>{service.location}</Text>
             </View>
             <View style={styles.serviceMetric}>
-              <Icon name="star" size={14} color="#f59e0b" />
-              <Text style={[styles.serviceMetricText, { fontSize: 14, color: '#f59e0b', fontWeight: '600' }]}>{(service as any).reviews}</Text>
-              <Text style={[styles.serviceMetricText, { fontSize: 13, marginLeft: 8 }]}>({(service as any).orders} orders)</Text>
+              <Icon name="star" size={12} color="#f59e0b" />
+              <Text style={styles.serviceMetricText}>{service.reviews}</Text>
+            </View>
+            <View style={styles.serviceMetric}>
+              <Icon name="shopping-bag" size={12} color="#6b7280" />
+              <Text style={styles.serviceMetricText}>{service.orders}</Text>
             </View>
           </View>
-          <TouchableOpacity style={[styles.viewButton, { marginTop: 12, alignSelf: 'flex-start' }]}>
-            <Text style={styles.viewButtonText}>View Details</Text>
-            <Icon name="arrow-right" size={14} color="#fff" style={{ marginLeft: 6 }} />
-          </TouchableOpacity>
         </View>
       </TouchableOpacity>
     );
@@ -652,64 +587,33 @@ export default function EventApp() {
       <TouchableOpacity
         key={artist.id}
         style={styles.enhancedArtistCard}
-  onPress={() => router.push(`/(client)/(hidden)/artist/${artist.id.toString()}`)}
+        onPress={() => router.push({ pathname: '/(client)/(hidden)/artist/[artistId]', params: { artistId: artist.id.toString() } })}
         activeOpacity={0.95}
       >
         <View style={styles.artistCardHeader}>
-          <View style={[styles.artistImageContainer, { backgroundColor: cardGradients[gradientIndex][0], height: 140, borderRadius: 20 }]}>
-            {(() => {
-              // Enhanced artist image resolution
-              const resolveArtistImage = (a: any) => {
-                const resolveCandidate = (candidate: any) => {
-                  if (!candidate) return null;
-                  if (typeof candidate === 'string') return candidate;
-                  if (typeof candidate === 'object') {
-                    return candidate.url || candidate.downloadURL || candidate.fullPath || candidate.path || candidate.fileUrl || null;
-                  }
-                  return null;
-                };
-
-                // Try multiple profile image fields
-                return resolveCandidate(a?.image) || resolveCandidate(a?.profileImage) || resolveCandidate(a?.avatar) || resolveCandidate(a?.photo) || resolveCandidate(a?.profilePicture);
-              };
-
-              const artistImageUrl = resolveArtistImage(artist);
-              console.log(`🎨 Artist ${artist.name} image URL:`, artistImageUrl);
-              
-              return artistImageUrl && typeof artistImageUrl === 'string' && artistImageUrl.startsWith('http') ? (
-                <View style={{ width: '100%', height: '100%', borderRadius: 20, overflow: 'hidden' }}>
-                  <Animated.Image
-                    source={{ uri: artistImageUrl }}
-                    style={{ width: '100%', height: '100%', borderRadius: 20 }}
-                    resizeMode="cover"
-                    onError={() => {}}
-                  />
-                </View>
-              ) : (
-                <Icon name="user" size={48} color="#ffffff" />
-              );
-            })()}
-            <View style={[styles.imageGradientOverlay, { borderBottomLeftRadius: 20, borderBottomRightRadius: 20 }]} />
+          <View style={[styles.artistImageContainer, { backgroundColor: cardGradients[gradientIndex][0] }]}>
+            <Icon name="user" size={24} color="#ffffff" />
+            <View style={styles.artistCardOverlay} />
           </View>
-          <View style={[styles.floatingBadge, { backgroundColor: '#f59e0b', top: 12, right: 12 }]}>
-            <Icon name="star" size={12} color="#fff" style={{ marginRight: 4 }} />
-            <Text style={[styles.floatingBadgeText, { color: '#fff' }]}>{artist.rating}</Text>
+          <View style={styles.artistRatingBadge}>
+            <Icon name="star" size={12} color="#f59e0b" />
+            <Text style={styles.artistRatingText}>{artist.rating}</Text>
           </View>
         </View>
 
-        <View style={[styles.enhancedArtistContent, { padding: 20 }]}>
-          <View style={[styles.artistTitleSection, { marginBottom: 12 }]}>
-            <Text style={[styles.enhancedArtistName, { fontSize: 18, marginBottom: 8 }]}>{artist.name}</Text>
-            <View style={[styles.artistSpecialtyBadge, { backgroundColor: '#f3f4f6', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 }]}>
-              <Text style={[styles.artistSpecialtyText, { fontSize: 12, color: '#6b7280', fontWeight: '600' }]}>{artist.specialty}</Text>
+        <View style={styles.enhancedArtistContent}>
+          <View style={styles.artistTitleSection}>
+            <Text style={styles.enhancedArtistName}>{artist.name}</Text>
+            <View style={styles.artistSpecialtyBadge}>
+              <Text style={styles.artistSpecialtyText}>{artist.specialty}</Text>
             </View>
           </View>
 
-          <Text style={[styles.enhancedArtistDescription, { fontSize: 14, color: '#6b7280', marginBottom: 16, lineHeight: 20 }]} numberOfLines={2}>{artist.description}</Text>
+          <Text style={styles.enhancedArtistDescription}>{artist.description}</Text>
 
-          <TouchableOpacity style={[styles.viewButton, { alignSelf: 'flex-start' }]}>
-            <Icon name="message-circle" size={14} color="#fff" style={{ marginRight: 6 }} />
-            <Text style={styles.viewButtonText}>Contact Artist</Text>
+          <TouchableOpacity style={styles.enhancedContactButton}>
+            <Icon name="message-circle" size={16} color="#fff" style={styles.contactButtonIcon} />
+            <Text style={styles.contactButtonText}>Contact</Text>
           </TouchableOpacity>
         </View>
       </TouchableOpacity>
@@ -731,17 +635,7 @@ export default function EventApp() {
           styles.trendingImageContainer,
           { backgroundColor: cardGradients[index % cardGradients.length][0] }
         ]}>
-          {/* display ticket flyer or image: support string uri or local require */}
-          {(() => {
-            const img = ticket?.flyer || ticket?.image || ticket?.flyerUrl || ticket?.cover;
-            if (typeof img === 'string' && img.startsWith('http')) {
-              return <Animated.Image source={{ uri: img }} style={styles.coverImage} resizeMode="cover" />;
-            }
-            if (typeof img === 'number') {
-              return <Animated.Image source={img} style={styles.coverImage} resizeMode="cover" />;
-            }
-            return <Icon name="calendar" size={24} color="#ffffff" />;
-          })()}
+          <Icon name="calendar" size={24} color="#ffffff" />
           <View style={styles.trendingCardOverlay} />
         </View>
         <View style={styles.enhancedTrendingContent}>
@@ -761,124 +655,31 @@ export default function EventApp() {
   // Fetch real artists and tickets when popup opens
   useEffect(() => {
     if (isPopupVisible && popupContent === 'artists') {
-      fetchArtists().then(setRealArtists).catch(() => setRealArtists([]));
+      fetchArtists().then(setRealArtists);
     }
     if (isPopupVisible && popupContent === 'tickets') {
-      fetchAllTickets().then(setRealTickets).catch(() => setRealTickets([]));
-    }
-    if (isPopupVisible && popupContent === 'services') {
-      fetchAllServices().then(svcs => {
-        if (Array.isArray(svcs) && svcs.length > 0) setRealServices(svcs as Service[]);
-        else setRealServices([]);
-      }).catch(() => setRealServices([]));
+      fetchTickets().then(setRealTickets);
     }
   }, [isPopupVisible, popupContent]);
 
-  // Fetch tickets on mount so Trending section has data immediately
+  // 2. Fetch real services from the marketplace API
   useEffect(() => {
-    let mounted = true;
-    fetchAllTickets()
-      .then(tickets => {
-        if (!mounted) return;
-        if (Array.isArray(tickets) && tickets.length > 0) {
-          console.log('Fetched tickets on mount:', tickets.length);
-          // normalize tickets to ensure image field is a usable uri or local require
-          const normalized = tickets.map((t: any) => {
-            const imgCandidate = t.images && Array.isArray(t.images) && t.images.length > 0 ? t.images[0] : (t.image || t.flyer || t.cover || t.flyerUrl || null);
-            let imageUri: any = null;
-            if (typeof imgCandidate === 'string' && imgCandidate.startsWith('http')) imageUri = imgCandidate;
-            else if (typeof imgCandidate === 'object' && imgCandidate !== null) imageUri = imgCandidate.url || imgCandidate.downloadURL || imgCandidate.path || null;
-            else if (typeof imgCandidate === 'number') imageUri = imgCandidate; // local require
-
-            return {
-              id: t.id,
-              title: t.title || t.name || t.eventName || 'Untitled',
-              venue: t.venue || t.location || (t as any).venueName || '',
-              city: t.city || t.cityName || '',
-              price: t.price || (t.priceAmount ?? 0),
-              image: imageUri,
-              raw: t,
-            } as any;
-          });
-          console.log('Sample normalized ticket:', normalized[0]);
-          setRealTickets(normalized);
+    fetchServices()
+      .then(services => {
+        console.log('Fetched services:', services);
+        if (Array.isArray(services)) {
+          // Shuffle services for randomness
+          const shuffled = services.sort(() => 0.5 - Math.random());
+          setRealServices(shuffled);
         } else {
-          // fallback to local dummy tickets so UI shows cards
-          console.log('No tickets from Firebase, using dummyTickets');
-          setRealTickets(dummyTickets as any[]);
+          console.error('Services is not an array:', services);
+          setRealServices([]);
         }
       })
-      .catch(() => {
-        if (!mounted) return;
-        console.log('Error fetching tickets, using dummyTickets');
-        setRealTickets(dummyTickets as any[]);
+      .catch(error => {
+        console.error('Error fetching services:', error);
+        setRealServices([]);
       });
-
-    return () => { mounted = false; };
-  }, []);
-
-  // Fetch real services from Firebase for Top Services using only Firestore fields
-  useEffect(() => {
-    let mounted = true;
-
-    const resolveCandidateSync = (candidate: any): string | number | null => {
-      if (!candidate) return null;
-      if (typeof candidate === 'number') return candidate; // local require
-      if (typeof candidate === 'string') {
-        if (candidate.startsWith('http')) return candidate;
-        // do not attempt Storage resolution here; ignore gs:// or storage paths
-        return null;
-      }
-      if (typeof candidate === 'object') {
-        const possible = candidate.url || candidate.downloadURL || candidate.fileUrl || candidate.path || candidate.fullPath || null;
-        if (typeof possible === 'string' && possible.startsWith('http')) return possible;
-        return null;
-      }
-      return null;
-    };
-
-    fetchAllServices()
-      .then(svcs => {
-        console.log('Fetched services on mount:', Array.isArray(svcs) ? svcs.length : typeof svcs);
-        if (!Array.isArray(svcs) || svcs.length === 0) {
-          if (mounted) setRealServices([]);
-          return;
-        }
-
-        console.log('services sample (raw):', svcs.slice(0, 3));
-
-        const normalized = svcs.map((s: any) => {
-          const imagesArr = s.images && Array.isArray(s.images) ? s.images : (s.images && typeof s.images === 'object' ? [s.images] : null);
-          let candidate = null;
-          if (imagesArr && imagesArr.length > 0) candidate = imagesArr[0];
-          else if (s.image) candidate = s.image;
-          else if (s.cover) candidate = s.cover;
-          else if (s.flyer) candidate = s.flyer;
-
-          let imageUri: any = null;
-          const resolved = resolveCandidateSync(candidate);
-          if (resolved) imageUri = typeof resolved === 'number' ? resolved : { uri: resolved };
-
-          return {
-            id: s.id || s.serviceId || s._id,
-            title: s.title || s.name || s.serviceName || 'Untitled Service',
-            location: s.location || s.city || s.venue || '',
-            reviews: s.reviews || s.rating || '0',
-            orders: s.orders || s.orderCount || '0',
-            price: s.price || s.basePrice || '0',
-            available: s.available || (s.status === 'available' ? 'Available' : 'Booked'),
-            image: imageUri,
-            raw: s,
-          } as any;
-        });
-
-        console.log('services sample (normalized):', normalized.slice(0, 3));
-        const shuffled = normalized.sort(() => 0.5 - Math.random());
-        if (mounted) setRealServices(shuffled as Service[]);
-      })
-      .catch(err => { console.log('Error fetching services:', err); if (mounted) setRealServices([]); });
-
-    return () => { mounted = false; };
   }, []);
 
   const handleFeatureNavigation = (featureTitle: string) => {
@@ -1235,7 +1036,6 @@ export default function EventApp() {
                 <View>
                   <Text style={styles.enhancedSectionTitle}>Trending Now</Text>
                   <Text style={styles.sectionSubtitle}>Popular events this week</Text>
-                  <Text style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>debug: {realTickets.length} tickets{realTickets.length>0?` (first:${realTickets[0].id})`:''}</Text>
                 </View>
                 <TouchableOpacity style={styles.seeAllButton} onPress={() => router.push('/(client)/tickets')}>
                   <Text style={styles.seeAllText}>See all</Text>
@@ -1256,7 +1056,6 @@ export default function EventApp() {
                     width: 240, // Make card bigger
                     height: 320,
                     marginRight: 24,
-                    ...(index === 0 ? { borderWidth: 2, borderColor: '#ef4444' } : {}),
                   }
                   ]}
                   activeOpacity={0.9}
@@ -1269,67 +1068,30 @@ export default function EventApp() {
                     height: 180, // Bigger image
                   }
                   ]}>
-                  {/* Enhanced image handling with fallback for real tickets */}
-                  {(() => {
-                    // Use same robust image resolution as services
-                    const resolveTicketImage = (t: any) => {
-                      const resolveCandidate = (candidate: any) => {
-                        if (!candidate) return null;
-                        if (typeof candidate === 'string') return candidate;
-                        if (typeof candidate === 'object') {
-                          return candidate.url || candidate.downloadURL || candidate.fullPath || candidate.path || candidate.fileUrl || null;
-                        }
-                        return null;
-                      };
-
-                      // Try multiple image fields
-                      let imgs = null;
-                      if (t?.images && Array.isArray(t.images)) imgs = t.images;
-                      else if (t?.image && Array.isArray(t.image)) imgs = t.image;
-                      else if (t?.image) imgs = [t.image];
-
-                      if (imgs && imgs.length > 0) {
-                        const first = resolveCandidate(imgs[0]);
-                        if (first) return first;
-                      }
-
-                      // Try other common fields
-                      return resolveCandidate(t?.cover) || resolveCandidate(t?.flyer) || resolveCandidate(t?.flyerUrl) || resolveCandidate(t?.file) || resolveCandidate(t?.image);
-                    };
-
-                    const ticketImageUrl = resolveTicketImage(ticket);
-                    console.log(`🎫 Ticket ${ticket.title} image URL:`, ticketImageUrl);
-                    
-                    return ticketImageUrl && typeof ticketImageUrl === 'string' && ticketImageUrl.startsWith('http') ? (
-                      <View style={{ width: '100%', height: '100%', borderRadius: 20, overflow: 'hidden' }}>
-                        <Animated.Image
-                          source={{ uri: ticketImageUrl }}
-                          style={{ width: '100%', height: '100%', borderRadius: 20 }}
-                          resizeMode="cover"
-                          onError={() => {}}
-                        />
-                      </View>
-                    ) : (
-                      <Icon name="calendar" size={32} color="#ffffff" />
-                    );
-                  })()}
-                  <View style={[styles.imageGradientOverlay, { borderBottomLeftRadius: 20, borderBottomRightRadius: 20 }]} />
-                  {index === 0 && (
-                    <View style={[styles.floatingBadge, { backgroundColor: '#ef4444', top: 12, left: 12 }]}>
-                      <Text style={styles.floatingBadgeText}>Trending</Text>
+                  {/* Robust image handling with fallback for real tickets */}
+                  {ticket.image && typeof ticket.image === 'string' && ticket.image.startsWith('http') ? (
+                    <View style={{ width: '100%', height: '100%', borderRadius: 20, overflow: 'hidden' }}>
+                    <Animated.Image
+                      source={{ uri: ticket.image }}
+                      style={{ width: '100%', height: '100%', borderRadius: 20 }}
+                      resizeMode="cover"
+                      onError={() => {}}
+                    />
                     </View>
+                  ) : (
+                    <Icon name="calendar" size={32} color="#ffffff" />
                   )}
-                  <View style={[styles.enhancedTrendingPrice, { position: 'absolute', bottom: 12, right: 12, backgroundColor: '#1f2937', borderRadius: 16 }]}> 
-                    <Text style={[styles.trendingPriceText, { fontSize: 16, color: '#ffffff', fontWeight: '700' }]}>{ticket.price} MAD</Text>
-                  </View>
+                  <View style={styles.trendingCardOverlay} />
                   </View>
                   <View style={[styles.enhancedTrendingContent, { padding: 20 }]}> 
-                    <Text style={[styles.enhancedTrendingTitle, { fontSize: 18, marginBottom: 12 }]}>{ticket.title}</Text>
-                    <View style={[styles.trendingInfo, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
+                    <Text style={[styles.enhancedTrendingTitle, { fontSize: 18 }]}>{ticket.title}</Text>
+                    <View style={styles.trendingInfo}>
                       <Icon name="map-pin" size={14} color="#6b7280" />
-                      <Text style={[styles.trendingInfoText, { fontSize: 15, color: '#6b7280' }]}>{ticket.venue}, {ticket.city}</Text>
+                      <Text style={[styles.trendingInfoText, { fontSize: 15 }]}>{ticket.venue}, {ticket.city}</Text>
                     </View>
-
+                    <View style={[styles.enhancedTrendingPrice, { paddingVertical: 10, paddingHorizontal: 16 }]}> 
+                      <Text style={[styles.trendingPriceText, { fontSize: 18 }]}>{ticket.price} MAD</Text>
+                    </View>
                   </View>
                   </TouchableOpacity>
                 ))}
@@ -1375,16 +1137,15 @@ export default function EventApp() {
                   <View>
                     <Text style={styles.enhancedSectionTitle}>Top Services</Text>
                     <Text style={styles.sectionSubtitle}>Don't miss out on these amazing services</Text>
-                    <Text style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>debug: {realServices.length} services{realServices.length>0?` (first:${realServices[0].id})`:''}</Text>
                   </View>
                   <TouchableOpacity style={styles.seeAllButton} onPress={() => router.push({ pathname: '/(client)/search' })}>
                     <Text style={styles.seeAllText}>See all</Text>
                     <Icon name="arrow-right" size={14} color="#4f46e5" />
                   </TouchableOpacity>
                   </View>
-                  {resolvedTopServices.length > 0 ? (
+                  {topRatedServices.length > 0 ? (
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingLeft: 8, marginBottom: 8 }}>
-                      {resolvedTopServices.slice(0, 8).map((service, index) => {
+                      {topRatedServices.slice(0, 8).map((service, index) => {
                         return (
                           <Animated.View
                             key={service.id}
@@ -1399,6 +1160,11 @@ export default function EventApp() {
                                 backgroundColor: 'rgba(255,255,255,0.85)',
                                 borderRadius: 28,
                                 overflow: 'hidden',
+                                elevation: 8,
+                                shadowColor: '#000',
+                                shadowOffset: { width: 0, height: 8 },
+                                shadowOpacity: 0.18,
+                                shadowRadius: 24,
                                 borderWidth: 1,
                                 borderColor: 'rgba(76,70,229,0.07)',
                               }}
@@ -1406,40 +1172,47 @@ export default function EventApp() {
                               onPress={() => router.push({ pathname: '/(client)/(hidden)/gig/[gigId]', params: { gigId: service.id.toString() } })}
                             >
                               {/* Service Image with glassmorphism and floating badge */}
-                              <View style={{ position: 'relative', width: '100%', height: 150, backgroundColor: cardGradients[index % cardGradients.length][0], ...(index===0?{borderWidth:2,borderColor:'#ef4444'}:{}) }}>
-                                {(() => {
-                                  const img = service.image;
-                                  if (!img) return (
-                                    <View style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}>
-                                      <Icon name="package" size={54} color="#ffffff" />
-                                    </View>
-                                  );
-
-                                  // local require
-                                  if (typeof img === 'number') {
-                                    return <Animated.Image source={img as any} style={{ width: '100%', height: '100%' }} resizeMode="cover" />;
-                                  }
-
-                                  // object with { uri }
-                                  if (typeof img === 'object' && (img as any).uri) {
-                                    return <Animated.Image source={(img as any)} style={{ width: '100%', height: '100%' }} resizeMode="cover" />;
-                                  }
-
-                                  // string url
-                                  if (typeof img === 'string' && img.startsWith('http')) {
-                                    return <Animated.Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />;
-                                  }
-
-                                  // fallback
-                                  return (
-                                    <View style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}>
-                                      <Icon name="package" size={54} color="#ffffff" />
-                                    </View>
-                                  );
-                                })()}
-                                <View style={styles.imageGradientOverlay} />
-                                <View style={[styles.floatingBadge, { backgroundColor: service.available === 'Available' ? '#10b981' : '#f59e0b' }]}>
-                                  <Text style={styles.floatingBadgeText}>{service.available}</Text>
+                              <View style={{ position: 'relative', width: '100%', height: 150, backgroundColor: cardGradients[index % cardGradients.length][0] }}>
+                                {service.image && typeof service.image === 'string' && service.image.startsWith('http') ? (
+                                  <Animated.Image
+                                    source={{ uri: service.image }}
+                                    style={{ width: '100%', height: '100%' }}
+                                    resizeMode="cover"
+                                    onError={() => {}}
+                                  />
+                                ) : (
+                                  <View style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}>
+                                    <Icon name="package" size={54} color="#ffffff" />
+                                  </View>
+                                )}
+                                {/* Glassmorphism overlay */}
+                                <View style={{
+                                  position: 'absolute',
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 0,
+                                  height: 70,
+                                  borderBottomLeftRadius: 28,
+                                  borderBottomRightRadius: 28,
+                                  backgroundColor: 'rgba(255,255,255,0.22)',
+                                  backdropFilter: 'blur(8px)',
+                                }} />
+                                {/* Floating badge */}
+                                <View style={{
+                                  position: 'absolute',
+                                  top: 16,
+                                  left: 16,
+                                  backgroundColor: service.available === 'Available' ? '#10b981' : '#f59e0b',
+                                  borderRadius: 16,
+                                  paddingHorizontal: 14,
+                                  paddingVertical: 5,
+                                  zIndex: 2,
+                                  shadowColor: '#000',
+                                  shadowOffset: { width: 0, height: 2 },
+                                  shadowOpacity: 0.12,
+                                  shadowRadius: 4,
+                                }}>
+                                  <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>{service.available}</Text>
                                 </View>
                               </View>
                               {/* Card Content */}
@@ -1453,7 +1226,7 @@ export default function EventApp() {
                                 </View>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                                   <Text style={{ color: '#10b981', fontWeight: 'bold', fontSize: 20 }}>{service.price}</Text>
-                                  <View style={{ backgroundColor: '#4f46e5', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 6 }}>
+                                  <View style={{ backgroundColor: '#4f46e5', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 6, shadowColor: '#4f46e5', shadowOpacity: 0.12, shadowRadius: 4 }}>
                                     <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>View</Text>
                                   </View>
                                 </View>
@@ -1520,8 +1293,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
-  zIndex: 10,
-  // shadow removed
+    zIndex: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 8,
   },
   headerContent: {
     flexDirection: 'row',
@@ -1563,9 +1340,13 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 22,
     backgroundColor: '#f1f5f9',
-  justifyContent: 'center',
-  alignItems: 'center',
-  // shadow removed
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#4f46e5',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   notificationBadge: {
     position: 'absolute',
@@ -1591,9 +1372,13 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 22,
     backgroundColor: '#e0e7ff',
-  justifyContent: 'center',
-  alignItems: 'center',
-  // shadow removed
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#4f46e5',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 4,
   },
   avatar: {
     width: 44,
@@ -1615,9 +1400,13 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 14,
-  borderWidth: 1,
-  borderColor: '#e2e8f0',
-  // shadow removed
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
   },
   searchIcon: {
     marginRight: 12,
@@ -1644,8 +1433,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderTopLeftRadius: 32,
     borderTopRightRadius: 32,
-  paddingTop: 24,
-  // shadow removed
+    paddingTop: 24,
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
   },
 
   // Quick Stats
@@ -1743,8 +1536,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 4,
     paddingHorizontal: 8,
-  zIndex: 3,
-  // shadow removed
+    zIndex: 3,
+    shadowColor: '#ef4444',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
   },
   badgeText: {
     color: '#ffffff',
@@ -1889,7 +1686,11 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: '#ffffff',
     marginRight: 16,
-  // shadow removed
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
     overflow: 'hidden',
   },
   trendingImageContainer: {
@@ -1940,12 +1741,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  // Cover image used in cards
-  coverImage: {
-    width: '100%',
-    height: '100%',
-  },
-
   // Enhanced Events Section
   enhancedEventsSection: {
     marginBottom: 100,
@@ -1956,7 +1751,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderRadius: 24,
     marginBottom: 20,
-  // shadow removed
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 6,
     overflow: 'hidden',
   },
   eventCardHeader: {
@@ -1989,7 +1788,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 12,
     alignItems: 'center',
-  // shadow removed
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   eventDateText: {
     fontSize: 16,
@@ -2086,7 +1889,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-  // shadows removed per request
+    shadowColor: '#4f46e5',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
   },
   buyButtonText: {
     color: '#ffffff',
@@ -2103,7 +1910,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderRadius: 20,
     marginBottom: 16,
-  // shadows removed
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
     overflow: 'hidden',
   },
   serviceCardHeader: {
@@ -2131,7 +1942,11 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 12,
-  // shadow removed
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   servicePriceText: {
     color: '#4f46e5',
@@ -2148,7 +1963,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     flexDirection: 'row',
     alignItems: 'center',
-  // shadow removed
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   availabilityDot: {
     width: 6,
@@ -2189,7 +2008,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderRadius: 20,
     marginBottom: 16,
-  // shadow removed
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
     overflow: 'hidden',
   },
   artistCardHeader: {
@@ -2219,7 +2042,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     flexDirection: 'row',
     alignItems: 'center',
-  // shadow removed
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   artistRatingText: {
     fontSize: 14,
@@ -2268,7 +2095,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-  // shadow removed
+    shadowColor: '#4f46e5',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 4,
   },
   contactButtonIcon: {
     marginRight: 8,
@@ -2302,7 +2133,11 @@ const styles = StyleSheet.create({
     width: 48,
    
     borderRadius: 20,
-  // shadow removed
+    shadowColor: '#64748b',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   enhancedModalCloseButton: {
     position: 'absolute',
@@ -2358,7 +2193,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 12,
-  // shadow removed
+          shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 4,
   },
   // Add enhancedFeatureTitle style (fix typo, was enhancedFeatureText before)
   enhancedFeatureTitle: {
@@ -2366,51 +2205,6 @@ const styles = StyleSheet.create({
     color: '#0f172a',
     fontWeight: '600',
     textAlign: 'center',
-  },
-
-  // New image/card helpers
-  imageGradientOverlay: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 80,
-    backgroundColor: 'rgba(0,0,0,0.35)'
-  },
-  imageTitle: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 18,
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 16,
-    zIndex: 3,
-  },
-  floatingBadge: {
-    position: 'absolute',
-    top: 12,
-    left: 12,
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    zIndex: 4,
-  },
-  floatingBadgeText: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  viewButton: {
-    backgroundColor: '#4f46e5',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  viewButtonText: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 14,
   },
 
 });
