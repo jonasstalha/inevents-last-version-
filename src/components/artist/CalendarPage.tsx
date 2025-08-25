@@ -1,54 +1,63 @@
-import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { collection, getDocs, getFirestore } from 'firebase/firestore';
+import React, { useEffect, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-// Dummy data for demonstration
-const initialOrders = [
-  {
-    id: 1,
-    type: 'service',
-    clientName: 'John Smith',
-    service: 'Live Performance',
-    date: '2024-07-20',
-    time: '8:00 PM',
-    price: 1500,
-    clientPrice: 1200,
-    message: 'Looking for acoustic set for wedding reception',
-    status: 'pending',
-    timestamp: '2 hours ago',
-  },
-  {
-    id: 2,
-    type: 'ticket',
-    clientName: 'Sarah Johnson',
-    eventName: 'Summer Music Festival',
-    quantity: 5,
-    ticketType: 'VIP',
-    price: 250,
-    clientPrice: 200,
-    message: 'Can we get group discount?',
-    status: 'pending',
-    timestamp: '4 hours ago',
-  },
-  {
-    id: 3,
-    type: 'service',
-    clientName: 'Mike Wilson',
-    service: 'Recording Session',
-    date: '2024-07-15',
-    time: '2:00 PM',
-    price: 800,
-    clientPrice: null,
-    message: 'Need vocals for my track, studio session preferred',
-    status: 'pending',
-    timestamp: '1 day ago',
-  },
-];
+interface Order {
+  id: number; // Updated to match the code's expectations
+  type: 'service' | 'ticket';
+  clientName: string;
+  service?: string;
+  date?: string;
+  time?: string;
+  price: number;
+  clientPrice?: number;
+  message?: string;
+  status: 'pending' | 'accepted' | 'declined' | 'counter_offered';
+  timestamp: string;
+  eventName?: string;
+  quantity?: number;
+  ticketType?: string;
+}
 
 const CalendarPage = () => {
-  const [orders, setOrders] = useState(initialOrders);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [filter, setFilter] = useState('all');
   const [counterOffer, setCounterOffer] = useState<{ [key: number]: string }>({});
+
+  useEffect(() => {
+    const fetchOrders = async () => {
+      try {
+        const db = getFirestore();
+        const ordersCollection = collection(db, 'orders');
+        const ordersSnapshot = await getDocs(ordersCollection);
+        const ordersData = ordersSnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: parseInt(doc.id, 10), // Ensure `id` is a number
+            type: data.type,
+            clientName: data.clientName,
+            service: data.service,
+            date: data.date,
+            time: data.time,
+            price: data.price,
+            clientPrice: data.clientPrice,
+            message: data.message,
+            status: data.status,
+            timestamp: data.timestamp,
+            eventName: data.eventName,
+            quantity: data.quantity,
+            ticketType: data.ticketType,
+          };
+        });
+        setOrders(ordersData);
+      } catch (error) {
+        console.error('Error fetching orders:', error);
+      }
+    };
+
+    fetchOrders();
+  }, []);
 
   const handleAcceptOrder = (orderId: number) => {
     setOrders(orders.map(order =>

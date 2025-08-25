@@ -4,7 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { getAuth } from 'firebase/auth';
 import React, { useEffect, useState } from 'react';
-import { Alert, Image, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, Modal, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchServicesByArtistId } from '../../firebase/artistServices';
 import { addServiceToFirebase, addTicketToFirebase, fetchArtistById } from '../../firebase/artistsService';
@@ -42,8 +42,9 @@ const ArtistMobileApp = () => {
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<{ type: string; name: string } | null>(null);
   const [notifications, setNotifications] = useState(3);
-  const [credits, setCredits] = useState(50);
-  const [walletBalance, setWalletBalance] = useState(1250.00);
+  const [credits, setCredits] = useState(0);
+  const [walletBalance, setWalletBalance] = useState(0.00);
+  const [showAddFundsModal, setShowAddFundsModal] = useState(false);
 
   // State for real artist profile
   const [artistProfile, setArtistProfile] = useState({
@@ -54,6 +55,9 @@ const ArtistMobileApp = () => {
     reviewsCount: 0
   });
   const [profileLoading, setProfileLoading] = useState(true);
+
+  // State for starter credits flag
+  const [hasGivenStarterCredits, setHasGivenStarterCredits] = useState(false);
 
   // Fetch real artist profile on mount
   useEffect(() => {
@@ -80,7 +84,38 @@ const ArtistMobileApp = () => {
       }
     };
     fetchProfile();
-  }, []);
+
+    // Initialize credits and wallet balance to 0
+    // In production, this would be handled by a backend system
+    if (!hasGivenStarterCredits) {
+      // Start with 0 credits and 0 MAD in wallet
+      setCredits(0);
+      setWalletBalance(0.00);
+      setHasGivenStarterCredits(true);
+    }
+  }, [hasGivenStarterCredits]);
+
+  // Handle Add Funds button click
+  const handleAddFunds = () => {
+    setShowAddFundsModal(true);
+  };
+
+  // Helper functions to manage credits and wallet balance
+  const addCredits = (amount: number) => {
+    setCredits(prev => prev + amount);
+  };
+
+  const deductCredits = (amount: number) => {
+    setCredits(prev => Math.max(0, prev - amount));
+  };
+
+  const addToWallet = (amount: number) => {
+    setWalletBalance(prev => prev + amount);
+  };
+
+  const deductFromWallet = (amount: number) => {
+    setWalletBalance(prev => Math.max(0, prev - amount));
+  };
 
   // Replace with marketplace categories from client CategorySelector
   const MARKETPLACE_CATEGORIES = [
@@ -194,7 +229,11 @@ const ArtistMobileApp = () => {
     setServiceSuccess('');
     if (credits < 5) {
       setServiceError('Insufficient credits! You need 5 credits to publish a service.');
-      Alert.alert('Error', 'Insufficient credits! You need 5 credits to publish a service.');
+      Alert.alert(
+        'Insufficient Credits', 
+        'You need 5 credits to publish a service. Click "Add Funds" to get more credits.',
+        [{ text: 'OK', style: 'default' }]
+      );
       return;
     }
     if (!selectedCategory || !newService.title || !newService.description || !newService.basePrice) {
@@ -243,7 +282,7 @@ const ArtistMobileApp = () => {
         reviewCount: gig.reviewCount,
         createdAt: gig.createdAt,
       }));
-      setCredits(credits - 5);
+      deductCredits(5);
       setServiceSuccess('Service added successfully!');
       setNewService({
         title: '',
@@ -285,6 +324,11 @@ const ArtistMobileApp = () => {
     }
     if (credits < 10) {
       setEventError('Insufficient credits! You need 10 credits to publish an event.');
+      Alert.alert(
+        'Insufficient Credits', 
+        'You need 10 credits to publish an event. Click "Add Funds" to get more credits.',
+        [{ text: 'OK', style: 'default' }]
+      );
       return;
     }
     if (!newEvent.title || !newEvent.description || !newEvent.date) {
@@ -318,7 +362,7 @@ const ArtistMobileApp = () => {
         await addTicketToFirebase(currentUser.uid, ticket);
       }
       addGig(eventData);
-      setCredits(credits - 10);
+      deductCredits(10);
       setEventSuccess('Event and tickets added successfully!');
       setNewEvent({
         title: '',
@@ -419,10 +463,71 @@ const ArtistMobileApp = () => {
             <Text style={styles.balanceValue}>{walletBalance.toFixed(2)} MAD</Text>
           </View>
         </View>
-        <TouchableOpacity style={styles.addFundsButton}>
+        <TouchableOpacity style={styles.addFundsButton} onPress={handleAddFunds}>
           <Text style={styles.addFundsText}>➕ Add Funds</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Custom Add Funds Modal */}
+      <Modal
+        visible={showAddFundsModal}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowAddFundsModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <LinearGradient
+              colors={['#6a0dad', '#4a148c']}
+              style={styles.modalGradient}
+            >
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>🚀 Coming Soon!</Text>
+                <TouchableOpacity
+                  style={styles.modalCloseButton}
+                  onPress={() => setShowAddFundsModal(false)}
+                >
+                  <Ionicons name="close" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            </LinearGradient>
+            
+            <View style={styles.modalBody}>
+              <View style={styles.modalIconContainer}>
+                <View style={styles.modalIcon}>
+                  <Ionicons name="card" size={40} color="#6a0dad" />
+                </View>
+              </View>
+              
+              <Text style={styles.modalMessage}>
+                The Add Funds feature is currently under development. This feature will allow you to add credits and money to your wallet.
+              </Text>
+              
+              <View style={styles.modalFeatures}>
+                <View style={styles.featureItem}>
+                  <Ionicons name="checkmark-circle" size={20} color="#34c759" />
+                  <Text style={styles.featureText}>Secure payment processing</Text>
+                </View>
+                <View style={styles.featureItem}>
+                  <Ionicons name="checkmark-circle" size={20} color="#34c759" />
+                  <Text style={styles.featureText}>Multiple payment methods</Text>
+                </View>
+                <View style={styles.featureItem}>
+                  <Ionicons name="checkmark-circle" size={20} color="#34c759" />
+                  <Text style={styles.featureText}>Instant wallet updates</Text>
+                </View>
+              </View>
+              
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => setShowAddFundsModal(false)}
+              >
+                <Text style={styles.modalButtonText}>Got it!</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 
@@ -1829,6 +1934,101 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     textAlign: 'center',
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    overflow: 'hidden',
+    width: '100%',
+    maxWidth: 350,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+  },
+  modalGradient: {
+    paddingVertical: 20,
+    paddingHorizontal: 24,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  modalCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalBody: {
+    padding: 24,
+  },
+  modalIconContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(106, 13, 173, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalMessage: {
+    fontSize: 16,
+    color: '#333',
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: 24,
+  },
+  modalFeatures: {
+    marginBottom: 24,
+  },
+  featureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  featureText: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 12,
+    flex: 1,
+  },
+  modalButton: {
+    backgroundColor: '#6a0dad',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 12,
+    alignItems: 'center',
+    elevation: 2,
+    shadowColor: '#6a0dad',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  modalButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 
 });

@@ -3,19 +3,18 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Dimensions,
-  Image,
-  Modal,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    Image,
+    Modal,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 
 const { width, height } = Dimensions.get('window');
@@ -110,9 +109,6 @@ const SimpleRoleButton = ({
 export default function AuthScreen() {
   const { login, register } = useAuth();
   const router = useRouter();
-
-  // Animation state
-  const [fadeAnim] = useState(new Animated.Value(0));
 
   // Form states
   const [isLogin, setIsLogin] = useState(true);
@@ -219,13 +215,6 @@ export default function AuthScreen() {
   useEffect(() => {
     StatusBar.setBarStyle('light-content', true);
     createHardcodedAdminAccount();
-
-    // Trigger animation
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 1000,
-      useNativeDriver: true,
-    }).start();
   }, []);
 
   // Hardcoded Admin Account Creation
@@ -338,8 +327,8 @@ export default function AuthScreen() {
           style={styles.gradientOverlay}
         />
       </View>
-
-      <Animated.View style={[styles.content, { opacity: fadeAnim }]}> 
+      
+      <View style={styles.content}>
         {/* Form Container */}
         <View style={styles.formContainer}>
           <View style={styles.blurContainer}>
@@ -488,7 +477,7 @@ export default function AuthScreen() {
             </ScrollView>
           </View>
         </View>
-      </Animated.View>
+      </View>
 
       {/* Category Selection Modal */}
       <Modal
@@ -555,7 +544,7 @@ const styles = StyleSheet.create({
   },
 
   formContainer: {
-    backgroundColor: 'rgba(82, 74, 74, 0.5)',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 20,
     padding: 20,
     backdropFilter: 'blur(10px)',
