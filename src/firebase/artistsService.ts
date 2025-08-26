@@ -182,9 +182,9 @@ export const fetchArtistsFromFirebase = async (): Promise<Artist[]> => {
   try {
     console.log('🎨 Fetching artists from Firebase...');
     
-    // Query users collection for artists (role === '(artist)')
+    // Query users collection for artists (role === 'artist')
     const usersRef = collection(db, 'users');
-    const artistsQuery = query(usersRef, where('role', '==', '(artist)'));
+    const artistsQuery = query(usersRef, where('role', '==', 'artist'));
     const querySnapshot = await getDocs(artistsQuery);
     
     if (querySnapshot.empty) {

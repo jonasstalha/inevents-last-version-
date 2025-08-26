@@ -1,4 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
+import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { Award, ChevronRight, CreditCard, Heart, CircleHelp as HelpCircle, LogOut } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
@@ -134,9 +135,10 @@ export default function ProfileScreen() {
       title: 'Help & Support',
       icon: <HelpCircle size={20} color={Theme.colors.textDark} />,
       onPress: () => {
-        const phone = '+212 701-186390'; // Replace with your support number
-        const url = `https://wa.me/${phone}`;
-        router.push(url);
+        const phone = '+212701186390'; // Remove spaces and dashes for URL
+        const message = 'Hello, I need help with InEvent app.';
+        const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+        Linking.openURL(url);
       },
     },
     {

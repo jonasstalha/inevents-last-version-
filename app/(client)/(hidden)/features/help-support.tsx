@@ -1,76 +1,34 @@
-import { Feather as Icon } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Theme } from '@/src/constants/theme';
+import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
+import { ArrowLeft, HelpCircle, Mail, MessageCircle, Phone } from 'lucide-react-native';
 import React, { useState } from 'react';
 import {
-    Animated,
-    Dimensions,
     ScrollView,
     StyleSheet,
     Text,
-    TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
 
-const { width, height } = Dimensions.get('window');
-
 const HelpSupport = () => {
   const router = useRouter();
-  const fadeAnim = new Animated.Value(0);
-  const slideAnim = new Animated.Value(50);
-  const [searchQuery, setSearchQuery] = useState('');
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null);
 
-  React.useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, []);
+  const handleWhatsAppPress = () => {
+    const phone = '+212701186390'; // Remove spaces and dashes for URL
+    const message = 'Hello, I need help with InEvent app.';
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    Linking.openURL(url);
+  };
 
-  const supportChannels = [
-    {
-      title: 'Live Chat',
-      icon: 'message-circle',
-      description: 'Get instant help from our support team',
-      availability: '24/7 Available',
-      color: '#4ecdc4',
-      action: 'Start Chat',
-    },
-    {
-      title: 'Email Support',
-      icon: 'mail',
-      description: 'Send us detailed questions or feedback',
-      availability: 'Response in 2-4 hours',
-      color: '#45b7d1',
-      action: 'Send Email',
-    },
-    {
-      title: 'Phone Support',
-      icon: 'phone',
-      description: 'Speak directly with our experts',
-      availability: 'Mon-Fri, 9AM-6PM',
-      color: '#f39c12',
-      action: 'Call Now',
-    },
-    {
-      title: 'Video Call',
-      icon: 'video',
-      description: 'Schedule a personalized consultation',
-      availability: 'By Appointment',
-      color: '#e74c3c',
-      action: 'Schedule',
-    },
-  ];
+  const handleEmailPress = () => {
+    Linking.openURL('mailto:support@inevent.ma');
+  };
+
+  const handlePhonePress = () => {
+    Linking.openURL('tel:+212701186390');
+  };
 
   const faqData = [
     {
@@ -90,119 +48,46 @@ const HelpSupport = () => {
       answer: 'Yes, we use industry-standard encryption and secure payment processors. We never store your full credit card information on our servers.',
     },
     {
-      question: 'How do I contact an event organizer?',
-      answer: 'You can contact organizers through the event page after booking. We provide secure messaging to protect your privacy while facilitating communication.',
-    },
-    {
       question: 'What if an event is cancelled?',
       answer: 'If an event is cancelled by the organizer, you\'ll receive a full refund automatically within 3-5 business days. You\'ll also be notified immediately via email and push notification.',
     },
-    {
-      question: 'How do I update my profile?',
-      answer: 'Go to Settings > Profile to update your personal information, preferences, and notification settings. Changes are saved automatically.',
-    },
-    {
-      question: 'Can I transfer my tickets to someone else?',
-      answer: 'Ticket transfer availability depends on the event organizer\'s policy. Look for the "Transfer Tickets" option in your booking details if available.',
-    },
   ];
-
-  const filteredFaqs = faqData.filter(faq =>
-    faq.question.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    faq.answer.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const renderSupportChannel = (channel: any, index: number) => (
-    <Animated.View
-      key={index}
-      style={[
-        styles.channelCard,
-        {
-          opacity: fadeAnim,
-          transform: [{ translateY: slideAnim }],
-        },
-      ]}
-    >
-      <LinearGradient
-        colors={[channel.color, `${channel.color}88`]}
-        style={styles.channelGradient}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-      >
-        <View style={styles.channelHeader}>
-          <View style={styles.channelIcon}>
-            <Icon name={channel.icon as any} size={24} color="#fff" />
-          </View>
-          <Text style={styles.channelTitle}>{channel.title}</Text>
-        </View>
-        
-        <Text style={styles.channelDescription}>{channel.description}</Text>
-        <Text style={styles.channelAvailability}>{channel.availability}</Text>
-        
-        <TouchableOpacity style={styles.channelButton}>
-          <Text style={styles.channelButtonText}>{channel.action}</Text>
-          <Icon name="arrow-right" size={16} color="#fff" />
-        </TouchableOpacity>
-      </LinearGradient>
-    </Animated.View>
-  );
 
   const renderFaqItem = (faq: any, index: number) => {
     const isExpanded = expandedFaq === index;
     
     return (
-      <Animated.View
-        key={index}
-        style={[
-          styles.faqCard,
-          {
-            opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }],
-          },
-        ]}
-      >
+      <View key={index} style={styles.faqCard}>
         <TouchableOpacity
           style={styles.faqHeader}
           onPress={() => setExpandedFaq(isExpanded ? null : index)}
         >
           <Text style={styles.faqQuestion}>{faq.question}</Text>
-          <Icon
-            name={isExpanded ? "chevron-up" : "chevron-down"}
-            size={20}
-            color="#666"
-          />
+          <Text style={styles.faqToggle}>{isExpanded ? '−' : '+'}</Text>
         </TouchableOpacity>
         
         {isExpanded && (
-          <Animated.View style={styles.faqAnswer}>
+          <View style={styles.faqAnswer}>
             <Text style={styles.faqAnswerText}>{faq.answer}</Text>
-          </Animated.View>
+          </View>
         )}
-      </Animated.View>
+      </View>
     );
   };
 
   return (
     <View style={styles.container}>
       {/* Header */}
-      <Animated.View
-        style={[
-          styles.header,
-          {
-            opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }],
-          },
-        ]}
-      >
+      <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={() => router.replace('/(client)')}
         >
-          <Icon name="arrow-left" size={24} color="#333" />
+          <ArrowLeft size={24} color={Theme.colors.textDark} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Help & Support</Text>
         <View style={styles.headerSpacer} />
-      </Animated.View>
+      </View>
 
       <ScrollView
         style={styles.scrollView}
@@ -210,136 +95,57 @@ const HelpSupport = () => {
         showsVerticalScrollIndicator={false}
       >
         {/* Hero Section */}
-        <Animated.View
-          style={[
-            styles.heroSection,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          <LinearGradient
-            colors={['#667eea', '#764ba2']}
-            style={styles.heroGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          >
-            <View style={styles.heroContent}>
-              <Icon name="help-circle" size={48} color="#fff" />
-              <Text style={styles.heroTitle}>How Can We Help?</Text>
-              <Text style={styles.heroSubtitle}>
-                Find answers to common questions or contact our support team
-              </Text>
-            </View>
-          </LinearGradient>
-        </Animated.View>
+        <View style={styles.heroSection}>
+          <HelpCircle size={48} color={Theme.colors.primary} />
+          <Text style={styles.heroTitle}>How Can We Help?</Text>
+          <Text style={styles.heroSubtitle}>
+            Get instant support or find answers to common questions
+          </Text>
+        </View>
 
-        {/* Quick Stats */}
-        <Animated.View
-          style={[
-            styles.statsSection,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          <View style={styles.statsGrid}>
-            {[
-              { icon: 'clock', value: '< 2 min', label: 'Avg Response Time' },
-              { icon: 'users', value: '50K+', label: 'Happy Users' },
-              { icon: 'star', value: '4.9/5', label: 'Support Rating' },
-              { icon: 'check-circle', value: '99%', label: 'Resolution Rate' },
-            ].map((stat, index) => (
-              <View key={index} style={styles.statCard}>
-                <Icon name={stat.icon as any} size={20} color="#4c4ec7" />
-                <Text style={styles.statValue}>{stat.value}</Text>
-                <Text style={styles.statLabel}>{stat.label}</Text>
-              </View>
-            ))}
-          </View>
-        </Animated.View>
-
-        {/* Support Channels */}
-        <View style={styles.channelsSection}>
+        {/* Contact Options */}
+        <View style={styles.contactSection}>
           <Text style={styles.sectionTitle}>Contact Support</Text>
-          <View style={styles.channelsGrid}>
-            {supportChannels.map((channel, index) => renderSupportChannel(channel, index))}
-          </View>
-        </View>
-
-        {/* FAQ Search */}
-        <Animated.View
-          style={[
-            styles.searchSection,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          <Text style={styles.sectionTitle}>Frequently Asked Questions</Text>
-          <View style={styles.searchContainer}>
-            <Icon name="search" size={20} color="#9ca3af" style={styles.searchIcon} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search FAQs..."
-              placeholderTextColor="#9ca3af"
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity
-                style={styles.clearButton}
-                onPress={() => setSearchQuery('')}
-              >
-                <Icon name="x" size={16} color="#6b7280" />
-              </TouchableOpacity>
-            )}
-          </View>
-        </Animated.View>
-
-        {/* FAQ List */}
-        <View style={styles.faqSection}>
-          {filteredFaqs.map((faq, index) => renderFaqItem(faq, index))}
           
-          {filteredFaqs.length === 0 && searchQuery.length > 0 && (
-            <View style={styles.noResults}>
-              <Icon name="search" size={48} color="#ccc" />
-              <Text style={styles.noResultsText}>No FAQs found</Text>
-              <Text style={styles.noResultsSubtext}>Try different search terms or contact support</Text>
+          <TouchableOpacity style={styles.contactCard} onPress={handleWhatsAppPress}>
+            <View style={styles.contactIcon}>
+              <MessageCircle size={24} color={Theme.colors.primary} />
             </View>
-          )}
+            <View style={styles.contactInfo}>
+              <Text style={styles.contactTitle}>WhatsApp Support</Text>
+              <Text style={styles.contactDescription}>Get instant help via WhatsApp</Text>
+              <Text style={styles.contactValue}>+212 701-186390</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.contactCard} onPress={handlePhonePress}>
+            <View style={styles.contactIcon}>
+              <Phone size={24} color={Theme.colors.primary} />
+            </View>
+            <View style={styles.contactInfo}>
+              <Text style={styles.contactTitle}>Phone Support</Text>
+              <Text style={styles.contactDescription}>Speak directly with our team</Text>
+              <Text style={styles.contactValue}>+212 701-186390</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.contactCard} onPress={handleEmailPress}>
+            <View style={styles.contactIcon}>
+              <Mail size={24} color={Theme.colors.primary} />
+            </View>
+            <View style={styles.contactInfo}>
+              <Text style={styles.contactTitle}>Email Support</Text>
+              <Text style={styles.contactDescription}>Send us your questions</Text>
+              <Text style={styles.contactValue}>support@inevent.ma</Text>
+            </View>
+          </TouchableOpacity>
         </View>
 
-        {/* Emergency Contact */}
-        <Animated.View
-          style={[
-            styles.emergencySection,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          <LinearGradient
-            colors={['#ff6b6b', '#ee5a6f']}
-            style={styles.emergencyGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          >
-            <Icon name="alert-circle" size={40} color="#fff" />
-            <Text style={styles.emergencyTitle}>Need Immediate Help?</Text>
-            <Text style={styles.emergencySubtitle}>
-              For urgent issues during events, use our emergency hotline
-            </Text>
-            <TouchableOpacity style={styles.emergencyButton}>
-              <Text style={styles.emergencyButtonText}>Emergency Contact</Text>
-              <Icon name="phone" size={16} color="#ff6b6b" />
-            </TouchableOpacity>
-          </LinearGradient>
-        </Animated.View>
+        {/* FAQ Section */}
+        <View style={styles.faqSection}>
+          <Text style={styles.sectionTitle}>Frequently Asked Questions</Text>
+          {faqData.map((faq, index) => renderFaqItem(faq, index))}
+        </View>
       </ScrollView>
     </View>
   );
@@ -348,28 +154,26 @@ const HelpSupport = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: Theme.colors.background,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: Theme.spacing.lg,
     paddingTop: 50,
-    paddingBottom: 15,
-    backgroundColor: '#fff',
+    paddingBottom: Theme.spacing.md,
+    backgroundColor: Theme.colors.secondary,
     borderBottomWidth: 1,
-    borderBottomColor: '#e9ecef',
+    borderBottomColor: Theme.colors.border,
   },
   backButton: {
-    padding: 8,
-    borderRadius: 20,
-    backgroundColor: '#f8f9fa',
+    padding: Theme.spacing.sm,
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#333',
-    marginLeft: 15,
+    fontSize: Theme.typography.fontSize.xl,
+    fontFamily: Theme.typography.fontFamily.bold,
+    color: Theme.colors.textDark,
+    marginLeft: Theme.spacing.md,
   },
   headerSpacer: {
     flex: 1,
@@ -378,267 +182,116 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 30,
+    paddingBottom: Theme.spacing.xl,
   },
   heroSection: {
-    margin: 20,
-    borderRadius: 20,
-    overflow: 'hidden',
-  },
-  heroGradient: {
-    padding: 30,
+    padding: Theme.spacing.xl,
     alignItems: 'center',
-  },
-  heroContent: {
-    alignItems: 'center',
+    backgroundColor: Theme.colors.secondary,
   },
   heroTitle: {
     fontSize: 28,
-    fontWeight: '800',
-    color: '#fff',
-    textAlign: 'center',
-    marginTop: 15,
-    marginBottom: 10,
+    fontFamily: Theme.typography.fontFamily.bold,
+    color: Theme.colors.textDark,
+    marginTop: Theme.spacing.md,
+    marginBottom: Theme.spacing.sm,
   },
   heroSubtitle: {
-    fontSize: 16,
-    color: '#ffffff',
-    textAlign: 'center',
-    opacity: 0.9,
-    lineHeight: 24,
-  },
-  statsSection: {
-    paddingHorizontal: 20,
-    marginBottom: 30,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-  },
-  statCard: {
-    width: '23%',
-    backgroundColor: '#fff',
-    padding: 15,
-    borderRadius: 12,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  statValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#333',
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  statLabel: {
-    fontSize: 10,
-    color: '#666',
+    fontSize: Theme.typography.fontSize.md,
+    color: Theme.colors.textLight,
     textAlign: 'center',
   },
-  channelsSection: {
-    paddingHorizontal: 20,
-    marginBottom: 30,
+  contactSection: {
+    padding: Theme.spacing.lg,
+    backgroundColor: Theme.colors.secondary,
+    marginTop: Theme.spacing.md,
   },
   sectionTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#333',
-    marginBottom: 20,
+    fontSize: Theme.typography.fontSize.xl,
+    fontFamily: Theme.typography.fontFamily.bold,
+    color: Theme.colors.textDark,
+    marginBottom: Theme.spacing.lg,
     textAlign: 'center',
   },
-  channelsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  channelCard: {
-    width: '48%',
-    borderRadius: 15,
-    overflow: 'hidden',
-    marginBottom: 15,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  channelGradient: {
-    padding: 20,
-  },
-  channelHeader: {
+  contactCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
+    padding: Theme.spacing.lg,
+    backgroundColor: Theme.colors.card,
+    borderRadius: Theme.borderRadius.md,
+    marginBottom: Theme.spacing.md,
+    ...Theme.shadows.sm,
   },
-  channelIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  contactIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: `${Theme.colors.primary}15`,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
+    marginRight: Theme.spacing.md,
   },
-  channelTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
+  contactInfo: {
     flex: 1,
   },
-  channelDescription: {
-    fontSize: 14,
-    color: '#ffffff',
-    opacity: 0.9,
-    marginBottom: 8,
-    lineHeight: 20,
+  contactTitle: {
+    fontSize: Theme.typography.fontSize.lg,
+    fontFamily: Theme.typography.fontFamily.semiBold,
+    color: Theme.colors.textDark,
+    marginBottom: 4,
   },
-  channelAvailability: {
-    fontSize: 12,
-    color: '#ffffff',
-    opacity: 0.8,
-    marginBottom: 15,
+  contactDescription: {
+    fontSize: Theme.typography.fontSize.sm,
+    color: Theme.colors.textLight,
+    marginBottom: 4,
   },
-  channelButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingVertical: 8,
-    paddingHorizontal: 15,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-  },
-  channelButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-    marginRight: 6,
-  },
-  searchSection: {
-    paddingHorizontal: 20,
-    marginBottom: 20,
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 15,
-    paddingHorizontal: 15,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  searchIcon: {
-    marginRight: 10,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    paddingVertical: 15,
-    color: '#333',
-  },
-  clearButton: {
-    padding: 5,
+  contactValue: {
+    fontSize: Theme.typography.fontSize.sm,
+    fontFamily: Theme.typography.fontFamily.medium,
+    color: Theme.colors.primary,
   },
   faqSection: {
-    paddingHorizontal: 20,
-    marginBottom: 30,
+    padding: Theme.spacing.lg,
+    backgroundColor: Theme.colors.secondary,
+    marginTop: Theme.spacing.md,
   },
   faqCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginBottom: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
+    backgroundColor: Theme.colors.card,
+    borderRadius: Theme.borderRadius.md,
+    marginBottom: Theme.spacing.sm,
+    ...Theme.shadows.sm,
   },
   faqHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 20,
+    justifyContent: 'space-between',
+    padding: Theme.spacing.lg,
   },
   faqQuestion: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: Theme.typography.fontSize.md,
+    fontFamily: Theme.typography.fontFamily.semiBold,
+    color: Theme.colors.textDark,
     flex: 1,
-    marginRight: 10,
+    marginRight: Theme.spacing.md,
+  },
+  faqToggle: {
+    fontSize: 20,
+    fontFamily: Theme.typography.fontFamily.bold,
+    color: Theme.colors.primary,
+    width: 20,
+    textAlign: 'center',
   },
   faqAnswer: {
-    paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingHorizontal: Theme.spacing.lg,
+    paddingBottom: Theme.spacing.lg,
     borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
+    borderTopColor: Theme.colors.border,
   },
   faqAnswerText: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 22,
-    marginTop: 15,
-  },
-  noResults: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  noResultsText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#666',
-    marginTop: 15,
-  },
-  noResultsSubtext: {
-    fontSize: 14,
-    color: '#999',
-    marginTop: 5,
-  },
-  emergencySection: {
-    margin: 20,
-    borderRadius: 20,
-    overflow: 'hidden',
-  },
-  emergencyGradient: {
-    padding: 30,
-    alignItems: 'center',
-  },
-  emergencyTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#fff',
-    textAlign: 'center',
-    marginTop: 15,
-    marginBottom: 10,
-  },
-  emergencySubtitle: {
-    fontSize: 16,
-    color: '#ffffff',
-    textAlign: 'center',
-    opacity: 0.9,
-    marginBottom: 25,
-    lineHeight: 24,
-  },
-  emergencyButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    paddingVertical: 15,
-    paddingHorizontal: 30,
-    borderRadius: 25,
-  },
-  emergencyButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#ff6b6b',
-    marginRight: 8,
+    fontSize: Theme.typography.fontSize.sm,
+    color: Theme.colors.textLight,
+    lineHeight: 20,
+    marginTop: Theme.spacing.sm,
   },
 });
 

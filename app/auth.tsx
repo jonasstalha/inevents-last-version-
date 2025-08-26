@@ -235,20 +235,87 @@ export default function AuthScreen() {
       const adminPassword = 'admin123456';
       const adminName = 'System Administrator';
       
-      console.log('🔧 Creating/checking admin account...');
-      console.log('📧 Admin email:', adminEmail);
-      console.log('👤 Admin role: admin');
+      console.log('Checking admin account...');
       
+      // First, try to login to see if the account exists
+      try {
+        const testCredential = await login(adminEmail, adminPassword);
+        if (testCredential === 'admin') {
+          console.log('✅ Admin account already exists with correct role');
+          return;
+        } else {
+          console.log('⚠️ Admin account exists but role is wrong:', testCredential);
+          // Account exists but role is wrong, let's fix it
+          await fixAdminAccountRole();
+          return;
+        }
+      } catch (loginError: any) {
+        console.log('Admin account does not exist or has wrong credentials, creating new one...');
+      }
+      
+      // If we get here, the account doesn't exist, so create it
       await register(adminEmail, adminPassword, adminName, '', false, 'admin');
       console.log('✅ Admin account created successfully');
       
     } catch (error: any) {
       if (error.message && error.message.includes('auth/email-already-in-use')) {
-        console.log('✅ Admin account already exists and ready');
-        console.log('📧 You can login with: admin@inevents.com / admin123456');
+        console.log('✅ Admin account already exists, checking Firestore data...');
+        await fixAdminAccountRole();
       } else {
         console.log('⚠️ Admin account setup issue:', error.message);
       }
+    }
+  };
+
+  // Fix admin account role in Firestore
+  const fixAdminAccountRole = async () => {
+    try {
+      console.log('🔧 Fixing admin account role in Firestore...');
+      
+      // Import Firestore functions
+      const { getFirestore, doc, setDoc, getDoc, Timestamp } = await import('firebase/firestore');
+      
+      const db = getFirestore();
+      
+      // Try to get the admin user by email first
+      // Since we know the admin email, we can try to find the user
+      const adminEmail = 'admin@inevents.com';
+      
+      // First, let's login to get the user ID
+      const { loginWithEmail } = await import('@/src/firebase/firebaseAuth');
+      
+      try {
+        const userCredential = await loginWithEmail(adminEmail, 'admin123456');
+        const adminUserId = userCredential.user.uid;
+        
+        console.log('Found admin user ID:', adminUserId);
+        
+        // Now update/create the Firestore document with admin role
+        const userRef = doc(db, 'users', adminUserId);
+        
+        // Check if document exists
+        const userDoc = await getDoc(userRef);
+        
+        const adminData = {
+          email: adminEmail,
+          name: 'System Administrator',
+          phoneNumber: '',
+          isPhoneVerified: false,
+          role: 'admin',
+          createdAt: userDoc.exists() ? userDoc.data()?.createdAt || Timestamp.now() : Timestamp.now(),
+          signupDate: userDoc.exists() ? userDoc.data()?.signupDate || Timestamp.now() : Timestamp.now(),
+        };
+        
+        await setDoc(userRef, adminData, { merge: true });
+        
+        console.log('✅ Admin account role fixed in Firestore');
+        
+      } catch (authError) {
+        console.error('Failed to authenticate admin user for role fix:', authError);
+      }
+      
+    } catch (error) {
+      console.error('Failed to fix admin account role:', error);
     }
   };
 
@@ -275,23 +342,15 @@ export default function AuthScreen() {
         if (userRole) {
           console.log(`✅ Login successful! User role: ${userRole}`);
           
-          // Navigate based on role with additional debugging
+          // Navigate based on role
           if (userRole === 'admin') {
-            console.log('🔄 Redirecting to admin panel: /(admin)');
-            Alert.alert('Admin Login', 'Welcome Admin! Redirecting to admin panel...', [
-              { 
-                text: 'Go to Admin Panel', 
-                onPress: () => {
-                  console.log('🚀 Manually navigating to admin panel');
-                  router.replace('/(admin)');
-                }
-              }
-            ]);
+            console.log(`🚀 Navigating to admin panel...`);
+            router.replace('/(admin)');
           } else if (userRole === 'artist') {
-            console.log('🔄 Redirecting to artist panel: /(artist)');
+            console.log(`🚀 Navigating to artist panel...`);
             router.replace('/(artist)');
           } else {
-            console.log('🔄 Redirecting to client panel: /(client)');
+            console.log(`🚀 Navigating to client panel...`);
             router.replace('/(client)');
           }
         }
@@ -313,15 +372,12 @@ export default function AuthScreen() {
         
         console.log(`✅ Registration successful! User role: ${userRole}`);
         
-        // Navigate based on role with debugging
+        // Navigate based on role
         if (userRole === 'admin') {
-          console.log('🔄 Redirecting new admin to admin panel: /(admin)');
           router.replace('/(admin)');
         } else if (userRole === 'artist') {
-          console.log('🔄 Redirecting new artist to artist panel: /(artist)');
           router.replace('/(artist)');
         } else {
-          console.log('🔄 Redirecting new client to client panel: /(client)');
           router.replace('/(client)');
         }
       }

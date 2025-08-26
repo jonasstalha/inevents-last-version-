@@ -1,10 +1,8 @@
-import { Feather as Icon } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Theme } from '@/src/constants/theme';
 import { useRouter } from 'expo-router';
+import { ArrowLeft, Shield } from 'lucide-react-native';
 import React from 'react';
 import {
-    Animated,
-    Dimensions,
     ScrollView,
     StyleSheet,
     Text,
@@ -12,147 +10,60 @@ import {
     View,
 } from 'react-native';
 
-const { width, height } = Dimensions.get('window');
-
 const PrivacyPolicy = () => {
   const router = useRouter();
-  const fadeAnim = new Animated.Value(0);
-  const slideAnim = new Animated.Value(50);
 
-  React.useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, []);
-
-  const privacySections = [
+  const sections = [
     {
       title: 'Information We Collect',
-      icon: 'database',
-      content: [
-        'Personal information you provide when creating an account',
-        'Event preferences and booking history',
-        'Payment information (securely processed)',
-        'Device information and usage analytics',
-        'Location data (with your permission)',
-      ],
+      content: 'We collect information you provide directly to us, such as when you create an account, make a booking, or contact us for support. This includes personal information like your name, email address, phone number, and payment information.',
     },
     {
       title: 'How We Use Your Information',
-      icon: 'settings',
-      content: [
-        'Provide and improve our event services',
-        'Process bookings and payments',
-        'Send important updates and notifications',
-        'Personalize your experience',
-        'Ensure platform security and prevent fraud',
-      ],
+      content: 'We use the information we collect to provide, maintain, and improve our services, process transactions, send you technical notices and support messages, and communicate with you about products, services, and events.',
     },
     {
       title: 'Information Sharing',
-      icon: 'share-2',
-      content: [
-        'We never sell your personal information',
-        'Event organizers receive necessary booking details only',
-        'Service providers get contact info for booked events',
-        'Legal authorities (only when required by law)',
-        'Trusted partners for payment processing',
-      ],
+      content: 'We do not sell, trade, or rent your personal information to third parties. We may share your information with service providers who assist us in operating our platform, conducting business, or servicing you.',
     },
     {
       title: 'Data Security',
-      icon: 'shield',
-      content: [
-        'End-to-end encryption for sensitive data',
-        'Secure payment processing with industry standards',
-        'Regular security audits and updates',
-        'Restricted access to personal information',
-        'Secure data centers and backup systems',
-      ],
+      content: 'We implement appropriate security measures to protect your personal information against unauthorized access, alteration, disclosure, or destruction. However, no method of transmission over the internet is 100% secure.',
     },
     {
       title: 'Your Rights',
-      icon: 'user',
-      content: [
-        'Access your personal data anytime',
-        'Request data correction or deletion',
-        'Opt out of marketing communications',
-        'Download your data in portable format',
-        'Contact our privacy team with concerns',
-      ],
+      content: 'You have the right to access, update, or delete your personal information. You may also opt out of certain communications from us. Contact us if you wish to exercise any of these rights.',
     },
     {
-      title: 'Cookies & Tracking',
-      icon: 'eye',
-      content: [
-        'Essential cookies for app functionality',
-        'Analytics cookies to improve user experience',
-        'Marketing cookies (with your consent)',
-        'Third-party integrations for enhanced features',
-        'You can manage cookie preferences in settings',
-      ],
+      title: 'Cookies and Tracking',
+      content: 'We use cookies and similar tracking technologies to track activity on our service and hold certain information. You can instruct your browser to refuse all cookies or to indicate when a cookie is being sent.',
+    },
+    {
+      title: 'Contact Information',
+      content: 'If you have any questions about this Privacy Policy, please contact us at privacy@inevent.ma or through our support channels.',
     },
   ];
 
   const renderSection = (section: any, index: number) => (
-    <Animated.View
-      key={index}
-      style={[
-        styles.sectionCard,
-        {
-          opacity: fadeAnim,
-          transform: [{ translateY: slideAnim }],
-        },
-      ]}
-    >
-      <View style={styles.sectionHeader}>
-        <View style={styles.sectionIcon}>
-          <Icon name={section.icon as any} size={24} color="#4c4ec7" />
-        </View>
-        <Text style={styles.sectionTitle}>{section.title}</Text>
-      </View>
-      
-      <View style={styles.sectionContent}>
-        {section.content.map((item: string, itemIndex: number) => (
-          <View key={itemIndex} style={styles.contentItem}>
-            <View style={styles.bullet} />
-            <Text style={styles.contentText}>{item}</Text>
-          </View>
-        ))}
-      </View>
-    </Animated.View>
+    <View key={index} style={styles.sectionCard}>
+      <Text style={styles.sectionTitle}>{section.title}</Text>
+      <Text style={styles.sectionContent}>{section.content}</Text>
+    </View>
   );
 
   return (
     <View style={styles.container}>
       {/* Header */}
-      <Animated.View
-        style={[
-          styles.header,
-          {
-            opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }],
-          },
-        ]}
-      >
+      <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={() => router.replace('/(client)')}
         >
-          <Icon name="arrow-left" size={24} color="#333" />
+          <ArrowLeft size={24} color={Theme.colors.textDark} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Privacy Policy</Text>
         <View style={styles.headerSpacer} />
-      </Animated.View>
+      </View>
 
       <ScrollView
         style={styles.scrollView}
@@ -160,102 +71,38 @@ const PrivacyPolicy = () => {
         showsVerticalScrollIndicator={false}
       >
         {/* Hero Section */}
-        <Animated.View
-          style={[
-            styles.heroSection,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          <LinearGradient
-            colors={['#667eea', '#764ba2']}
-            style={styles.heroGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          >
-            <View style={styles.heroContent}>
-              <Icon name="lock" size={48} color="#fff" />
-              <Text style={styles.heroTitle}>Your Privacy Matters</Text>
-              <Text style={styles.heroSubtitle}>
-                We're committed to protecting your personal information and being transparent about our practices
-              </Text>
-              <View style={styles.lastUpdated}>
-                <Icon name="calendar" size={16} color="#fff" />
-                <Text style={styles.lastUpdatedText}>Last updated: January 2024</Text>
-              </View>
-            </View>
-          </LinearGradient>
-        </Animated.View>
-
-        {/* Quick Overview */}
-        <Animated.View
-          style={[
-            styles.overviewSection,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          <Text style={styles.overviewTitle}>Privacy at a Glance</Text>
-          <View style={styles.overviewGrid}>
-            {[
-              { icon: 'shield' as const, title: 'No Data Selling', description: 'We never sell your personal information to third parties' },
-              { icon: 'lock' as const, title: 'Secure Storage', description: 'Your data is encrypted and stored securely' },
-              { icon: 'user' as const, title: 'Easy Deletion', description: 'Delete your account and data anytime' },
-              { icon: 'eye' as const, title: 'Minimal Collection', description: 'We only collect what we need for our services' },
-            ].map((item, index) => (
-              <View key={index} style={styles.overviewCard}>
-                <View style={styles.overviewIcon}>
-                  <Icon name={item.icon as any} size={20} color="#4c4ec7" />
-                </View>
-                <Text style={styles.overviewCardTitle}>{item.title}</Text>
-                <Text style={styles.overviewCardDescription}>{item.description}</Text>
-              </View>
-            ))}
-          </View>
-        </Animated.View>
-
-        {/* Detailed Sections */}
-        <View style={styles.sectionsContainer}>
-          {privacySections.map((section, index) => renderSection(section, index))}
+        <View style={styles.heroSection}>
+          <Shield size={48} color={Theme.colors.primary} />
+          <Text style={styles.heroTitle}>Your Privacy Matters</Text>
+          <Text style={styles.heroSubtitle}>
+            Learn how we collect, use, and protect your information
+          </Text>
+          <Text style={styles.lastUpdated}>
+            Last updated: January 2024
+          </Text>
         </View>
 
-        {/* Contact Section */}
-        <Animated.View
-          style={[
-            styles.contactSection,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          <LinearGradient
-            colors={['#4c4ec7', '#6c5ce7']}
-            style={styles.contactGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          >
-            <Icon name="help-circle" size={40} color="#fff" />
-            <Text style={styles.contactTitle}>Questions About Privacy?</Text>
-            <Text style={styles.contactSubtitle}>
-              Our privacy team is here to help you understand our practices
-            </Text>
-            <TouchableOpacity style={styles.contactButton}>
-              <Text style={styles.contactButtonText}>Contact Privacy Team</Text>
-              <Icon name="mail" size={16} color="#4c4ec7" />
-            </TouchableOpacity>
-          </LinearGradient>
-        </Animated.View>
-
-        {/* Legal Notice */}
-        <View style={styles.legalNotice}>
-          <Text style={styles.legalText}>
-            This privacy policy is part of our Terms of Service. By using our app, you agree to the collection and use of information in accordance with this policy.
+        {/* Introduction */}
+        <View style={styles.introSection}>
+          <Text style={styles.introText}>
+            At InEvent, we are committed to protecting your privacy and ensuring the security of your personal information. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our mobile application and services.
           </Text>
+        </View>
+
+        {/* Policy Sections */}
+        <View style={styles.sectionsContainer}>
+          {sections.map(renderSection)}
+        </View>
+
+        {/* Footer */}
+        <View style={styles.footerSection}>
+          <Text style={styles.footerTitle}>Questions?</Text>
+          <Text style={styles.footerText}>
+            If you have any questions about this Privacy Policy, please contact our support team.
+          </Text>
+          <TouchableOpacity style={styles.contactButton}>
+            <Text style={styles.contactButtonText}>Contact Support</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </View>
@@ -265,28 +112,26 @@ const PrivacyPolicy = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: Theme.colors.background,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: Theme.spacing.lg,
     paddingTop: 50,
-    paddingBottom: 15,
-    backgroundColor: '#fff',
+    paddingBottom: Theme.spacing.md,
+    backgroundColor: Theme.colors.secondary,
     borderBottomWidth: 1,
-    borderBottomColor: '#e9ecef',
+    borderBottomColor: Theme.colors.border,
   },
   backButton: {
-    padding: 8,
-    borderRadius: 20,
-    backgroundColor: '#f8f9fa',
+    padding: Theme.spacing.sm,
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#333',
-    marginLeft: 15,
+    fontSize: Theme.typography.fontSize.xl,
+    fontFamily: Theme.typography.fontFamily.bold,
+    color: Theme.colors.textDark,
+    marginLeft: Theme.spacing.md,
   },
   headerSpacer: {
     flex: 1,
@@ -295,211 +140,93 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 30,
+    paddingBottom: Theme.spacing.xl,
   },
   heroSection: {
-    margin: 20,
-    borderRadius: 20,
-    overflow: 'hidden',
-  },
-  heroGradient: {
-    padding: 30,
+    padding: Theme.spacing.xl,
     alignItems: 'center',
-  },
-  heroContent: {
-    alignItems: 'center',
+    backgroundColor: Theme.colors.secondary,
   },
   heroTitle: {
     fontSize: 28,
-    fontWeight: '800',
-    color: '#fff',
-    textAlign: 'center',
-    marginTop: 15,
-    marginBottom: 10,
+    fontFamily: Theme.typography.fontFamily.bold,
+    color: Theme.colors.textDark,
+    marginTop: Theme.spacing.md,
+    marginBottom: Theme.spacing.sm,
   },
   heroSubtitle: {
-    fontSize: 16,
-    color: '#ffffff',
+    fontSize: Theme.typography.fontSize.md,
+    color: Theme.colors.textLight,
     textAlign: 'center',
-    opacity: 0.9,
-    lineHeight: 24,
-    marginBottom: 20,
+    marginBottom: Theme.spacing.md,
   },
   lastUpdated: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 20,
+    fontSize: Theme.typography.fontSize.sm,
+    color: Theme.colors.textLight,
+    fontStyle: 'italic',
   },
-  lastUpdatedText: {
-    fontSize: 14,
-    color: '#fff',
-    marginLeft: 8,
+  introSection: {
+    padding: Theme.spacing.lg,
+    backgroundColor: Theme.colors.secondary,
+    marginTop: Theme.spacing.md,
   },
-  overviewSection: {
-    paddingHorizontal: 20,
-    marginBottom: 30,
-  },
-  overviewTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#333',
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  overviewGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  overviewCard: {
-    width: '48%',
-    backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 15,
-    marginBottom: 15,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  overviewIcon: {
-    width: 45,
-    height: 45,
-    borderRadius: 22.5,
-    backgroundColor: '#f8f9ff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-  overviewCardTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 5,
-    textAlign: 'center',
-  },
-  overviewCardDescription: {
-    fontSize: 12,
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: 18,
+  introText: {
+    fontSize: Theme.typography.fontSize.md,
+    color: Theme.colors.textLight,
+    lineHeight: 24,
+    textAlign: 'left',
   },
   sectionsContainer: {
-    paddingHorizontal: 20,
-    marginBottom: 30,
+    padding: Theme.spacing.lg,
+    backgroundColor: Theme.colors.secondary,
+    marginTop: Theme.spacing.md,
   },
   sectionCard: {
-    backgroundColor: '#fff',
-    borderRadius: 15,
-    padding: 25,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  sectionIcon: {
-    width: 45,
-    height: 45,
-    borderRadius: 22.5,
-    backgroundColor: '#f8f9ff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 15,
+    backgroundColor: Theme.colors.card,
+    borderRadius: Theme.borderRadius.md,
+    padding: Theme.spacing.lg,
+    marginBottom: Theme.spacing.md,
+    ...Theme.shadows.sm,
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#333',
-    flex: 1,
+    fontSize: Theme.typography.fontSize.lg,
+    fontFamily: Theme.typography.fontFamily.bold,
+    color: Theme.colors.textDark,
+    marginBottom: Theme.spacing.md,
   },
   sectionContent: {
-    paddingLeft: 10,
+    fontSize: Theme.typography.fontSize.sm,
+    color: Theme.colors.textLight,
+    lineHeight: 22,
   },
-  contentItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  bullet: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#4c4ec7',
-    marginTop: 8,
-    marginRight: 15,
-  },
-  contentText: {
-    fontSize: 16,
-    color: '#555',
-    lineHeight: 24,
-    flex: 1,
-  },
-  contactSection: {
-    margin: 20,
-    borderRadius: 20,
-    overflow: 'hidden',
-  },
-  contactGradient: {
-    padding: 30,
+  footerSection: {
+    padding: Theme.spacing.xl,
+    backgroundColor: Theme.colors.secondary,
+    marginTop: Theme.spacing.md,
     alignItems: 'center',
   },
-  contactTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#fff',
-    textAlign: 'center',
-    marginTop: 15,
-    marginBottom: 10,
+  footerTitle: {
+    fontSize: Theme.typography.fontSize.lg,
+    fontFamily: Theme.typography.fontFamily.bold,
+    color: Theme.colors.textDark,
+    marginBottom: Theme.spacing.sm,
   },
-  contactSubtitle: {
-    fontSize: 16,
-    color: '#ffffff',
+  footerText: {
+    fontSize: Theme.typography.fontSize.md,
+    color: Theme.colors.textLight,
     textAlign: 'center',
-    opacity: 0.9,
-    marginBottom: 25,
-    lineHeight: 24,
+    marginBottom: Theme.spacing.lg,
   },
   contactButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    paddingVertical: 15,
-    paddingHorizontal: 30,
-    borderRadius: 25,
+    backgroundColor: Theme.colors.primary,
+    paddingVertical: Theme.spacing.md,
+    paddingHorizontal: Theme.spacing.xl,
+    borderRadius: Theme.borderRadius.md,
   },
   contactButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#4c4ec7',
-    marginRight: 8,
-  },
-  legalNotice: {
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: '#fff',
-    marginHorizontal: 20,
-    marginBottom: 20,
-    borderRadius: 15,
-    borderLeftWidth: 4,
-    borderLeftColor: '#4c4ec7',
-  },
-  legalText: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 20,
-    fontStyle: 'italic',
+    fontSize: Theme.typography.fontSize.md,
+    fontFamily: Theme.typography.fontFamily.semiBold,
+    color: Theme.colors.secondary,
   },
 });
 

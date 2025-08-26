@@ -1,222 +1,73 @@
-import { Feather as Icon } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Theme } from '@/src/constants/theme';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import { ArrowLeft, FileText } from 'lucide-react-native';
+import React from 'react';
 import {
-  Animated,
-  Dimensions,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-
-const { width, height } = Dimensions.get('window');
 
 const TermsOfService = () => {
   const router = useRouter();
-  const fadeAnim = new Animated.Value(0);
-  const slideAnim = new Animated.Value(50);
-  const [expandedSection, setExpandedSection] = useState<number | null>(null);
 
-  React.useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, []);
-
-  const termsSections = [
+  const sections = [
     {
       title: 'Acceptance of Terms',
-      icon: 'check-circle',
-      content: [
-        'By accessing and using our event platform, you accept and agree to be bound by these Terms of Service.',
-        'If you do not agree to these terms, please do not use our services.',
-        'These terms apply to all users including event organizers, service providers, and attendees.',
-        'We reserve the right to modify these terms at any time with notice to users.',
-      ],
+      content: 'By accessing and using the InEvent mobile application, you accept and agree to be bound by the terms and provision of this agreement. These Terms of Service govern your use of our platform.',
     },
     {
       title: 'User Accounts',
-      icon: 'user',
-      content: [
-        'You must provide accurate and complete information when creating an account.',
-        'You are responsible for maintaining the security of your account credentials.',
-        'You must notify us immediately of any unauthorized use of your account.',
-        'One person or entity may not maintain multiple accounts.',
-        'We reserve the right to suspend or terminate accounts that violate our policies.',
-      ],
+      content: 'To access certain features of our service, you must register for an account. You are responsible for maintaining the confidentiality of your account credentials and for all activities that occur under your account.',
     },
     {
-      title: 'Event Booking & Payments',
-      icon: 'credit-card',
-      content: [
-        'All bookings are subject to availability and confirmation from event organizers.',
-        'Payment is required at the time of booking unless otherwise specified.',
-        'We use secure third-party payment processors for all transactions.',
-        'Refunds are subject to the specific cancellation policy of each event.',
-        'We may charge transaction fees as disclosed at the time of booking.',
-      ],
+      title: 'Event Bookings',
+      content: 'When you book an event through our platform, you enter into a direct contractual relationship with the event organizer. InEvent serves as an intermediary platform and is not responsible for the actual delivery of events.',
     },
     {
-      title: 'User Conduct',
-      icon: 'shield',
-      content: [
-        'Users must comply with all applicable laws and regulations.',
-        'Prohibited activities include fraud, spam, harassment, and illegal content.',
-        'Users may not interfere with the platform\'s operation or security.',
-        'Respect other users and maintain professional communication.',
-        'Report any suspicious or inappropriate behavior to our support team.',
-      ],
+      title: 'Payment Terms',
+      content: 'Payments for events are processed securely through our platform. Refund policies are determined by individual event organizers and will be clearly stated before booking. Processing fees may apply.',
     },
     {
       title: 'Service Provider Terms',
-      icon: 'briefcase',
-      content: [
-        'Service providers must have proper licenses and insurance as required by law.',
-        'All services must be delivered as described in listings and agreements.',
-        'Providers are responsible for their own taxes and business compliance.',
-        'We may verify credentials and conduct background checks as appropriate.',
-        'Providers must maintain high standards of professionalism and quality.',
-      ],
+      content: 'Service providers using our platform must comply with all applicable laws and regulations. You are responsible for the quality and delivery of your services and must maintain appropriate insurance coverage.',
     },
     {
-      title: 'Content & Intellectual Property',
-      icon: 'file-text',
-      content: [
-        'Users retain ownership of content they create and upload.',
-        'By uploading content, you grant us a license to use it for platform operations.',
-        'You must have rights to all content you upload to the platform.',
-        'We respect intellectual property rights and respond to valid DMCA notices.',
-        'Our platform content and technology are protected by intellectual property laws.',
-      ],
-    },
-    {
-      title: 'Cancellations & Refunds',
-      icon: 'x-circle',
-      content: [
-        'Each event has its own cancellation policy set by the organizer.',
-        'Cancellation policies are clearly displayed before booking.',
-        'Refunds are processed according to the applicable cancellation policy.',
-        'We may charge processing fees for cancellations as disclosed.',
-        'Force majeure events may result in full refunds at our discretion.',
-      ],
-    },
-    {
-      title: 'Platform Availability',
-      icon: 'wifi',
-      content: [
-        'We strive to maintain platform availability but cannot guarantee 100% uptime.',
-        'We may temporarily suspend service for maintenance or security reasons.',
-        'We are not liable for losses due to temporary service interruptions.',
-        'Critical updates and maintenance will be communicated in advance when possible.',
-      ],
+      title: 'Prohibited Uses',
+      content: 'You may not use our service for any unlawful purpose, to violate any laws, to harass or harm others, to transmit harmful content, or to interfere with the security or functionality of our platform.',
     },
     {
       title: 'Limitation of Liability',
-      icon: 'alert-triangle',
-      content: [
-        'Our liability is limited to the amount you paid for services in the past 12 months.',
-        'We are not liable for indirect, incidental, or consequential damages.',
-        'We do not guarantee the quality or safety of third-party services.',
-        'Users participate in events at their own risk.',
-        'Our maximum liability per incident is limited as specified in applicable law.',
-      ],
+      content: 'InEvent shall not be liable for any indirect, incidental, special, consequential, or punitive damages resulting from your use of our service, even if we have been advised of the possibility of such damages.',
     },
     {
-      title: 'Dispute Resolution',
-      icon: 'users',
-      content: [
-        'We encourage users to resolve disputes through our support system first.',
-        'Disputes not resolved through support may be subject to arbitration.',
-        'Class action lawsuits are waived in favor of individual arbitration.',
-        'Arbitration will be conducted under the rules of the American Arbitration Association.',
-        'Some jurisdictions may not allow certain limitations, in which case local laws apply.',
-      ],
+      title: 'Changes to Terms',
+      content: 'We reserve the right to modify these terms at any time. Changes will be effective immediately upon posting. Your continued use of the service constitutes acceptance of the modified terms.',
     },
   ];
 
-  const quickSummary = [
-    { icon: 'user' as const, title: 'Account Responsibility', description: 'Keep your account secure and information accurate' },
-    { icon: 'dollar-sign', title: 'Fair Pricing', description: 'Transparent pricing with no hidden fees' },
-    { icon: 'shield' as const, title: 'Safe Environment', description: 'We maintain a secure platform for all users' },
-    { icon: 'clock', title: 'Timely Service', description: 'Reliable platform with minimal downtime' },
-  ];
-
-  const renderSection = (section: any, index: number) => {
-    const isExpanded = expandedSection === index;
-    
-    return (
-      <Animated.View
-        key={index}
-        style={[
-          styles.sectionCard,
-          {
-            opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }],
-          },
-        ]}
-      >
-        <TouchableOpacity
-          style={styles.sectionHeader}
-          onPress={() => setExpandedSection(isExpanded ? null : index)}
-        >
-          <View style={styles.sectionIcon}>
-            <Icon name={section.icon as any} size={20} color="#4c4ec7" />
-          </View>
-          <Text style={styles.sectionTitle}>{section.title}</Text>
-          <Icon
-            name={isExpanded ? "chevron-up" : "chevron-down"}
-            size={20}
-            color="#666"
-          />
-        </TouchableOpacity>
-        
-        {isExpanded && (
-          <Animated.View style={styles.sectionContent}>
-            {section.content.map((item: string, itemIndex: number) => (
-              <View key={itemIndex} style={styles.contentItem}>
-                <View style={styles.bullet} />
-                <Text style={styles.contentText}>{item}</Text>
-              </View>
-            ))}
-          </Animated.View>
-        )}
-      </Animated.View>
-    );
-  };
+  const renderSection = (section: any, index: number) => (
+    <View key={index} style={styles.sectionCard}>
+      <Text style={styles.sectionTitle}>{section.title}</Text>
+      <Text style={styles.sectionContent}>{section.content}</Text>
+    </View>
+  );
 
   return (
     <View style={styles.container}>
       {/* Header */}
-      <Animated.View
-        style={[
-          styles.header,
-          {
-            opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }],
-          },
-        ]}
-      >
+      <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={() => router.replace('/(client)')}
         >
-          <Icon name="arrow-left" size={24} color="#333" />
+          <ArrowLeft size={24} color={Theme.colors.textDark} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Terms of Service</Text>
         <View style={styles.headerSpacer} />
-      </Animated.View>
+      </View>
 
       <ScrollView
         style={styles.scrollView}
@@ -224,125 +75,44 @@ const TermsOfService = () => {
         showsVerticalScrollIndicator={false}
       >
         {/* Hero Section */}
-        <Animated.View
-          style={[
-            styles.heroSection,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          <LinearGradient
-            colors={['#667eea', '#764ba2']}
-            style={styles.heroGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          >
-            <View style={styles.heroContent}>
-              <Icon name="file-text" size={48} color="#fff" />
-              <Text style={styles.heroTitle}>Terms of Service</Text>
-              <Text style={styles.heroSubtitle}>
-                Understanding our platform rules and your rights as a user
-              </Text>
-              <View style={styles.lastUpdated}>
-                <Icon name="calendar" size={16} color="#fff" />
-                <Text style={styles.lastUpdatedText}>Effective: January 1, 2024</Text>
-              </View>
-            </View>
-          </LinearGradient>
-        </Animated.View>
-
-        {/* Quick Summary */}
-        <Animated.View
-          style={[
-            styles.summarySection,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          <Text style={styles.summaryTitle}>Terms Summary</Text>
-          <Text style={styles.summaryDescription}>
-            Here are the key points of our Terms of Service:
+        <View style={styles.heroSection}>
+          <FileText size={48} color={Theme.colors.primary} />
+          <Text style={styles.heroTitle}>Terms of Service</Text>
+          <Text style={styles.heroSubtitle}>
+            Please read these terms carefully before using our service
           </Text>
-          <View style={styles.summaryGrid}>
-            {quickSummary.map((item, index) => (
-              <View key={index} style={styles.summaryCard}>
-                <View style={styles.summaryIcon}>
-                  <Icon name={item.icon as any} size={20} color="#4c4ec7" />
-                </View>
-                <Text style={styles.summaryCardTitle}>{item.title}</Text>
-                <Text style={styles.summaryCardDescription}>{item.description}</Text>
-              </View>
-            ))}
-          </View>
-        </Animated.View>
-
-        {/* Important Notice */}
-        <Animated.View
-          style={[
-            styles.noticeSection,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          <View style={styles.noticeCard}>
-            <Icon name="info" size={24} color="#f39c12" />
-            <View style={styles.noticeContent}>
-              <Text style={styles.noticeTitle}>Important Notice</Text>
-              <Text style={styles.noticeText}>
-                These terms constitute a legally binding agreement between you and our platform. 
-                Please read them carefully before using our services.
-              </Text>
-            </View>
-          </View>
-        </Animated.View>
-
-        {/* Detailed Terms */}
-        <View style={styles.termsSection}>
-          <Text style={styles.sectionMainTitle}>Detailed Terms</Text>
-          <Text style={styles.sectionDescription}>
-            Tap any section below to view the full terms and conditions.
+          <Text style={styles.lastUpdated}>
+            Last updated: January 2024
           </Text>
-          {termsSections.map((section, index) => renderSection(section, index))}
+        </View>
+
+        {/* Introduction */}
+        <View style={styles.introSection}>
+          <Text style={styles.introText}>
+            Welcome to InEvent. These Terms of Service ("Terms") govern your use of our mobile application and services. By using our platform, you agree to comply with and be bound by these Terms.
+          </Text>
+        </View>
+
+        {/* Terms Sections */}
+        <View style={styles.sectionsContainer}>
+          {sections.map(renderSection)}
         </View>
 
         {/* Contact Section */}
-        <Animated.View
-          style={[
-            styles.contactSection,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          <LinearGradient
-            colors={['#4c4ec7', '#6c5ce7']}
-            style={styles.contactGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          >
-            <Icon name="help-circle" size={40} color="#fff" />
-            <Text style={styles.contactTitle}>Questions About Our Terms?</Text>
-            <Text style={styles.contactSubtitle}>
-              Our legal team is available to help clarify any questions
-            </Text>
-            <TouchableOpacity style={styles.contactButton}>
-              <Text style={styles.contactButtonText}>Contact Legal Team</Text>
-              <Icon name="mail" size={16} color="#4c4ec7" />
-            </TouchableOpacity>
-          </LinearGradient>
-        </Animated.View>
+        <View style={styles.contactSection}>
+          <Text style={styles.contactTitle}>Questions About These Terms?</Text>
+          <Text style={styles.contactText}>
+            If you have any questions about these Terms of Service, please contact our legal team.
+          </Text>
+          <TouchableOpacity style={styles.contactButton}>
+            <Text style={styles.contactButtonText}>Contact Legal</Text>
+          </TouchableOpacity>
+        </View>
 
-        {/* Acknowledgment */}
-        <View style={styles.acknowledgmentSection}>
-          <Text style={styles.acknowledgmentText}>
-            By using our platform, you acknowledge that you have read, understood, and agree to be bound by these Terms of Service.
+        {/* Agreement Section */}
+        <View style={styles.agreementSection}>
+          <Text style={styles.agreementText}>
+            By continuing to use InEvent, you acknowledge that you have read, understood, and agree to be bound by these Terms of Service.
           </Text>
         </View>
       </ScrollView>
@@ -353,28 +123,26 @@ const TermsOfService = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: Theme.colors.background,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: Theme.spacing.lg,
     paddingTop: 50,
-    paddingBottom: 15,
-    backgroundColor: '#fff',
+    paddingBottom: Theme.spacing.md,
+    backgroundColor: Theme.colors.secondary,
     borderBottomWidth: 1,
-    borderBottomColor: '#e9ecef',
+    borderBottomColor: Theme.colors.border,
   },
   backButton: {
-    padding: 8,
-    borderRadius: 20,
-    backgroundColor: '#f8f9fa',
+    padding: Theme.spacing.sm,
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#333',
-    marginLeft: 15,
+    fontSize: Theme.typography.fontSize.xl,
+    fontFamily: Theme.typography.fontFamily.bold,
+    color: Theme.colors.textDark,
+    marginLeft: Theme.spacing.md,
   },
   headerSpacer: {
     flex: 1,
@@ -383,265 +151,107 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 30,
+    paddingBottom: Theme.spacing.xl,
   },
   heroSection: {
-    margin: 20,
-    borderRadius: 20,
-    overflow: 'hidden',
-  },
-  heroGradient: {
-    padding: 30,
+    padding: Theme.spacing.xl,
     alignItems: 'center',
-  },
-  heroContent: {
-    alignItems: 'center',
+    backgroundColor: Theme.colors.secondary,
   },
   heroTitle: {
     fontSize: 28,
-    fontWeight: '800',
-    color: '#fff',
-    textAlign: 'center',
-    marginTop: 15,
-    marginBottom: 10,
+    fontFamily: Theme.typography.fontFamily.bold,
+    color: Theme.colors.textDark,
+    marginTop: Theme.spacing.md,
+    marginBottom: Theme.spacing.sm,
   },
   heroSubtitle: {
-    fontSize: 16,
-    color: '#ffffff',
+    fontSize: Theme.typography.fontSize.md,
+    color: Theme.colors.textLight,
     textAlign: 'center',
-    opacity: 0.9,
-    lineHeight: 24,
-    marginBottom: 20,
+    marginBottom: Theme.spacing.md,
   },
   lastUpdated: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 20,
+    fontSize: Theme.typography.fontSize.sm,
+    color: Theme.colors.textLight,
+    fontStyle: 'italic',
   },
-  lastUpdatedText: {
-    fontSize: 14,
-    color: '#fff',
-    marginLeft: 8,
+  introSection: {
+    padding: Theme.spacing.lg,
+    backgroundColor: Theme.colors.secondary,
+    marginTop: Theme.spacing.md,
   },
-  summarySection: {
-    paddingHorizontal: 20,
-    marginBottom: 30,
+  introText: {
+    fontSize: Theme.typography.fontSize.md,
+    color: Theme.colors.textLight,
+    lineHeight: 24,
+    textAlign: 'left',
   },
-  summaryTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#333',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  summaryDescription: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  summaryGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  summaryCard: {
-    width: '48%',
-    backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 15,
-    alignItems: 'center',
-    marginBottom: 15,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  summaryIcon: {
-    width: 45,
-    height: 45,
-    borderRadius: 22.5,
-    backgroundColor: '#f8f9ff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-  summaryCardTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 5,
-    textAlign: 'center',
-  },
-  summaryCardDescription: {
-    fontSize: 12,
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-  noticeSection: {
-    paddingHorizontal: 20,
-    marginBottom: 30,
-  },
-  noticeCard: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 15,
-    borderLeftWidth: 4,
-    borderLeftColor: '#f39c12',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  noticeContent: {
-    flex: 1,
-    marginLeft: 15,
-  },
-  noticeTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 5,
-  },
-  noticeText: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 20,
-  },
-  termsSection: {
-    paddingHorizontal: 20,
-    marginBottom: 30,
-  },
-  sectionMainTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#333',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  sectionDescription: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 20,
+  sectionsContainer: {
+    padding: Theme.spacing.lg,
+    backgroundColor: Theme.colors.secondary,
+    marginTop: Theme.spacing.md,
   },
   sectionCard: {
-    backgroundColor: '#fff',
-    borderRadius: 15,
-    marginBottom: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 20,
-  },
-  sectionIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#f8f9ff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 15,
+    backgroundColor: Theme.colors.card,
+    borderRadius: Theme.borderRadius.md,
+    padding: Theme.spacing.lg,
+    marginBottom: Theme.spacing.md,
+    ...Theme.shadows.sm,
   },
   sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    flex: 1,
+    fontSize: Theme.typography.fontSize.lg,
+    fontFamily: Theme.typography.fontFamily.bold,
+    color: Theme.colors.textDark,
+    marginBottom: Theme.spacing.md,
   },
   sectionContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-  },
-  contentItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-    marginTop: 10,
-  },
-  bullet: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#4c4ec7',
-    marginTop: 8,
-    marginRight: 15,
-  },
-  contentText: {
-    fontSize: 14,
-    color: '#555',
+    fontSize: Theme.typography.fontSize.sm,
+    color: Theme.colors.textLight,
     lineHeight: 22,
-    flex: 1,
   },
   contactSection: {
-    margin: 20,
-    borderRadius: 20,
-    overflow: 'hidden',
-  },
-  contactGradient: {
-    padding: 30,
+    padding: Theme.spacing.xl,
+    backgroundColor: Theme.colors.secondary,
+    marginTop: Theme.spacing.md,
     alignItems: 'center',
   },
   contactTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#fff',
-    textAlign: 'center',
-    marginTop: 15,
-    marginBottom: 10,
+    fontSize: Theme.typography.fontSize.lg,
+    fontFamily: Theme.typography.fontFamily.bold,
+    color: Theme.colors.textDark,
+    marginBottom: Theme.spacing.sm,
   },
-  contactSubtitle: {
-    fontSize: 16,
-    color: '#ffffff',
+  contactText: {
+    fontSize: Theme.typography.fontSize.md,
+    color: Theme.colors.textLight,
     textAlign: 'center',
-    opacity: 0.9,
-    marginBottom: 25,
-    lineHeight: 24,
+    marginBottom: Theme.spacing.lg,
   },
   contactButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    paddingVertical: 15,
-    paddingHorizontal: 30,
-    borderRadius: 25,
+    backgroundColor: Theme.colors.primary,
+    paddingVertical: Theme.spacing.md,
+    paddingHorizontal: Theme.spacing.xl,
+    borderRadius: Theme.borderRadius.md,
   },
   contactButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#4c4ec7',
-    marginRight: 8,
+    fontSize: Theme.typography.fontSize.md,
+    fontFamily: Theme.typography.fontFamily.semiBold,
+    color: Theme.colors.secondary,
   },
-  acknowledgmentSection: {
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: '#fff',
-    marginHorizontal: 20,
-    marginBottom: 20,
-    borderRadius: 15,
+  agreementSection: {
+    padding: Theme.spacing.xl,
+    backgroundColor: `${Theme.colors.info}15`,
+    marginTop: Theme.spacing.md,
     borderLeftWidth: 4,
-    borderLeftColor: '#28a745',
+    borderLeftColor: Theme.colors.info,
   },
-  acknowledgmentText: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 20,
+  agreementText: {
+    fontSize: Theme.typography.fontSize.sm,
+    color: Theme.colors.textLight,
     fontStyle: 'italic',
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });
 

@@ -174,8 +174,7 @@ export default function SearchScreen() {
   };
 
   const handleArtistPress = (artistId: string) => {
-    const router = useRouter();
-    router.push(`/(artist)/public-profile?id=${artistId}`);
+    router.push(`/artist-profile?id=${artistId}`);
   };
 
   const handleGigPress = (gigId: string) => {

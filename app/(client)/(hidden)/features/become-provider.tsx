@@ -1,225 +1,209 @@
+import { Theme } from '@/src/constants/theme';
 import { useRouter } from 'expo-router';
+import { ArrowLeft, CheckCircle, Star, TrendingUp, Users } from 'lucide-react-native';
 import React from 'react';
 import {
-    Dimensions,
     ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
     View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import Icon from 'react-native-vector-icons/Feather';
 
-const { width } = Dimensions.get('window');
-
-export default function BecomeProviderScreen() {
+const BecomeProvider = () => {
   const router = useRouter();
 
   const benefits = [
     {
-      icon: 'dollar-sign',
-      title: 'Earn Money',
-      description: 'Set your own prices and earn money doing what you love',
-      color: '#10b981'
-    },
-    {
-      icon: 'users',
-      title: 'Reach Customers',
-      description: 'Connect with thousands of potential clients in your area',
-      color: '#3b82f6'
-    },
-    {
-      icon: 'star',
-      title: 'Build Reputation',
-      description: 'Get reviews and build your professional reputation',
-      color: '#f59e0b'
-    },
-    {
-      icon: 'calendar',
-      title: 'Flexible Schedule',
-      description: 'Work when you want, accept bookings that fit your schedule',
-      color: '#8b5cf6'
-    },
-    {
-      icon: 'trending-up',
+      icon: TrendingUp,
       title: 'Grow Your Business',
-      description: 'Use our platform to expand and grow your service business',
-      color: '#ef4444'
+      description: 'Reach more customers and increase your revenue',
     },
     {
-      icon: 'shield',
+      icon: Users,
+      title: 'Connect with Clients',
+      description: 'Build lasting relationships with event organizers',
+    },
+    {
+      icon: Star,
+      title: 'Build Your Reputation',
+      description: 'Showcase your work and receive customer reviews',
+    },
+    {
+      icon: CheckCircle,
       title: 'Secure Payments',
-      description: 'Get paid securely through our trusted payment system',
-      color: '#06b6d4'
-    }
+      description: 'Get paid safely and on time for your services',
+    },
   ];
 
   const steps = [
     {
       step: '1',
-      title: 'Create Your Profile',
-      description: 'Sign up and create a detailed profile showcasing your services and expertise'
+      title: 'Register',
+      description: 'Create your provider account with basic information',
     },
     {
       step: '2',
-      title: 'Verify Your Identity',
-      description: 'Complete our verification process to build trust with customers'
+      title: 'Verify',
+      description: 'Upload your credentials and business documents',
     },
     {
       step: '3',
-      title: 'List Your Services',
-      description: 'Add your services with descriptions, pricing, and availability'
+      title: 'Setup Profile',
+      description: 'Add your services, portfolio, and pricing',
     },
     {
       step: '4',
-      title: 'Start Receiving Bookings',
-      description: 'Get notified of bookings and start earning money immediately'
-    }
+      title: 'Start Earning',
+      description: 'Receive bookings and grow your business',
+    },
   ];
 
+  const renderBenefitCard = (benefit: any, index: number) => (
+    <View key={index} style={styles.benefitCard}>
+      <View style={styles.benefitIcon}>
+        <benefit.icon size={24} color={Theme.colors.primary} />
+      </View>
+      <Text style={styles.benefitTitle}>{benefit.title}</Text>
+      <Text style={styles.benefitDescription}>{benefit.description}</Text>
+    </View>
+  );
+
+  const renderStepCard = (step: any, index: number) => (
+    <View key={index} style={styles.stepCard}>
+      <View style={styles.stepNumber}>
+        <Text style={styles.stepNumberText}>{step.step}</Text>
+      </View>
+      <View style={styles.stepContent}>
+        <Text style={styles.stepTitle}>{step.title}</Text>
+        <Text style={styles.stepDescription}>{step.description}</Text>
+      </View>
+    </View>
+  );
+
   return (
-    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
+    <View style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={() => router.replace('/(client)')}
         >
-          <Icon name="arrow-left" size={24} color="#4f46e5" />
+          <ArrowLeft size={24} color={Theme.colors.textDark} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Become a Provider</Text>
-        <View style={styles.placeholder} />
+        <View style={styles.headerSpacer} />
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Hero Section */}
         <View style={styles.heroSection}>
-          <View style={styles.heroIcon}>
-            <Icon name="briefcase" size={48} color="#4f46e5" />
-          </View>
-          <Text style={styles.heroTitle}>Join Our Provider Network</Text>
+          <Text style={styles.heroTitle}>Join Our Network</Text>
           <Text style={styles.heroSubtitle}>
-            Turn your skills into income by offering services to thousands of customers
+            Become a service provider and grow your event business
           </Text>
         </View>
 
         {/* Benefits Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Why Join Us?</Text>
+        <View style={styles.benefitsSection}>
+          <Text style={styles.sectionTitle}>Why Join InEvent?</Text>
           <View style={styles.benefitsGrid}>
-            {benefits.map((benefit, index) => (
-              <View key={index} style={styles.benefitCard}>
-                <View style={[styles.benefitIcon, { backgroundColor: benefit.color }]}>
-                  <Icon name={benefit.icon} size={24} color="#ffffff" />
-                </View>
-                <Text style={styles.benefitTitle}>{benefit.title}</Text>
-                <Text style={styles.benefitDescription}>{benefit.description}</Text>
-              </View>
-            ))}
+            {benefits.map(renderBenefitCard)}
           </View>
         </View>
 
-        {/* How it Works Section */}
-        <View style={styles.section}>
+        {/* Steps Section */}
+        <View style={styles.stepsSection}>
           <Text style={styles.sectionTitle}>How It Works</Text>
-          <View style={styles.stepsContainer}>
-            {steps.map((step, index) => (
-              <View key={index} style={styles.stepItem}>
-                <View style={styles.stepNumber}>
-                  <Text style={styles.stepNumberText}>{step.step}</Text>
-                </View>
-                <View style={styles.stepContent}>
-                  <Text style={styles.stepTitle}>{step.title}</Text>
-                  <Text style={styles.stepDescription}>{step.description}</Text>
-                </View>
-                {index < steps.length - 1 && <View style={styles.stepConnector} />}
-              </View>
-            ))}
+          <View style={styles.stepsList}>
+            {steps.map(renderStepCard)}
           </View>
         </View>
 
         {/* CTA Section */}
         <View style={styles.ctaSection}>
           <Text style={styles.ctaTitle}>Ready to Get Started?</Text>
-          <Text style={styles.ctaSubtitle}>
-            Join thousands of providers already earning on our platform
+          <Text style={styles.ctaDescription}>
+            Join thousands of successful service providers
           </Text>
           <TouchableOpacity style={styles.ctaButton}>
-            <Icon name="user" size={20} color="#ffffff" style={styles.ctaIcon} />
-            <Text style={styles.ctaButtonText}>Start Your Application</Text>
+            <Text style={styles.ctaButtonText}>Apply Now</Text>
           </TouchableOpacity>
+          
+          <View style={styles.infoNote}>
+            <Text style={styles.infoText}>
+              Application review typically takes 2-3 business days
+            </Text>
+          </View>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: Theme.colors.background,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: '#ffffff',
+    paddingHorizontal: Theme.spacing.lg,
+    paddingTop: 50,
+    paddingBottom: Theme.spacing.md,
+    backgroundColor: Theme.colors.secondary,
     borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
+    borderBottomColor: Theme.colors.border,
   },
   backButton: {
-    padding: 8,
+    padding: Theme.spacing.sm,
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#0f172a',
+    fontSize: Theme.typography.fontSize.xl,
+    fontFamily: Theme.typography.fontFamily.bold,
+    color: Theme.colors.textDark,
+    marginLeft: Theme.spacing.md,
   },
-  placeholder: {
-    width: 40,
-  },
-  content: {
+  headerSpacer: {
     flex: 1,
   },
-  heroSection: {
-    alignItems: 'center',
-    paddingVertical: 40,
-    paddingHorizontal: 20,
-    backgroundColor: '#ffffff',
+  scrollView: {
+    flex: 1,
   },
-  heroIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#e0e7ff',
-    justifyContent: 'center',
+  scrollContent: {
+    paddingBottom: Theme.spacing.xl,
+  },
+  heroSection: {
+    padding: Theme.spacing.xl,
     alignItems: 'center',
-    marginBottom: 24,
+    backgroundColor: Theme.colors.secondary,
   },
   heroTitle: {
     fontSize: 28,
-    fontWeight: '800',
-    color: '#0f172a',
-    textAlign: 'center',
-    marginBottom: 12,
+    fontFamily: Theme.typography.fontFamily.bold,
+    color: Theme.colors.textDark,
+    marginBottom: Theme.spacing.sm,
   },
   heroSubtitle: {
-    fontSize: 16,
-    color: '#64748b',
+    fontSize: Theme.typography.fontSize.md,
+    color: Theme.colors.textLight,
     textAlign: 'center',
-    lineHeight: 24,
   },
-  section: {
-    paddingHorizontal: 20,
-    paddingVertical: 32,
+  benefitsSection: {
+    padding: Theme.spacing.lg,
+    backgroundColor: Theme.colors.secondary,
+    marginTop: Theme.spacing.md,
   },
   sectionTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#0f172a',
-    marginBottom: 24,
+    fontSize: Theme.typography.fontSize.xl,
+    fontFamily: Theme.typography.fontFamily.bold,
+    color: Theme.colors.textDark,
+    marginBottom: Theme.spacing.lg,
     textAlign: 'center',
   },
   benefitsGrid: {
@@ -229,125 +213,120 @@ const styles = StyleSheet.create({
   },
   benefitCard: {
     width: '48%',
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
+    backgroundColor: Theme.colors.card,
+    borderRadius: Theme.borderRadius.md,
+    padding: Theme.spacing.lg,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    marginBottom: Theme.spacing.md,
+    ...Theme.shadows.sm,
   },
   benefitIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: `${Theme.colors.primary}15`,
     alignItems: 'center',
-    marginBottom: 16,
+    justifyContent: 'center',
+    marginBottom: Theme.spacing.md,
   },
   benefitTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0f172a',
-    marginBottom: 8,
+    fontSize: Theme.typography.fontSize.md,
+    fontFamily: Theme.typography.fontFamily.semiBold,
+    color: Theme.colors.textDark,
     textAlign: 'center',
+    marginBottom: Theme.spacing.sm,
   },
   benefitDescription: {
-    fontSize: 14,
-    color: '#64748b',
+    fontSize: Theme.typography.fontSize.sm,
+    color: Theme.colors.textLight,
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 18,
   },
-  stepsContainer: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 24,
+  stepsSection: {
+    padding: Theme.spacing.lg,
+    backgroundColor: Theme.colors.secondary,
+    marginTop: Theme.spacing.md,
   },
-  stepItem: {
+  stepsList: {
+    gap: Theme.spacing.md,
+  },
+  stepCard: {
     flexDirection: 'row',
-    position: 'relative',
-    marginBottom: 32,
+    alignItems: 'center',
+    backgroundColor: Theme.colors.card,
+    borderRadius: Theme.borderRadius.md,
+    padding: Theme.spacing.lg,
+    ...Theme.shadows.sm,
   },
   stepNumber: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#4f46e5',
-    justifyContent: 'center',
+    backgroundColor: Theme.colors.primary,
     alignItems: 'center',
-    marginRight: 16,
+    justifyContent: 'center',
+    marginRight: Theme.spacing.md,
   },
   stepNumberText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontSize: Theme.typography.fontSize.lg,
+    fontFamily: Theme.typography.fontFamily.bold,
+    color: Theme.colors.secondary,
   },
   stepContent: {
     flex: 1,
-    paddingTop: 4,
   },
   stepTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#0f172a',
-    marginBottom: 8,
+    fontSize: Theme.typography.fontSize.lg,
+    fontFamily: Theme.typography.fontFamily.semiBold,
+    color: Theme.colors.textDark,
+    marginBottom: 4,
   },
   stepDescription: {
-    fontSize: 15,
-    color: '#64748b',
-    lineHeight: 22,
-  },
-  stepConnector: {
-    position: 'absolute',
-    left: 19,
-    top: 40,
-    bottom: -32,
-    width: 2,
-    backgroundColor: '#e2e8f0',
+    fontSize: Theme.typography.fontSize.sm,
+    color: Theme.colors.textLight,
   },
   ctaSection: {
+    padding: Theme.spacing.xl,
+    backgroundColor: Theme.colors.secondary,
+    marginTop: Theme.spacing.md,
     alignItems: 'center',
-    paddingVertical: 40,
-    paddingHorizontal: 20,
-    backgroundColor: '#ffffff',
-    marginTop: 32,
   },
   ctaTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#0f172a',
-    marginBottom: 12,
-    textAlign: 'center',
+    fontSize: Theme.typography.fontSize.xl,
+    fontFamily: Theme.typography.fontFamily.bold,
+    color: Theme.colors.textDark,
+    marginBottom: Theme.spacing.sm,
   },
-  ctaSubtitle: {
-    fontSize: 16,
-    color: '#64748b',
+  ctaDescription: {
+    fontSize: Theme.typography.fontSize.md,
+    color: Theme.colors.textLight,
     textAlign: 'center',
-    marginBottom: 32,
-    lineHeight: 24,
+    marginBottom: Theme.spacing.lg,
   },
   ctaButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#4f46e5',
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    borderRadius: 16,
-    shadowColor: '#4f46e5',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  ctaIcon: {
-    marginRight: 12,
+    backgroundColor: Theme.colors.primary,
+    paddingVertical: Theme.spacing.md,
+    paddingHorizontal: Theme.spacing.xl,
+    borderRadius: Theme.borderRadius.md,
+    marginBottom: Theme.spacing.lg,
   },
   ctaButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontSize: Theme.typography.fontSize.md,
+    fontFamily: Theme.typography.fontFamily.semiBold,
+    color: Theme.colors.secondary,
+  },
+  infoNote: {
+    backgroundColor: `${Theme.colors.info}15`,
+    padding: Theme.spacing.md,
+    borderRadius: Theme.borderRadius.sm,
+    borderLeftWidth: 3,
+    borderLeftColor: Theme.colors.info,
+  },
+  infoText: {
+    fontSize: Theme.typography.fontSize.sm,
+    color: Theme.colors.textLight,
+    textAlign: 'center',
   },
 });
+
+export default BecomeProvider;

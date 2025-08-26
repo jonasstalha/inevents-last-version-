@@ -21,7 +21,7 @@ export default function SavedArtistsScreen() {
   }, [savedArtistIds, getSavedArtists]);
   
   const handleViewArtist = (artistId: string) => {
-    router.push(`/(artist)/public-profile?id=${artistId}`);
+    router.push(`/artist-profile?id=${artistId}`);
   };
   
   const handleUnsaveArtist = (artistId: string) => {

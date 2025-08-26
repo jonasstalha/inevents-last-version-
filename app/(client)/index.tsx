@@ -18,6 +18,7 @@ import { dummyTickets } from './tickets';
 // Update the import path below to the correct location of your api file
 // Example: If api.ts is in app/src/api.ts, use '../src/api'
 import { fetchArtists, fetchServices, fetchTickets } from '../../src/api';
+import { fetchArtistsFromFirebase } from '../../src/firebase/artistsService';
 import { useMarketplaceStore } from '../../stores/useMarketplaceStore';
 
 const { width, height } = Dimensions.get('window');
@@ -655,7 +656,17 @@ export default function EventApp() {
   // Fetch real artists and tickets when popup opens
   useEffect(() => {
     if (isPopupVisible && popupContent === 'artists') {
-      fetchArtists().then(setRealArtists);
+      console.log('🎨 Fetching real artists from Firebase...');
+      fetchArtistsFromFirebase()
+        .then((firebaseArtists) => {
+          console.log('✅ Successfully fetched Firebase artists:', firebaseArtists);
+          setRealArtists(firebaseArtists);
+        })
+        .catch((error) => {
+          console.error('❌ Error fetching Firebase artists:', error);
+          // Fallback to mock artists
+          fetchArtists().then(setRealArtists);
+        });
     }
     if (isPopupVisible && popupContent === 'tickets') {
       fetchTickets().then(setRealTickets);
@@ -2182,7 +2193,7 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   enhancedFeatureItem: {
-    width: '30%',
+    width: '48%',
     alignItems: 'center',
     marginBottom: 24,
   },

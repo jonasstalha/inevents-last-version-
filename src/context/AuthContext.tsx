@@ -167,7 +167,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         
         // Log the role specifically for debugging
         console.log('AuthContext: User role from Firestore:', userData.role);
+        console.log('AuthContext: Role type:', typeof userData.role);
         console.log('AuthContext: Checking if role is admin:', userData.role === 'admin');
+        console.log('AuthContext: Trimmed role check:', userData.role?.trim() === 'admin');
+        
+        // Normalize the role to ensure consistency
+        const normalizedRole = userData.role?.toString().trim().toLowerCase() || 'client';
+        console.log('AuthContext: Normalized role:', normalizedRole);
         
         // Set user with data from Firestore
         const userToSet: User = {
@@ -193,8 +199,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         
         console.log(`AuthContext: User role set to ${userData.role || 'client'}`);
         
-        // Return the role for immediate use
-        return userData.role || 'client';
+        // Return the exact role from Firestore for immediate use
+        const roleToReturn = userData.role || 'client';
+        console.log('AuthContext: Returning role for immediate navigation:', roleToReturn);
+        return roleToReturn;
       } else {
         // User doesn't exist in Firestore (unusual), use Firebase Auth data
         console.log('AuthContext: No user data found in Firestore, using Firebase Auth data');
