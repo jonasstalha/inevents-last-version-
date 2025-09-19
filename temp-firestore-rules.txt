@@ -1,0 +1,25 @@
+// TEMPORARY PERMISSIVE RULES - FOR DEVELOPMENT ONLY
+// Copy this exactly to Firebase Console > Firestore Database > Rules
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow all operations on all documents (DEVELOPMENT ONLY)
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
+
+// INSTRUCTIONS:
+// 1. Go to https://console.firebase.google.com
+// 2. Select project: inevents-2fe56
+// 3. Go to Firestore Database > Rules
+// 4. Delete all existing rules
+// 5. Copy and paste the rules above
+// 6. Click "Publish"
+// 7. Return to your app and refresh services
+
+// WARNING: These rules allow anyone to read/write your database
+// Use only for development and testing
+// Update with proper security rules before production

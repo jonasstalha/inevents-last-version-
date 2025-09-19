@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "726891438005",
+    "project_id": "inevent-32130",
+    "storage_bucket": "inevent-32130.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:726891438005:android:a04b440a61b61dec3ac3fc",
+        "android_client_info": {
+          "package_name": "com.peakpower.inevent"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDHu5sbQ2ieEMaKeyjaBySy9ldfJHxoZsc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

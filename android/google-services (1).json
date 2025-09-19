@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "780609459655",
+    "project_id": "inevents-2fe56",
+    "storage_bucket": "inevents-2fe56.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:780609459655:android:c4535e1323f166ef7f75e2",
+        "android_client_info": {
+          "package_name": "com.compagny.inevents"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "780609459655-33kqf1801palf7v922atpse13ictumgr.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC7Mr5CAQPoqAIMLh-IefxsVugqyI8PYXA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "780609459655-33kqf1801palf7v922atpse13ictumgr.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "780609459655-llrk15uu4pg39tvt9ml30b6nb9013ojq.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.ios.inevent"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
