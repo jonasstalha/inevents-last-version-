@@ -184,6 +184,8 @@ export default function EventApp() {
   const [realArtists, setRealArtists] = useState<Artist[]>([]);
   const [realTickets, setRealTickets] = useState<any[]>([]);
   const [realServices, setRealServices] = useState<Service[]>([]);
+  const [topTickets, setTopTickets] = useState<any[]>([]);
+  const [topGlobalServices, setTopGlobalServices] = useState<any[]>([]);
   const { services } = useMarketplaceStore();
   
   // Animated values
@@ -760,14 +762,14 @@ export default function EventApp() {
   useEffect(() => {
     fetchAllTickets().then((tickets) => {
       // Sort by availableTickets (if exists), fallback to createdAt or id
-      const sorted = [...tickets].sort((a, b) => {
+      const sorted = [...tickets].sort((a: any, b: any) => {
         if (typeof b.availableTickets === 'number' && typeof a.availableTickets === 'number') {
           return b.availableTickets - a.availableTickets;
         }
         if (b.createdAt && a.createdAt) {
           return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
         }
-        return (b.id || 0) - (a.id || 0);
+        return (Number(b.id) || 0) - (Number(a.id) || 0);
       });
       setTopTickets(sorted.slice(0, 8));
     });
@@ -778,7 +780,7 @@ export default function EventApp() {
     if (user) {
       fetchAllServices().then((services) => {
         // Sort by rating or reviews
-        const sorted = [...services].sort((a, b) => (b.rating || 0) - (a.rating || 0));
+        const sorted = [...services].sort((a: any, b: any) => (Number(b.rating) || 0) - (Number(a.rating) || 0));
         setTopGlobalServices(sorted.slice(0, 8));
       });
     }
