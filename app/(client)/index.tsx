@@ -1352,8 +1352,16 @@ export default function EventApp() {
                                 </View>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                                   <Text style={{ color: '#10b981', fontWeight: 'bold', fontSize: 20 }}>{service.price}</Text>
-                                  <View style={{ backgroundColor: '#4f46e5', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 6, shadowColor: '#4f46e5', shadowOpacity: 0.12, shadowRadius: 4 }}>
-                                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>View</Text>
+                                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                                    <TouchableOpacity 
+                                      style={{ backgroundColor: '#f59e0b', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}
+                                      onPress={() => router.push({ pathname: '/(client)/(hidden)/custom-order/[serviceId]', params: { serviceId: service.id.toString() } })}
+                                    >
+                                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>Custom</Text>
+                                    </TouchableOpacity>
+                                    <View style={{ backgroundColor: '#4f46e5', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, shadowColor: '#4f46e5', shadowOpacity: 0.12, shadowRadius: 4 }}>
+                                      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>View</Text>
+                                    </View>
                                   </View>
                                 </View>
                               </View>

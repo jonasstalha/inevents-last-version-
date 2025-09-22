@@ -1,8 +1,10 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Easing, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Easing, Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useAuth } from '../../../../src/context/AuthContext';
 import { fetchAllTickets } from '../../../../src/firebase/clientTicketsService';
+import { createOrder } from '../../../../src/firebase/orderService';
 
 // Fallback images
 const ticketImages = [
@@ -28,6 +30,7 @@ interface TicketData {
   flyer?: string;
   artistName?: string;
   artistPhoto?: string;
+  artistId?: string;
   ticketTypes?: { type: string; price: string | number }[];
   availableTickets?: number;
   eventDate?: any;
@@ -48,6 +51,7 @@ const getRandomPlaceholderImage = () => {
 export default function TicketDetailScreen() {
   const { ticket } = useLocalSearchParams();
   const router = useRouter();
+  const { user } = useAuth();
   const [ticketData, setTicketData] = useState<TicketData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +61,18 @@ export default function TicketDetailScreen() {
   const [isPurchasing, setIsPurchasing] = useState(false);
   const [scaleAnim] = useState(new Animated.Value(1));
   const [pulseAnim] = useState(new Animated.Value(1));
+
+  // Personal information form states
+  const [showPersonalInfoForm, setShowPersonalInfoForm] = useState(false);
+  const [personalInfo, setPersonalInfo] = useState({
+    fullName: '',
+    email: user?.email || '',
+    phone: '',
+    address: '',
+    city: '',
+    country: '',
+    specialRequests: ''
+  });
 
   useEffect(() => {
     fetchTicketData();
@@ -143,6 +159,7 @@ export default function TicketDetailScreen() {
           flyer: foundTicket.flyer,
           artistName: foundTicket.artistName || 'Unknown Artist',
           artistPhoto: foundTicket.artistPhoto,
+          artistId: foundTicket.artistId || foundTicket.userId || 'unknown',
           ticketTypes: foundTicket.ticketTypes || [],
           availableTickets: foundTicket.availableTickets || 100,
           eventDate: foundTicket.eventDate,
@@ -191,30 +208,111 @@ export default function TicketDetailScreen() {
     setShowPurchaseModal(true);
   };
 
-  // Confirm purchase
+  // Confirm purchase - show personal info form first
   const confirmPurchase = async () => {
+    setShowPurchaseModal(false);
+    setShowPersonalInfoForm(true);
+  };
+
+  // Handle form submission with personal info
+  const submitOrderWithPersonalInfo = async () => {
     setIsPurchasing(true);
     
-    // Simulate purchase processing
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    setIsPurchasing(false);
-    setShowPurchaseModal(false);
-    
-    Alert.alert(
-      'Purchase Successful! 🎉',
-      `Your ${quantity} ticket(s) for "${ticketData?.title}" have been purchased successfully. Total: ${calculateTotal()} MAD`,
-      [
-        {
-          text: 'View My Tickets',
-          onPress: () => router.push('/(client)/tickets')
-        },
-        {
-          text: 'OK',
-          style: 'default'
+    try {
+      if (!user) {
+        Alert.alert('Authentication Required', 'Please log in to purchase tickets.');
+        setIsPurchasing(false);
+        return;
+      }
+
+      if (!ticketData) {
+        Alert.alert('Error', 'Ticket data not available.');
+        setIsPurchasing(false);
+        return;
+      }
+
+      // Validate required fields
+      if (!personalInfo.fullName.trim() || !personalInfo.phone.trim() || !personalInfo.address.trim()) {
+        Alert.alert('Missing Information', 'Please fill in all required fields (Full Name, Phone, Address).');
+        setIsPurchasing(false);
+        return;
+      }
+
+      // Check if enough tickets are available
+      if (quantity > (ticketData.availableTickets || 0)) {
+        Alert.alert(
+          'Not Enough Tickets',
+          `Sorry, only ${ticketData.availableTickets || 0} tickets are available for this event.`
+        );
+        setIsPurchasing(false);
+        return;
+      }
+
+      // Prepare ticket quantities for order
+      const ticketQuantities = [];
+      if (ticketData.ticketTypes && ticketData.ticketTypes.length > 0 && selectedTicketType !== null) {
+        // Specific ticket type selected
+        const selectedType = ticketData.ticketTypes[selectedTicketType];
+        ticketQuantities.push({
+          type: selectedType.type,
+          price: typeof selectedType.price === 'number' ? selectedType.price : parseFloat(selectedType.price?.toString() || '0'),
+          quantity: quantity
+        });
+      } else {
+        // General ticket
+        ticketQuantities.push({
+          type: 'General',
+          price: ticketData.price,
+          quantity: quantity
+        });
+      }
+
+      // Create order in Firebase with personal info
+      const orderInput = {
+        ticketId: ticketData.id,
+        artistId: ticketData.artistId || 'unknown',
+        ticketName: ticketData.title,
+        clientName: personalInfo.fullName,
+        totalPrice: calculateTotal(),
+        ticketQuantities,
+        specialRequests: personalInfo.specialRequests,
+        clientInfo: {
+          fullName: personalInfo.fullName,
+          email: personalInfo.email,
+          phone: personalInfo.phone,
+          address: personalInfo.address,
+          city: personalInfo.city,
+          country: personalInfo.country
         }
-      ]
-    );
+      };
+
+      const newOrderId = await createOrder(orderInput);
+      
+      setIsPurchasing(false);
+      setShowPersonalInfoForm(false);
+      
+      Alert.alert(
+        'Purchase Successful! 🎉',
+        `Your ${quantity} ticket(s) for "${ticketData?.title}" have been purchased successfully. Total: ${calculateTotal()} MAD\n\nOrder ID: ${newOrderId}`,
+        [
+          {
+            text: 'View My Tickets',
+            onPress: () => router.push('/(client)/tickets')
+          },
+          {
+            text: 'OK',
+            style: 'default'
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Error placing order:', error);
+      setIsPurchasing(false);
+      Alert.alert(
+        'Order Processing Error', 
+        'We encountered an issue while processing your order. Please try again or contact support if the problem persists.'
+      );
+    }
   };
 
   // Loading state
@@ -498,6 +596,152 @@ export default function TicketDetailScreen() {
                   </View>
                 ) : (
                   <Text style={styles.modalConfirmText}>Confirm Purchase</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Personal Information Form Modal */}
+      <Modal
+        visible={showPersonalInfoForm}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowPersonalInfoForm(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.personalInfoModal}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Personal Information</Text>
+              <TouchableOpacity onPress={() => setShowPersonalInfoForm(false)}>
+                <Ionicons name="close" size={24} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.formContainer} showsVerticalScrollIndicator={false}>
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Full Name *</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={personalInfo.fullName}
+                  onChangeText={(text) => setPersonalInfo(prev => ({ ...prev, fullName: text }))}
+                  placeholder="Enter your full name"
+                  placeholderTextColor="#9CA3AF"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Email</Text>
+                <TextInput
+                  style={[styles.formInput, { backgroundColor: '#F3F4F6' }]}
+                  value={personalInfo.email}
+                  editable={false}
+                  placeholder="Email address"
+                  placeholderTextColor="#9CA3AF"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Phone Number *</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={personalInfo.phone}
+                  onChangeText={(text) => setPersonalInfo(prev => ({ ...prev, phone: text }))}
+                  placeholder="+212 xxx xxx xxx"
+                  placeholderTextColor="#9CA3AF"
+                  keyboardType="phone-pad"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Address *</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={personalInfo.address}
+                  onChangeText={(text) => setPersonalInfo(prev => ({ ...prev, address: text }))}
+                  placeholder="Street address"
+                  placeholderTextColor="#9CA3AF"
+                />
+              </View>
+
+              <View style={styles.formRow}>
+                <View style={styles.formGroupHalf}>
+                  <Text style={styles.formLabel}>City</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    value={personalInfo.city}
+                    onChangeText={(text) => setPersonalInfo(prev => ({ ...prev, city: text }))}
+                    placeholder="City"
+                    placeholderTextColor="#9CA3AF"
+                  />
+                </View>
+
+                <View style={styles.formGroupHalf}>
+                  <Text style={styles.formLabel}>Country</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    value={personalInfo.country}
+                    onChangeText={(text) => setPersonalInfo(prev => ({ ...prev, country: text }))}
+                    placeholder="Country"
+                    placeholderTextColor="#9CA3AF"
+                  />
+                </View>
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Special Requests</Text>
+                <TextInput
+                  style={[styles.formInput, styles.textArea]}
+                  value={personalInfo.specialRequests}
+                  onChangeText={(text) => setPersonalInfo(prev => ({ ...prev, specialRequests: text }))}
+                  placeholder="Any special requests or notes..."
+                  placeholderTextColor="#9CA3AF"
+                  multiline={true}
+                  numberOfLines={3}
+                />
+              </View>
+
+              <View style={styles.orderSummary}>
+                <Text style={styles.summaryTitle}>Order Summary</Text>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>{ticketData?.title}</Text>
+                </View>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>
+                    {selectedTicketType !== null && ticketData?.ticketTypes && ticketData.ticketTypes.length > 0
+                      ? `${ticketData.ticketTypes[selectedTicketType]?.type} × ${quantity}`
+                      : `Ticket × ${quantity}`
+                    }
+                  </Text>
+                  <Text style={styles.summaryValue}>{calculateTotal()} MAD</Text>
+                </View>
+                <View style={[styles.summaryRow, styles.summaryTotal]}>
+                  <Text style={styles.summaryTotalLabel}>Total</Text>
+                  <Text style={styles.summaryTotalValue}>{calculateTotal()} MAD</Text>
+                </View>
+              </View>
+            </ScrollView>
+            
+            <View style={styles.formActions}>
+              <TouchableOpacity 
+                style={styles.formCancelButton} 
+                onPress={() => setShowPersonalInfoForm(false)}
+              >
+                <Text style={styles.formCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={styles.formSubmitButton} 
+                onPress={submitOrderWithPersonalInfo}
+                disabled={isPurchasing}
+              >
+                {isPurchasing ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <Text style={[styles.formSubmitText, { marginLeft: 8 }]}>Processing...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.formSubmitText}>Complete Order</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -979,5 +1223,129 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  // Personal Info Form Styles
+  personalInfoModal: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '90%',
+    width: '100%',
+    marginTop: 'auto',
+  },
+  formContainer: {
+    maxHeight: 400,
+    paddingHorizontal: 20,
+  },
+  formGroup: {
+    marginBottom: 16,
+  },
+  formRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  formGroupHalf: {
+    flex: 1,
+  },
+  formLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 8,
+  },
+  formInput: {
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#111827',
+    backgroundColor: '#FFFFFF',
+  },
+  textArea: {
+    height: 80,
+    textAlignVertical: 'top',
+  },
+  orderSummary: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  summaryTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 12,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  summaryLabel: {
+    fontSize: 14,
+    color: '#6B7280',
+    flex: 1,
+  },
+  summaryValue: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#111827',
+  },
+  summaryTotal: {
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+    paddingTop: 8,
+    marginTop: 4,
+    marginBottom: 0,
+  },
+  summaryTotalLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  summaryTotalValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#6C63FF',
+  },
+  formActions: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+  },
+  formCancelButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+  },
+  formCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  formSubmitButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: '#6C63FF',
+  },
+  formSubmitText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 }); 

@@ -1,16 +1,16 @@
 import { getAuth } from 'firebase/auth';
 import {
-    addDoc,
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    getFirestore,
-    increment,
-    query,
-    serverTimestamp,
-    updateDoc,
-    where
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  getFirestore,
+  increment,
+  query,
+  serverTimestamp,
+  updateDoc,
+  where
 } from 'firebase/firestore';
 import app from './firebaseConfig';
 
@@ -44,6 +44,14 @@ export interface OrderInput {
     quantity: number;
   }[];
   specialRequests?: string;
+  clientInfo?: {
+    fullName: string;
+    email: string;
+    phone: string;
+    address: string;
+    city: string;
+    country: string;
+  };
 }
 
 // Interface for order statuses
@@ -130,7 +138,7 @@ export const createOrder = async (orderData: OrderInput): Promise<string> => {
     const orderToSubmit = {
       clientId,
       clientEmail,
-      clientName,
+      clientName: orderData.clientInfo?.fullName || orderData.clientName || auth.currentUser.displayName || 'Anonymous Customer',
       ticketId: orderData.ticketId,
       ticketName: orderData.ticketName || 'Event Ticket',
       artistId: orderData.artistId,
@@ -138,6 +146,7 @@ export const createOrder = async (orderData: OrderInput): Promise<string> => {
       totalPrice: orderData.totalPrice,
       ticketQuantities: orderData.ticketQuantities,
       specialRequests: orderData.specialRequests || '',
+      clientInfo: orderData.clientInfo || null,
       createdAt: serverTimestamp(),
       totalQuantity: orderData.ticketQuantities.reduce((acc, item) => acc + item.quantity, 0),
       orderReference: generateOrderReference()

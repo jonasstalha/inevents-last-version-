@@ -156,6 +156,11 @@ service cloud.firestore {
         (request.auth.uid == resource.data.clientId || 
          request.auth.uid == resource.data.artistId || 
          isAdmin());
+      allow list: if isAuthenticated() && 
+        (resource == null || 
+         request.auth.uid == resource.data.clientId || 
+         request.auth.uid == resource.data.artistId || 
+         isAdmin());
       allow create: if isAuthenticated();
       allow update: if isAuthenticated() && 
         (request.auth.uid == resource.data.clientId || 
@@ -167,7 +172,19 @@ service cloud.firestore {
     match /userTickets/{ticketId} {
       allow read: if isAuthenticated() && 
         (request.auth.uid == resource.data.userId || isAdmin());
+      allow list: if isAuthenticated() && 
+        (resource == null || 
+         request.auth.uid == resource.data.userId || 
+         isAdmin());
       allow write: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow delete: if isAdmin();
+    }
+    
+    // User statistics (user performance analytics)
+    match /userStatistics/{userId} {
+      allow read: if isAuthenticated() && 
+        (request.auth.uid == userId || isAdmin());
+      allow create, update: if isAuthenticated() && request.auth.uid == userId;
       allow delete: if isAdmin();
     }
     

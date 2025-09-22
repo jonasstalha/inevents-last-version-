@@ -3,7 +3,7 @@ import app from './firebaseConfig';
 
 /**
  * Create a custom service order (offer) from client to artist.
- * @param orderData { clientId, artistId, serviceId, clientPrice, realPrice, message, status, createdAt }
+ * @param orderData { clientId, artistId, serviceId, clientPrice, realPrice, message, status, createdAt, clientInfo }
  */
 export const createCustomServiceOrder = async (orderData: {
   clientId: string;
@@ -13,6 +13,14 @@ export const createCustomServiceOrder = async (orderData: {
   realPrice: number;
   message: string;
   status?: string;
+  clientInfo?: {
+    fullName: string;
+    email: string;
+    phone: string;
+    address: string;
+    city: string;
+    country: string;
+  };
 }) => {
   const db = getFirestore(app);
   const data = {

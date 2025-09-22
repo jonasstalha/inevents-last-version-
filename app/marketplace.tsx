@@ -64,8 +64,16 @@ const MarketplacePage = () => {
               </View>
               <View style={styles.cardFooter}>
                 <Text style={styles.cardPrice}>{service.basePrice} MAD</Text>
-                <View style={styles.viewButton}>
-                  <Text style={styles.viewButtonText}>View</Text>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  <TouchableOpacity 
+                    style={{ backgroundColor: '#f59e0b', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}
+                    onPress={() => router.push({ pathname: '/(client)/(hidden)/custom-order/[serviceId]', params: { serviceId: service.id.toString() } })}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 10 }}>Custom</Text>
+                  </TouchableOpacity>
+                  <View style={styles.viewButton}>
+                    <Text style={styles.viewButtonText}>View</Text>
+                  </View>
                 </View>
               </View>
             </View>

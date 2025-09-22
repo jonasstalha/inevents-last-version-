@@ -44,6 +44,21 @@ export default function ServiceDetailScreen() {
   const [showReviewForm, setShowReviewForm] = useState(false);
   const [reviewText, setReviewText] = useState('');
   const [reviewRating, setReviewRating] = useState(5);
+  
+  // Multi-step custom order states
+  const [orderStep, setOrderStep] = useState(1); // 1: Service details, 2: Price, 3: Personal info
+  const [clientBudget, setClientBudget] = useState('');
+  const [personalInfo, setPersonalInfo] = useState({
+    fullName: '',
+    email: '',
+    phone: '',
+    address: '',
+    city: '',
+    country: '',
+    eventDate: '',
+    eventLocation: ''
+  });
+  
   const [reviews, setReviews] = useState<Array<{
     user: string;
     text: string;
@@ -235,6 +250,107 @@ export default function ServiceDetailScreen() {
     if (couponApplied) total -= discount;
     
     return Math.max(total, 0);
+  };
+
+  // Multi-step custom order handlers
+  const handleContinueToStep2 = () => {
+    if (!customMessage.trim()) {
+      Alert.alert('Required Field', 'Please describe your service requirements.');
+      return;
+    }
+    setOrderStep(2);
+  };
+
+  const handleContinueToStep3 = () => {
+    if (!clientBudget.trim() || isNaN(Number(clientBudget)) || Number(clientBudget) <= 0) {
+      Alert.alert('Invalid Budget', 'Please enter a valid budget amount.');
+      return;
+    }
+    setOrderStep(3);
+  };
+
+  const handleFinalSubmit = async () => {
+    try {
+      // Validate required personal info
+      if (!personalInfo.fullName.trim() || !personalInfo.email.trim() || !personalInfo.phone.trim()) {
+        Alert.alert('Missing Information', 'Please fill in all required fields (Name, Email, Phone).');
+        return;
+      }
+
+      // Get current user ID
+      const auth = getAuth();
+      const currentUser = auth.currentUser;
+      
+      if (!currentUser) {
+        Alert.alert('Error', 'You need to be logged in to place an order.');
+        return;
+      }
+      
+      // Create custom order object
+      const customOrder = {
+        id: `custom_order_${Date.now()}`,
+        clientId: currentUser.uid,
+        artistId: serviceData.userId || serviceData.artistId,
+        serviceId: String(gigId),
+        serviceTitle: serviceData.title || defaultServiceData.title,
+        serviceDescription: customMessage,
+        clientBudget: Number(clientBudget),
+        estimatedPrice: calculatePrice(),
+        clientInfo: personalInfo,
+        status: 'pending', // pending, accepted, declined, completed
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        type: 'custom_order'
+      };
+      
+      // Save custom order to Firebase
+      const { addDoc, collection } = await import('firebase/firestore');
+      const { getFirestore } = await import('firebase/firestore');
+      const db = getFirestore();
+      
+      await addDoc(collection(db, 'custom_orders'), customOrder);
+
+      // Reset form
+      setOrderStep(1);
+      setCustomMessage('');
+      setClientBudget('');
+      setPersonalInfo({
+        fullName: '',
+        email: '',
+        phone: '',
+        address: '',
+        city: '',
+        country: '',
+        eventDate: '',
+        eventLocation: ''
+      });
+
+      // Show success message
+      Alert.alert(
+        '🎉 Custom Order Sent!', 
+        `Your custom order has been sent to ${defaultServiceData.provider.name}!\n\nYour Budget: ${clientBudget} MAD\n\nYou'll receive a response within ${defaultServiceData.provider.responseTime}.`,
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              setShowOfferForm(false);
+              router.push('/(client)');
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Error sending custom order:', error);
+      Alert.alert('Error', 'There was a problem sending your custom order. Please try again.');
+    }
+  };
+
+  const handleBackStep = () => {
+    if (orderStep > 1) {
+      setOrderStep(orderStep - 1);
+    } else {
+      setShowOfferForm(false);
+    }
   };
 
   const handleSendOffer = async () => {
@@ -602,42 +718,240 @@ export default function ServiceDetailScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Offer Modal */}
+        {/* Multi-Step Custom Order Modal */}
         <Modal visible={showOfferForm} animationType="slide" transparent>
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Send Custom Offer</Text>
-                <TouchableOpacity onPress={() => setShowOfferForm(false)}>
+                <TouchableOpacity onPress={handleBackStep}>
+                  <Ionicons name="arrow-back" size={24} color="#6b7280" />
+                </TouchableOpacity>
+                <Text style={styles.modalTitle}>
+                  {orderStep === 1 && 'Service Details'}
+                  {orderStep === 2 && 'Your Budget'}
+                  {orderStep === 3 && 'Personal Information'}
+                </Text>
+                <TouchableOpacity onPress={() => {setShowOfferForm(false); setOrderStep(1);}}>
                   <Ionicons name="close" size={24} color="#6b7280" />
                 </TouchableOpacity>
               </View>
-              
-              <Text style={styles.modalSubtitle}>
-                Tell {defaultServiceData.provider.name} about your service requirements
-              </Text>
-              
-              <TextInput
-                multiline
-                numberOfLines={6}
-                placeholder="Describe your event in detail..."
-                value={customMessage}
-                onChangeText={setCustomMessage}
-                style={styles.textArea}
-              />
-              
-              <View style={styles.modalPriceRow}>
-                <Text style={styles.modalPriceLabel}>Total Amount:</Text>
-                <Text style={styles.modalPriceValue}>{calculatePrice()} MAD</Text>
+
+              {/* Step Indicator */}
+              <View style={styles.stepIndicator}>
+                {[1, 2, 3].map((step) => (
+                  <View key={step} style={styles.stepIndicatorContainer}>
+                    <View style={[
+                      styles.stepCircle, 
+                      orderStep >= step ? styles.stepCircleActive : styles.stepCircleInactive
+                    ]}>
+                      <Text style={[
+                        styles.stepText,
+                        orderStep >= step ? styles.stepTextActive : styles.stepTextInactive
+                      ]}>{step}</Text>
+                    </View>
+                    {step < 3 && <View style={[
+                      styles.stepLine,
+                      orderStep > step ? styles.stepLineActive : styles.stepLineInactive
+                    ]} />}
+                  </View>
+                ))}
               </View>
+
+              <ScrollView style={styles.modalScrollContent} showsVerticalScrollIndicator={false}>
+                {/* Step 1: Service Details */}
+                {orderStep === 1 && (
+                  <View>
+                    <Text style={styles.modalSubtitle}>
+                      Tell {defaultServiceData.provider.name} about your service requirements
+                    </Text>
+                    
+                    <TextInput
+                      multiline
+                      numberOfLines={6}
+                      placeholder="Describe your event in detail..."
+                      value={customMessage}
+                      onChangeText={setCustomMessage}
+                      style={styles.textArea}
+                    />
+                    
+                    <View style={styles.modalPriceRow}>
+                      <Text style={styles.modalPriceLabel}>Estimated Cost:</Text>
+                      <Text style={styles.modalPriceValue}>{calculatePrice()} MAD</Text>
+                    </View>
+                  </View>
+                )}
+
+                {/* Step 2: Budget Entry */}
+                {orderStep === 2 && (
+                  <View>
+                    <Text style={styles.modalSubtitle}>
+                      What's your budget for this service?
+                    </Text>
+                    
+                    <Text style={styles.budgetHint}>
+                      Enter the amount you're willing to pay for this service
+                    </Text>
+                    
+                    <View style={styles.budgetInputContainer}>
+                      <TextInput
+                        placeholder="0"
+                        value={clientBudget}
+                        onChangeText={setClientBudget}
+                        keyboardType="numeric"
+                        style={styles.budgetInput}
+                      />
+                      <Text style={styles.currencyLabel}>MAD</Text>
+                    </View>
+
+                    <View style={styles.budgetComparison}>
+                      <View style={styles.budgetComparisonRow}>
+                        <Text style={styles.budgetComparisonLabel}>Estimated Price:</Text>
+                        <Text style={styles.budgetComparisonValue}>{calculatePrice()} MAD</Text>
+                      </View>
+                      <View style={styles.budgetComparisonRow}>
+                        <Text style={styles.budgetComparisonLabel}>Your Budget:</Text>
+                        <Text style={[
+                          styles.budgetComparisonValue,
+                          Number(clientBudget) < calculatePrice() ? styles.budgetLower : styles.budgetHigher
+                        ]}>
+                          {clientBudget || '0'} MAD
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                )}
+
+                {/* Step 3: Personal Information */}
+                {orderStep === 3 && (
+                  <View>
+                    <Text style={styles.modalSubtitle}>
+                      Personal & Event Information
+                    </Text>
+
+                    <View style={styles.formGroup}>
+                      <Text style={styles.formLabel}>Full Name *</Text>
+                      <TextInput
+                        value={personalInfo.fullName}
+                        onChangeText={(text) => setPersonalInfo(prev => ({...prev, fullName: text}))}
+                        placeholder="Enter your full name"
+                        style={styles.formInput}
+                      />
+                    </View>
+
+                    <View style={styles.formGroup}>
+                      <Text style={styles.formLabel}>Email *</Text>
+                      <TextInput
+                        value={personalInfo.email}
+                        onChangeText={(text) => setPersonalInfo(prev => ({...prev, email: text}))}
+                        placeholder="your.email@example.com"
+                        keyboardType="email-address"
+                        style={styles.formInput}
+                      />
+                    </View>
+
+                    <View style={styles.formGroup}>
+                      <Text style={styles.formLabel}>Phone Number *</Text>
+                      <TextInput
+                        value={personalInfo.phone}
+                        onChangeText={(text) => setPersonalInfo(prev => ({...prev, phone: text}))}
+                        placeholder="+212 xxx xxx xxx"
+                        keyboardType="phone-pad"
+                        style={styles.formInput}
+                      />
+                    </View>
+
+                    <View style={styles.formGroup}>
+                      <Text style={styles.formLabel}>Address</Text>
+                      <TextInput
+                        value={personalInfo.address}
+                        onChangeText={(text) => setPersonalInfo(prev => ({...prev, address: text}))}
+                        placeholder="Street address"
+                        style={styles.formInput}
+                      />
+                    </View>
+
+                    <View style={styles.formRow}>
+                      <View style={styles.formGroupHalf}>
+                        <Text style={styles.formLabel}>City</Text>
+                        <TextInput
+                          value={personalInfo.city}
+                          onChangeText={(text) => setPersonalInfo(prev => ({...prev, city: text}))}
+                          placeholder="City"
+                          style={styles.formInput}
+                        />
+                      </View>
+                      <View style={styles.formGroupHalf}>
+                        <Text style={styles.formLabel}>Country</Text>
+                        <TextInput
+                          value={personalInfo.country}
+                          onChangeText={(text) => setPersonalInfo(prev => ({...prev, country: text}))}
+                          placeholder="Country"
+                          style={styles.formInput}
+                        />
+                      </View>
+                    </View>
+
+                    <View style={styles.formGroup}>
+                      <Text style={styles.formLabel}>Event Date</Text>
+                      <TextInput
+                        value={personalInfo.eventDate}
+                        onChangeText={(text) => setPersonalInfo(prev => ({...prev, eventDate: text}))}
+                        placeholder="DD/MM/YYYY"
+                        style={styles.formInput}
+                      />
+                    </View>
+
+                    <View style={styles.formGroup}>
+                      <Text style={styles.formLabel}>Event Location</Text>
+                      <TextInput
+                        value={personalInfo.eventLocation}
+                        onChangeText={(text) => setPersonalInfo(prev => ({...prev, eventLocation: text}))}
+                        placeholder="Event venue/location"
+                        style={styles.formInput}
+                      />
+                    </View>
+
+                    <View style={styles.orderSummary}>
+                      <Text style={styles.summaryTitle}>Order Summary</Text>
+                      <View style={styles.summaryRow}>
+                        <Text style={styles.summaryLabel}>Service:</Text>
+                        <Text style={styles.summaryValue}>{serviceData?.title}</Text>
+                      </View>
+                      <View style={styles.summaryRow}>
+                        <Text style={styles.summaryLabel}>Your Budget:</Text>
+                        <Text style={styles.summaryValue}>{clientBudget} MAD</Text>
+                      </View>
+                    </View>
+                  </View>
+                )}
+              </ScrollView>
               
               <View style={styles.modalActions}>
-                <TouchableOpacity onPress={() => setShowOfferForm(false)} style={styles.modalCancel}>
-                  <Text style={styles.modalCancelText}>Cancel</Text>
+                <TouchableOpacity 
+                  onPress={handleBackStep}
+                  style={styles.modalCancel}
+                >
+                  <Text style={styles.modalCancelText}>
+                    {orderStep === 1 ? 'Cancel' : 'Back'}
+                  </Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={handleSendOffer} style={styles.modalSend}>
-                  <Text style={styles.modalSendText}>Send Offer</Text>
-                  <Ionicons name="send" size={16} color="#fff" />
+                
+                <TouchableOpacity 
+                  onPress={
+                    orderStep === 1 ? handleContinueToStep2 :
+                    orderStep === 2 ? handleContinueToStep3 :
+                    handleFinalSubmit
+                  }
+                  style={styles.modalSend}
+                >
+                  <Text style={styles.modalSendText}>
+                    {orderStep === 3 ? 'Send Order' : 'Continue'}
+                  </Text>
+                  <Ionicons 
+                    name={orderStep === 3 ? 'send' : 'arrow-forward'} 
+                    size={16} 
+                    color="#fff" 
+                  />
                 </TouchableOpacity>
               </View>
             </View>
@@ -1336,17 +1650,20 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-end', // Changed back to flex-end for bottom slide-up
   },
   
   modalContent: {
     backgroundColor: '#fff',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    paddingTop: 24,
-    paddingHorizontal: 20,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
-    maxHeight: screenHeight * 0.8,
+    width: '100%',
+    height: screenHeight * 0.90, // Increased to 90% of screen height
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 10,
   },
   
   modalHeader: {
@@ -1354,6 +1671,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
+    paddingTop: 24,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+    paddingBottom: 16,
   },
   
   modalTitle: {
@@ -1405,6 +1727,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+    backgroundColor: '#fff',
   },
   
   modalCancel: {
@@ -1558,5 +1885,199 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     marginTop: 2,
     marginBottom: 12,
+  },
+
+  // Multi-step form styles
+  stepIndicator: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+    paddingHorizontal: 20,
+  },
+
+  stepIndicatorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+
+  stepCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+  },
+
+  stepCircleActive: {
+    backgroundColor: '#6366f1',
+    borderColor: '#6366f1',
+  },
+
+  stepCircleInactive: {
+    backgroundColor: '#f3f4f6',
+    borderColor: '#d1d5db',
+  },
+
+  stepText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  stepTextActive: {
+    color: '#ffffff',
+  },
+
+  stepTextInactive: {
+    color: '#9ca3af',
+  },
+
+  stepLine: {
+    flex: 1,
+    height: 2,
+    marginHorizontal: 8,
+  },
+
+  stepLineActive: {
+    backgroundColor: '#6366f1',
+  },
+
+  stepLineInactive: {
+    backgroundColor: '#d1d5db',
+  },
+
+  modalScrollContent: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    // Removed maxHeight restriction to allow full form visibility
+  },
+
+  budgetHint: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+
+  budgetInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+
+  budgetInput: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#1f2937',
+    textAlign: 'center',
+    minWidth: 120,
+    borderBottomWidth: 2,
+    borderBottomColor: '#6366f1',
+    paddingBottom: 8,
+    marginRight: 8,
+  },
+
+  currencyLabel: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#6b7280',
+  },
+
+  budgetComparison: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    padding: 16,
+  },
+
+  budgetComparisonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+
+  budgetComparisonLabel: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+
+  budgetComparisonValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+
+  budgetLower: {
+    color: '#dc2626',
+  },
+
+  budgetHigher: {
+    color: '#059669',
+  },
+
+  formGroup: {
+    marginBottom: 16,
+  },
+
+  formLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 8,
+  },
+
+  formInput: {
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    backgroundColor: '#ffffff',
+  },
+
+  formRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+
+  formGroupHalf: {
+    flex: 1,
+    marginRight: 8,
+  },
+
+  orderSummary: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 20,
+  },
+
+  summaryTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 12,
+  },
+
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+
+  summaryLabel: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+
+  summaryValue: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#1f2937',
   },
 });
