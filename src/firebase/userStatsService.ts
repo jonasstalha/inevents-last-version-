@@ -1,5 +1,6 @@
 import { collection, doc, getDoc, getDocs, getFirestore, query, setDoc, where } from 'firebase/firestore';
 import app from './firebaseConfig';
+import { getUserRewards } from './rewardsService';
 
 const db = getFirestore(app);
 
@@ -12,6 +13,9 @@ export interface UserStats {
   email?: string;
   name?: string;
   lastUpdated?: Date;
+  level?: number;
+  levelName?: string;
+  nextLevelPoints?: number;
 }
 
 /**
@@ -45,20 +49,17 @@ export const fetchUserStatistics = async (userId: string): Promise<UserStats> =>
       return sum + amount;
     }, 0);
     
-    // Points calculation rules:
-    // - 10 points per confirmed order
-    // - 1 point per 10 MAD spent
-    // - 5 points per ticket purchased
-    const orderPoints = confirmedOrders.length * 10;
-    const spendingPoints = Math.floor(totalSpent / 10);
-    const ticketPoints = tickets.length * 5;
-    const totalPoints = orderPoints + spendingPoints + ticketPoints;
+    // Get rewards data from the new rewards system
+    const rewardsData = await getUserRewards(userId);
     
     return {
       orders: confirmedOrders.length,
       tickets: tickets.length,
-      points: totalPoints,
-      totalSpent: totalSpent
+      points: rewardsData?.totalPoints || 0,
+      totalSpent: totalSpent,
+      level: rewardsData?.level || 1,
+      levelName: rewardsData?.levelName || 'Bronze Explorer',
+      nextLevelPoints: rewardsData?.nextLevelPoints || 500,
     };
     
   } catch (error) {

@@ -1,6 +1,6 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getApp, getApps, initializeApp } from 'firebase/app';
-import { getReactNativePersistence, initializeAuth } from 'firebase/auth';
+import { getAuth } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
 
 // Firebase config for inevents-2fe56 project
 const firebaseConfig = {
@@ -15,11 +15,12 @@ const firebaseConfig = {
 // Initialize app once
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Use persistent auth
-const auth = initializeAuth(app, {
-  persistence: getReactNativePersistence(AsyncStorage),
-});
+// Initialize auth
+const auth = getAuth(app);
 
-export { app, auth };
+// Initialize Firestore
+const db = getFirestore(app);
+
+export { app, auth, db };
 export default app; // Export the app instance for use in other modules
 export const firebaseConfigObject = firebaseConfig; // Export the config object if needed elsewhere

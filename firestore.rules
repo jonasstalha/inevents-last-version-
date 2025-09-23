@@ -168,6 +168,42 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
     
+    // Global custom orders collection
+    match /customOrders/{orderId} {
+      allow read: if isAuthenticated() && 
+        (request.auth.uid == resource.data.clientId || 
+         request.auth.uid == resource.data.artistId || 
+         isAdmin());
+      allow list: if isAuthenticated() && 
+        (resource == null || 
+         request.auth.uid == resource.data.clientId || 
+         request.auth.uid == resource.data.artistId || 
+         isAdmin());
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && 
+        (request.auth.uid == resource.data.clientId || 
+         request.auth.uid == resource.data.artistId);
+      allow delete: if isAdmin();
+    }
+    
+    // Global incoming custom orders collection
+    match /incomingCustomOrders/{orderId} {
+      allow read: if isAuthenticated() && 
+        (request.auth.uid == resource.data.clientId || 
+         request.auth.uid == resource.data.artistId || 
+         isAdmin());
+      allow list: if isAuthenticated() && 
+        (resource == null || 
+         request.auth.uid == resource.data.clientId || 
+         request.auth.uid == resource.data.artistId || 
+         isAdmin());
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && 
+        (request.auth.uid == resource.data.clientId || 
+         request.auth.uid == resource.data.artistId);
+      allow delete: if isAdmin();
+    }
+    
     // User tickets (global view for analytics)
     match /userTickets/{ticketId} {
       allow read: if isAuthenticated() && 

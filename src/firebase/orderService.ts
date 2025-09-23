@@ -1,18 +1,19 @@
 import { getAuth } from 'firebase/auth';
 import {
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  getFirestore,
-  increment,
-  query,
-  serverTimestamp,
-  updateDoc,
-  where
+    addDoc,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    getFirestore,
+    increment,
+    query,
+    serverTimestamp,
+    updateDoc,
+    where
 } from 'firebase/firestore';
 import app from './firebaseConfig';
+import { awardTicketPoints } from './rewardsService';
 
 /**
  * Order Service
@@ -238,6 +239,20 @@ export const createOrder = async (orderData: OrderInput): Promise<string> => {
         console.error('Failed to send confirmation email:', emailError);
         // Don't throw this error as it's not critical to order creation
       }
+    }
+
+    // Award points for ticket purchase
+    try {
+      await awardTicketPoints(
+        clientId,
+        orderDoc.id,
+        orderData.totalPrice,
+        orderData.ticketName || 'Event Ticket'
+      );
+      console.log(`✅ Awarded points for ticket purchase: Order ${orderDoc.id}`);
+    } catch (pointsError) {
+      console.error('Failed to award points for ticket purchase:', pointsError);
+      // Don't throw this error as it's not critical to order creation
     }
 
     return orderDoc.id;
