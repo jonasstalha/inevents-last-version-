@@ -2818,9 +2818,9 @@ service cloud.firestore {
             <TouchableOpacity 
               style={{
                 backgroundColor: Theme.colors.primary,
-                paddingHorizontal: 20,
-                paddingVertical: 12,
-                borderRadius: 8,
+                paddingHorizontal: Theme.spacing.lg,
+                paddingVertical: Theme.spacing.md,
+                borderRadius: Theme.borderRadius.md,
                 marginBottom: 10
               }}
               onPress={fetchFinancialData}

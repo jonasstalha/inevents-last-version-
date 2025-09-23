@@ -21,17 +21,13 @@ export const performCompleteLogout = async (options: LogoutOptions = {}) => {
   try {
     console.log('🔄 Starting complete logout process...');
     
-    // Step 1: Sign out from Firebase Authentication
-    const auth = getAuth();
-    if (auth.currentUser) {
-      await signOut(auth);
-      console.log('✅ Firebase authentication logout completed');
-    } else {
-      console.log('ℹ️ No Firebase user was logged in');
-    }
+    // Step 1: Clear cached data first to ensure clean state
+    console.log('🧹 Clearing cached data...');
+    await clearCachedData();
     
-    // Step 2: Clear AsyncStorage if requested
+    // Step 2: Clear AsyncStorage
     if (clearAllStorage) {
+      console.log('🗑️ Clearing all AsyncStorage...');
       await AsyncStorage.clear();
       console.log('✅ AsyncStorage completely cleared');
     } else {
@@ -43,15 +39,45 @@ export const performCompleteLogout = async (options: LogoutOptions = {}) => {
         'authState', 
         'lastLoginTime',
         'userPreferences',
-        'profileImage'
+        'profileImage',
+        'artistProfile',
+        'artistData'
       ];
       
       await AsyncStorage.multiRemove(authKeys);
       console.log('✅ Auth-related AsyncStorage keys cleared');
     }
     
-    // Step 3: Clear any cached data that might persist
-    await clearCachedData();
+    // Step 3: Sign out from Firebase Authentication (do this last to avoid auth state issues)
+    console.log('🔐 Signing out from Firebase...');
+    const auth = getAuth();
+    if (auth.currentUser) {
+      await signOut(auth);
+      console.log('✅ Firebase authentication logout completed');
+    } else {
+      console.log('ℹ️ No Firebase user was logged in');
+    }
+    
+    // Step 4: Additional cleanup - force clear any remaining state
+    try {
+      // Clear any potential remaining keys
+      const allKeys = await AsyncStorage.getAllKeys();
+      const keysToRemove = allKeys.filter(key => 
+        key.includes('user') || 
+        key.includes('auth') || 
+        key.includes('artist') || 
+        key.includes('firebase') ||
+        key.includes('session') ||
+        key.includes('token')
+      );
+      
+      if (keysToRemove.length > 0) {
+        await AsyncStorage.multiRemove(keysToRemove);
+        console.log(`✅ Additional ${keysToRemove.length} keys cleared`);
+      }
+    } catch (additionalError) {
+      console.warn('⚠️ Additional cleanup warning:', additionalError);
+    }
     
     console.log('🎉 Complete logout process finished successfully');
     
@@ -66,16 +92,24 @@ export const performCompleteLogout = async (options: LogoutOptions = {}) => {
     
     // Even if some steps fail, try to clear what we can
     try {
+      console.log('🚨 Attempting emergency cleanup...');
       await AsyncStorage.clear();
-      console.log('✅ Emergency AsyncStorage clear completed');
+      
+      // Try to sign out from Firebase even in error case
+      const auth = getAuth();
+      if (auth.currentUser) {
+        await signOut(auth);
+      }
+      
+      console.log('✅ Emergency logout cleanup completed');
+      return { success: true }; // Consider it successful if we cleared storage
     } catch (storageError) {
       console.error('❌ Emergency storage clear failed:', storageError);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown logout error' 
+      };
     }
-    
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Unknown logout error' 
-    };
   }
 };
 
@@ -87,18 +121,62 @@ const clearCachedData = async () => {
     // Clear any app-specific cached data here
     // For example: image cache, downloaded files, temporary data, etc.
     
-    // Example of clearing specific cached items:
+    // Comprehensive cache clearing for inevents app
     const cacheKeys = [
+      // Artist-related cache
       'artistsCache',
+      'artistProfile',
+      'artistServices',
+      'artistSettings',
+      'artistStats',
+      
+      // Event and service cache
       'eventsCache', 
+      'servicesCache',
       'ticketsCache',
       'ordersCache',
+      
+      // User activity cache
       'searchHistory',
-      'recentActivity'
+      'recentActivity',
+      'viewHistory',
+      'favoriteArtists',
+      'bookmarkedEvents',
+      
+      // UI state cache
+      'navigationState',
+      'tabState',
+      'filterPreferences',
+      'sortPreferences',
+      
+      // Media cache
+      'imageCache',
+      'profileImages',
+      'serviceImages',
+      
+      // Auth-related cache (backup clearing)
+      'firebaseUser',
+      'authToken',
+      'sessionData',
+      'loginCredentials',
+      
+      // App state
+      'appState',
+      'userRole',
+      'currentScreen',
+      'lastActiveTab'
     ];
     
     await AsyncStorage.multiRemove(cacheKeys);
-    console.log('✅ App-specific cache cleared');
+    console.log('✅ Comprehensive app cache cleared');
+    
+    // Also clear any Redux persist storage if used
+    try {
+      await AsyncStorage.removeItem('persist:root');
+      console.log('✅ Redux persist storage cleared');
+    } catch (persistError) {
+      console.log('ℹ️ No Redux persist storage found (normal)');
+    }
     
   } catch (error) {
     console.error('⚠️ Cache clearing error (non-critical):', error);

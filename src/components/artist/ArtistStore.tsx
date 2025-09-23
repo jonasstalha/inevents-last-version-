@@ -96,7 +96,8 @@ type ArtistAction =
   | { type: 'UPDATE_CATEGORY'; payload: Category }
   | { type: 'DELETE_CATEGORY'; payload: string }
   | { type: 'UPDATE_SETTINGS'; payload: Partial<ArtistSettings> }
-  | { type: 'ADD_TICKET_TO_GIG'; payload: { gigId: string; ticket: Ticket } };
+  | { type: 'ADD_TICKET_TO_GIG'; payload: { gigId: string; ticket: Ticket } }
+  | { type: 'RESET_STORE' };
 
 const initialState: ArtistState = {
   settings: {
@@ -241,6 +242,18 @@ function artistReducer(state: ArtistState, action: ArtistAction): ArtistState {
       // The new Gig type does not support tickets, so this action is now a no-op or should be removed.
       return state;
     }
+    case 'RESET_STORE':
+      // Reset store to initial state for complete logout
+      return {
+        ...initialState,
+        // Preserve some basic settings that should persist
+        settings: {
+          ...initialState.settings,
+          language: 'English', // Reset to default
+          isDarkMode: false, // Reset to default
+          notificationsEnabled: true, // Reset to default
+        }
+      };
     default:
       return state;
   }
@@ -262,6 +275,7 @@ interface ArtistContextType extends ArtistState {
   deleteCategory: (id: string) => void;
   updateSettings: (settings: Partial<ArtistSettings>) => void;
   addTicketToGig: (gigId: string, ticket: Ticket) => void;
+  resetStore: () => void;
 }
 
 const ArtistContext = createContext<ArtistContextType | undefined>(undefined);
@@ -288,6 +302,7 @@ export const ArtistStoreProvider: React.FC<{ children: ReactNode }> = ({ childre
     deleteCategory: (id) => dispatch({ type: 'DELETE_CATEGORY', payload: id }),
     updateSettings: (settings) => dispatch({ type: 'UPDATE_SETTINGS', payload: settings }),
     addTicketToGig: (gigId, ticket) => dispatch({ type: 'ADD_TICKET_TO_GIG', payload: { gigId, ticket } }),
+    resetStore: () => dispatch({ type: 'RESET_STORE' }),
   };
 
   return <ArtistContext.Provider value={value}>{children}</ArtistContext.Provider>;

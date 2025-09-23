@@ -61,34 +61,41 @@ const PublicProfile = () => {
 
   // Service management functions
   const handleEditService = (serviceId: string) => {
-    // Navigate to artist dashboard with service edit mode
+    // Navigate to artist dashboard with editing parameters
     router.push({
-      pathname: '/(artist)',
-      params: { action: 'editService', serviceId }
+      pathname: '/(artist)/ArtistPlatform',
+      params: { 
+        tab: 'ticket',
+        editMode: 'true',
+        serviceId: serviceId 
+      }
     });
   };
 
   const handleViewServiceStats = (serviceId: string) => {
-    // Navigate to analytics for specific service
+    // Navigate to analytics tab with specific service
     router.push({
-      pathname: '/(artist)',
-      params: { action: 'analytics', serviceId }
+      pathname: '/(artist)/ArtistPlatform',
+      params: { 
+        tab: 'analytics',
+        serviceId: serviceId 
+      }
     });
   };
 
   const handleCreateNewService = () => {
-    // Navigate to service creation
+    // Navigate to service creation (Add tab)
     router.push({
-      pathname: '/(artist)',
-      params: { action: 'createService' }
+      pathname: '/(artist)/ArtistPlatform',
+      params: { tab: 'ticket' }
     });
   };
 
   const handleManageAllServices = () => {
-    // Navigate to services management tab
+    // Navigate to orders/services management tab
     router.push({
-      pathname: '/(artist)',
-      params: { tab: 'services' }
+      pathname: '/(artist)/ArtistPlatform',
+      params: { tab: 'calendar' }
     });
   };
 

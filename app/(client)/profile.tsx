@@ -1,15 +1,17 @@
 import * as ImagePicker from 'expo-image-picker';
 import * as Linking from 'expo-linking';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Award, ChevronRight, CreditCard, Heart, CircleHelp as HelpCircle, LogOut } from 'lucide-react-native';
+import { Award, ChevronRight, CreditCard, Edit3, Heart, CircleHelp as HelpCircle, LogOut, RefreshCw } from 'lucide-react-native';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { Card } from '@/src/components/common/Card';
+import { ProfileEditModal } from '@/src/components/profile/ProfileEditModal';
 import { Theme } from '@/src/constants/theme';
 import { useApp } from '@/src/context/AppContext';
 import { useAuth } from '@/src/context/AuthContext';
-import { getUserStatistics, UserStats } from '@/src/firebase/userStatsService';
+import { updateProfileWithImage } from '@/src/firebase/profileService';
+import { debugUserDataLocations, recalculateUserStatistics, UserStats } from '@/src/firebase/userStatsService';
 
 export default function ProfileScreen() {
   const { user, logout, loading: authLoading } = useAuth();
@@ -65,6 +67,7 @@ export default function ProfileScreen() {
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [showRewards, setShowRewards] = useState(false);
   const [showSavedArtists, setShowSavedArtists] = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false);
   const [statsLoading, setStatsLoading] = useState(true);
   const [stats, setStats] = useState<UserStats>({
     orders: 0,
@@ -87,6 +90,10 @@ export default function ProfileScreen() {
             // Clear cache and redirect
             await clearAllAuthData();
             router.replace('/auth');
+          } else {
+            // User is authenticated, refresh statistics
+            console.log('Profile Screen - User authenticated, refreshing stats');
+            fetchUserStatistics();
           }
         }
       };
@@ -130,8 +137,16 @@ export default function ProfileScreen() {
     
     try {
       setStatsLoading(true);
-      const userStats = await getUserStatistics(user.id);
+      console.log('🔄 Fetching/recalculating user statistics...');
+      
+      // Debug data locations first
+      await debugUserDataLocations(user.id);
+      
+      // Recalculate statistics from scratch to ensure accuracy
+      const userStats = await recalculateUserStatistics(user.id);
       setStats(userStats);
+      
+      console.log('✅ Statistics updated:', userStats);
     } catch (error) {
       console.error('Error fetching user statistics:', error);
       // Keep default stats on error
@@ -223,11 +238,37 @@ export default function ProfileScreen() {
       quality: 0.7,
     });
     if (!result.canceled && result.assets && result.assets.length > 0) {
-      setProfileImage(result.assets[0].uri);
+      const imageUri = result.assets[0].uri;
+      setProfileImage(imageUri);
+      
+      // Upload image to Firebase and update profile
+      try {
+        await updateProfileWithImage({}, imageUri);
+        Alert.alert('Success! 🎉', 'Profile image updated successfully');
+        // Refresh user data
+        fetchUserStatistics();
+      } catch (error) {
+        console.error('Error updating profile image:', error);
+        Alert.alert('Error', 'Failed to update profile image. Please try again.');
+      }
     }
   };
 
+  const handleEditProfile = () => {
+    setShowEditProfile(true);
+  };
+
+  const handleProfileUpdateSuccess = () => {
+    // Refresh user statistics and profile data
+    fetchUserStatistics();
+  };
+
   const menuItems = [
+    {
+      title: 'Edit Profile',
+      icon: <Edit3 size={20} color={Theme.colors.primary} />,
+      onPress: handleEditProfile,
+    },
     {
       title: 'Payment Services',
       icon: <CreditCard size={20} color={Theme.colors.textDark} />,
@@ -282,9 +323,9 @@ export default function ProfileScreen() {
   ];
 
   // Only show name and email from user, and allow user to add a profile image later
-  const displayName = user?.name || user?.email || 'User';
+  const displayName = user?.name || (user as any)?.displayName || user?.email || 'User';
   const displayEmail = user?.email || 'user@example.com';
-  const displayImage = profileImage;
+  const displayImage = (user as any)?.profileImage || (user as any)?.photoURL || profileImage;
 
   // Show loading state while checking authentication
   if (authLoading) {
@@ -329,6 +370,19 @@ export default function ProfileScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+      {/* Profile Edit Modal */}
+      <ProfileEditModal
+        visible={showEditProfile}
+        onClose={() => setShowEditProfile(false)}
+        currentUser={{
+          name: displayName,
+          email: displayEmail,
+          phone: (user as any)?.phone || '',
+          photoURL: displayImage || (user as any)?.photoURL || null
+        }}
+        onSuccess={handleProfileUpdateSuccess}
+      />
+
       <View style={styles.header}>
 
       </View>   
@@ -365,6 +419,16 @@ export default function ProfileScreen() {
           <>
             <View style={styles.statsHeader}>
               <Text style={styles.statsTitle}>📊 Your Activity</Text>
+              <TouchableOpacity
+                onPress={fetchUserStatistics}
+                style={styles.refreshButton}
+                disabled={statsLoading}
+              >
+                <RefreshCw 
+                  size={16} 
+                  color={statsLoading ? Theme.colors.textLight : Theme.colors.primary} 
+                />
+              </TouchableOpacity>
             </View>
             <View style={styles.statsRow}>
               <View style={styles.statItem}>
@@ -542,11 +606,18 @@ const styles = StyleSheet.create({
     marginBottom: Theme.spacing.xl,
   },
   statsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: Theme.spacing.md,
     paddingTop: Theme.spacing.md,
     paddingBottom: Theme.spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: Theme.colors.border,
+  },
+  refreshButton: {
+    padding: Theme.spacing.sm,
+    borderRadius: Theme.borderRadius.sm,
   },
   statsTitle: {
     fontFamily: Theme.typography.fontFamily.bold,

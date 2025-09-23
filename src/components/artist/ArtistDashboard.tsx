@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getAuth } from 'firebase/auth';
 import React, { useEffect, useState } from 'react';
-import { Alert, Image, Modal, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, Modal, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, Animated, Dimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchServicesByArtistId } from '../../firebase/artistServices';
 import { addServiceToFirebase, addTicketToFirebase, fetchArtistById } from '../../firebase/artistsService';
@@ -20,6 +20,19 @@ const ArtistMobileApp = () => {
   const [eventSuccess, setEventSuccess] = useState('');
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const params = useLocalSearchParams();
+
+  // Handle navigation parameters
+  useEffect(() => {
+    if (params.tab) {
+      setActiveTab(params.tab as string);
+    }
+    
+    if (params.serviceId && params.editMode === 'true') {
+      // Load service data for editing
+      loadServiceForEditing(params.serviceId as string);
+    }
+  }, [params]);
 
   const {
     gigs,
@@ -31,12 +44,12 @@ const ArtistMobileApp = () => {
     updateCategory,
     deleteCategory,
     settings,
-    toggleDarkMode,
     toggleNotifications,
     updateLanguage,
     addPaymentMethod,
     removePaymentMethod,
     updateSecuritySettings,
+    resetStore,
   } = useArtistStore();
 
   const [activeTab, setActiveTab] = useState('home');
@@ -117,6 +130,54 @@ const ArtistMobileApp = () => {
   const deductFromWallet = (amount: number) => {
     setWalletBalance(prev => Math.max(0, prev - amount));
   };
+
+  // Load service data for editing
+  const loadServiceForEditing = async (serviceId: string) => {
+    try {
+      const auth = getAuth();
+      const currentUser = auth.currentUser;
+      if (!currentUser) return;
+
+      // Fetch the service data
+      const services = await fetchServicesByArtistId(currentUser.uid);
+      const serviceToEdit = services.find(service => service.id === serviceId);
+      
+      if (serviceToEdit) {
+        // Populate the form with existing service data
+        setNewService({
+          title: serviceToEdit.title || '',
+          description: serviceToEdit.description || '',
+          basePrice: serviceToEdit.basePrice?.toString() || '',
+          minQuantity: '1',
+          maxQuantity: '10',
+          category: serviceToEdit.category || '',
+          images: serviceToEdit.images || [],
+          addOns: [{ name: '', price: '', type: 'checkbox' }],
+          providerName: artistProfile.name,
+          providerAvatar: artistProfile.image,
+          rating: serviceToEdit.rating || 0,
+          reviewCount: serviceToEdit.reviewCount || 0,
+          isAvailable: true,
+          location: '',
+          defaultMessage: '',
+          tags: '',
+        });
+
+        // Also populate individual states
+        setServiceImages(serviceToEdit.images || []);
+        setServiceLocation({ city: '' });
+        
+        // Set editing mode
+        setEditingServiceId(serviceId);
+        setActiveTab('ticket'); // Switch to the add/edit tab
+      }
+    } catch (error) {
+      console.error('Error loading service for editing:', error);
+    }
+  };
+
+  // State to track if we're editing a service
+  const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
 
   // Replace with marketplace categories from client CategorySelector
   const MARKETPLACE_CATEGORIES = [
@@ -859,6 +920,86 @@ const OrderManagementPage = () => {
   // Settings Page Component
   const SettingsPage = () => {
     const router = useRouter();
+    const [showComingSoonModal, setShowComingSoonModal] = useState(false);
+    const [modalAnimation] = useState(new Animated.Value(0));
+
+    const showComingSoonPrompt = () => {
+      setShowComingSoonModal(true);
+      Animated.spring(modalAnimation, {
+        toValue: 1,
+        useNativeDriver: true,
+        tension: 100,
+        friction: 8,
+      }).start();
+    };
+
+    const hideComingSoonModal = () => {
+      Animated.spring(modalAnimation, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 100,
+        friction: 8,
+      }).start(() => {
+        setShowComingSoonModal(false);
+      });
+    };
+
+    const handleLogoutFromDashboard = async () => {
+      Alert.alert(
+        "Logout Confirmation",
+        "Are you sure you want to logout? This will clear all your cached data and you'll need to login again.",
+        [
+          {
+            text: "Cancel",
+            style: "cancel"
+          },
+          {
+            text: "Logout",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                console.log('🔄 Starting complete logout process from dashboard...');
+                
+                // Step 1: Clear Artist Store state
+                console.log('🧹 Clearing Artist Store state...');
+                resetStore();
+                
+                // Step 2: Perform complete logout with cache clearing
+                const performCompleteLogout = (await import('../../utils/logoutUtil')).default;
+                const result = await performCompleteLogout({
+                  clearAllStorage: true,
+                  showSuccessMessage: false
+                });
+                
+                if (result.success) {
+                  console.log('✅ Dashboard logout completed successfully - redirecting to client side');
+                  router.replace('/(client)');
+                } else {
+                  console.error('❌ Dashboard logout failed:', result.error);
+                  // Still redirect even if logout had issues
+                  router.replace('/(client)');
+                  Alert.alert("Logout Notice", "You have been logged out, but some data may not have been cleared completely.");
+                }
+                
+              } catch (error) {
+                console.error('❌ Dashboard logout process failed:', error);
+                
+                // Emergency logout as fallback - always redirect
+                try {
+                  const { emergencyLogout } = await import('../../utils/logoutUtil');
+                  await emergencyLogout();
+                } catch (emergencyError) {
+                  console.error('❌ Emergency dashboard logout failed:', emergencyError);
+                } finally {
+                  // Always redirect regardless of errors
+                  router.replace('/(client)');
+                }
+              }
+            }
+          }
+        ]
+      );
+    };
 
     // Update settingsPaths to match expo-router structure
     const settingsPaths = {
@@ -869,7 +1010,8 @@ const OrderManagementPage = () => {
     };
 
     return (
-      <ScrollView style={[styles.container, { paddingTop: insets.top }]}> 
+      <>
+        <ScrollView style={[styles.container, { paddingTop: insets.top }]}> 
         {/* Profile Settings */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Profile Settings</Text>
@@ -905,34 +1047,92 @@ const OrderManagementPage = () => {
         {/* App Settings */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>App Settings</Text>
-          <TouchableOpacity style={styles.settingItem} onPress={() => router.push(settingsPaths.language)}>
+          <TouchableOpacity style={styles.settingItem} onPress={showComingSoonPrompt}>
             <Ionicons name="language" size={24} color="#6a0dad" />
             <View style={styles.settingInfo}>
               <Text style={styles.settingLabel}>Language</Text>
-              <Text style={styles.settingDescription}>
-                {settings.language === 'French' && 'Français'}
-                {settings.language === 'Arabic' && 'العربية'}
-                {settings.language === 'English' && 'English'}
-                {!["French", "Arabic", "English"].includes(settings.language) && 'English'}
-              </Text>
+              <Text style={styles.settingDescription}>Coming Soon</Text>
             </View>
-            <Ionicons name="chevron-forward" size={24} color="#666" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.settingItem} onPress={toggleDarkMode}>
-            <Ionicons name="moon" size={24} color="#6a0dad" />
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Dark Mode</Text>
-              <Text style={styles.settingDescription}>{settings.isDarkMode ? 'On' : 'Off'}</Text>
+            <View style={styles.comingSoonBadge}>
+              <Text style={styles.comingSoonText}>Soon</Text>
             </View>
-            <Ionicons name="chevron-forward" size={24} color="#666" />
           </TouchableOpacity>
         </View>
         {/* Logout Button */}
-        <TouchableOpacity style={styles.logoutButton} onPress={() => {/* Add logout logic here */}}>
+        <TouchableOpacity style={styles.logoutButton} onPress={handleLogoutFromDashboard}>
           <Ionicons name="log-out" size={24} color="#fff" />
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
       </ScrollView>
+      
+      <Modal
+        visible={showComingSoonModal}
+        transparent={true}
+        animationType="none"
+        onRequestClose={hideComingSoonModal}
+      >
+        <View style={styles.modalOverlay}>
+          <Animated.View
+            style={[
+              styles.modalContent,
+              {
+                transform: [
+                  {
+                    scale: modalAnimation.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.8, 1],
+                    }),
+                  },
+                  {
+                    translateY: modalAnimation.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [100, 0],
+                    }),
+                  },
+                ],
+                opacity: modalAnimation,
+              },
+            ]}
+          >
+            <LinearGradient colors={['#667eea', '#764ba2']} style={styles.modalHeader}>
+              <Ionicons name="language" size={48} color="#ffffff" />
+              <Text style={styles.modalTitle}>Language Settings</Text>
+              <Text style={styles.modalSubtitle}>Coming Soon</Text>
+            </LinearGradient>
+
+            <View style={styles.modalBody}>
+              <Text style={styles.modalDescription}>
+                We're developing comprehensive language support to make your experience truly global.
+              </Text>
+              <View style={styles.featureGrid}>
+                <View style={styles.featureCard}>
+                  <Ionicons name="globe" size={24} color="#667eea" />
+                  <Text style={styles.featureTitle}>Multi-Language</Text>
+                </View>
+                <View style={styles.featureCard}>
+                  <Ionicons name="flash" size={24} color="#f093fb" />
+                  <Text style={styles.featureTitle}>Real-Time Switch</Text>
+                </View>
+                <View style={styles.featureCard}>
+                  <Ionicons name="location" size={24} color="#4facfe" />
+                  <Text style={styles.featureTitle}>Auto Detection</Text>
+                </View>
+                <View style={styles.featureCard}>
+                  <Ionicons name="star" size={24} color="#f6d365" />
+                  <Text style={styles.featureTitle}>Native Feel</Text>
+                </View>
+              </View>
+            </View>
+
+            <TouchableOpacity style={styles.modalCloseButton} onPress={hideComingSoonModal}>
+              <LinearGradient colors={['#667eea', '#764ba2']} style={styles.modalCloseGradient}>
+                <Text style={styles.modalCloseText}>Got it!</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
+      </Modal>
+      </>
     );
   };
 
@@ -1851,6 +2051,70 @@ const styles = StyleSheet.create({
   },
   modalButtonText: {
     color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  comingSoonBadge: {
+    backgroundColor: '#667eea',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  comingSoonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  modalContent: {
+    backgroundColor: '#ffffff',
+    borderRadius: 24,
+    width: '100%',
+    maxWidth: 400,
+    overflow: 'hidden',
+    elevation: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+  },
+  modalSubtitle: {
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.9)',
+    textAlign: 'center',
+  },
+  modalDescription: {
+    fontSize: 16,
+    color: '#4a5568',
+    lineHeight: 24,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  featureGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    justifyContent: 'space-between',
+  },
+  featureCard: {
+    width: '47%',
+    backgroundColor: '#f7fafc',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    gap: 8,
+  },
+  featureTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#2d3748',
+    textAlign: 'center',
+  },
+  modalCloseGradient: {
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  modalCloseText: {
+    color: '#ffffff',
     fontSize: 16,
     fontWeight: 'bold',
   },

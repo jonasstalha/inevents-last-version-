@@ -23,18 +23,16 @@ export interface UserStats {
  */
 export const fetchUserStatistics = async (userId: string): Promise<UserStats> => {
   try {
-    // Fetch orders from Firebase
+    // Fetch orders from user's orders subcollection (not global collection)
     const ordersQuery = query(
-      collection(db, 'orders'),
-      where('clientId', '==', userId)
+      collection(db, 'users', userId, 'orders')
     );
     const ordersSnapshot = await getDocs(ordersQuery);
     const orders = ordersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     
-    // Fetch tickets from Firebase
+    // Fetch tickets from user's tickets subcollection
     const ticketsQuery = query(
-      collection(db, 'userTickets'),
-      where('userId', '==', userId)
+      collection(db, 'users', userId, 'tickets')
     );
     const ticketsSnapshot = await getDocs(ticketsQuery);
     const tickets = ticketsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -45,7 +43,9 @@ export const fetchUserStatistics = async (userId: string): Promise<UserStats> =>
     );
     
     const totalSpent = confirmedOrders.reduce((sum: number, order: any) => {
-      const amount = typeof order.total === 'number' ? order.total : parseFloat(order.total) || 0;
+      const amount = typeof order.totalPrice === 'number' ? order.totalPrice :
+                     typeof order.total === 'number' ? order.total : 
+                     parseFloat(order.totalPrice || order.total || '0') || 0;
       return sum + amount;
     }, 0);
     
@@ -201,5 +201,80 @@ export const getUserStatistics = async (userId: string): Promise<UserStats> => {
     // Fallback to stored stats if fresh fetch fails
     const storedStats = await loadStoredStatistics(userId);
     return storedStats || { orders: 0, tickets: 0, points: 0, totalSpent: 0 };
+  }
+};
+
+/**
+ * Recalculate and fix user statistics from existing data
+ * This function will scan all existing orders and tickets and recalculate points
+ */
+export const recalculateUserStatistics = async (userId: string): Promise<UserStats> => {
+  try {
+    console.log(`🔄 Recalculating statistics for user: ${userId}`);
+
+    // Get fresh statistics by re-scanning all data
+    const freshStats = await fetchUserStatistics(userId);
+    
+    // Force save the corrected statistics
+    await saveUserStatistics(userId, freshStats);
+    
+    console.log('✅ Statistics recalculated and saved:', freshStats);
+    return freshStats;
+    
+  } catch (error) {
+    console.error('❌ Error recalculating user statistics:', error);
+    throw error;
+  }
+};
+
+/**
+ * Debug function to check where user data is stored
+ */
+export const debugUserDataLocations = async (userId: string) => {
+  try {
+    console.log(`🔍 Debugging data locations for user: ${userId}`);
+    
+    // Check user's orders subcollection
+    const userOrdersRef = collection(db, 'users', userId, 'orders');
+    const userOrdersSnapshot = await getDocs(userOrdersRef);
+    console.log(`📦 Found ${userOrdersSnapshot.docs.length} orders in users/${userId}/orders`);
+    
+    // Check user's tickets subcollection  
+    const userTicketsRef = collection(db, 'users', userId, 'tickets');
+    const userTicketsSnapshot = await getDocs(userTicketsRef);
+    console.log(`🎫 Found ${userTicketsSnapshot.docs.length} tickets in users/${userId}/tickets`);
+    
+    // Check if orders exist in global collection
+    try {
+      const globalOrdersQuery = query(
+        collection(db, 'orders'),
+        where('clientId', '==', userId)
+      );
+      const globalOrdersSnapshot = await getDocs(globalOrdersQuery);
+      console.log(`🌐 Found ${globalOrdersSnapshot.docs.length} orders in global orders collection`);
+    } catch (error) {
+      console.log('⚠️  No access to global orders collection');
+    }
+    
+    // Check if tickets exist in global collection
+    try {
+      const globalTicketsQuery = query(
+        collection(db, 'userTickets'),
+        where('userId', '==', userId)
+      );
+      const globalTicketsSnapshot = await getDocs(globalTicketsQuery);
+      console.log(`🌐 Found ${globalTicketsSnapshot.docs.length} tickets in global userTickets collection`);
+    } catch (error) {
+      console.log('⚠️  No access to global userTickets collection');
+    }
+    
+    return {
+      userOrders: userOrdersSnapshot.docs.length,
+      userTickets: userTicketsSnapshot.docs.length
+    };
+    
+  } catch (error) {
+    console.error('❌ Error debugging user data locations:', error);
+    return null;
   }
 };
