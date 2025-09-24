@@ -1,5 +1,4 @@
-import { useRouter } from 'expo-router';
-import { addDoc, collection, deleteDoc, doc, getDocs, getFirestore, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, updateDoc } from 'firebase/firestore';
 import {
   Activity,
   ChartBar as BarChart,
@@ -20,9 +19,9 @@ import {
   Trash2,
   TrendingUp,
   Users,
-  X
+  X,
 } from 'lucide-react-native';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -36,216 +35,104 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import { Card } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import '../../src/firebase/firebaseConfig';
 
-import { Card } from '@/src/components/common/Card';
-import { Theme } from '@/src/constants/theme';
-import { useApp } from '@/src/context/AppContext';
-import { useAuth } from '@/src/context/AuthContext';
-import { debugFirebaseConnection } from '@/src/firebase/debugFirebase';
+// Theme and firebase helpers
+import { Theme } from '../../src/constants/theme';
+import { debugFirebaseConnection } from '../../src/firebase/debugFirebase';
+import { fetchAllServicesFromFirebase } from '../../src/firebase/fetchAllServices';
+import { db } from '../../src/firebase/firebaseConfig';
 
-// Use getFirestore() for db
-const db = getFirestore();
+export default function AdminPanel() {
 
-// Mock data for demo purposes
-const mockServices = [
-  {
-    id: '1',
-    name: 'Portrait Photography',
-    category: 'Photography',
-    creator: 'John Doe',
-    status: 'approved',
-    price: 150,
-    views: 245,
-    purchases: 12,
-    createdAt: new Date('2024-11-01'),
-  },
-  {
-    id: '2',
-    name: 'Logo Design',
-    category: 'Design',
-    creator: 'Jane Smith',
-    status: 'pending',
-    price: 75,
-    views: 89,
-    purchases: 3,
-    createdAt: new Date('2024-12-01'),
-  },
-];
+  // Minimal types used by this admin panel. These keep the file self-contained and
+  // avoid TypeScript errors until more detailed types are restored.
+  type User = {
+    id: string;
+    name: string;
+    email: string;
+    phone?: string;
+    role?: string;
+    status?: string;
+    region?: string;
+    revenue?: number;
+    [key: string]: any;
+  };
 
-const mockCoupons = [
-  {
-    id: '1',
-    name: 'Holiday Special',
-    code: 'HOLIDAY2024',
-    discount: 20,
-    type: 'percentage',
-    expirationDate: new Date('2024-12-31'),
-    usageCount: 45,
-    maxUsage: 100,
-    status: 'active',
-  },
-  {
-    id: '2',
-    name: 'New User Discount',
-    code: 'NEWUSER50',
-    discount: 50,
-    type: 'fixed',
-    expirationDate: new Date('2025-01-31'),
-    usageCount: 23,
-    maxUsage: 200,
-    status: 'active',
-  },
-];
+  type Service = {
+    id: string;
+    name?: string;
+    title?: string;
+    category?: string;
+    creator?: string;
+    artistId?: string;
+    status?: string;
+    price?: number;
+    basePrice?: number;
+    views?: number;
+    purchases?: number;
+    createdAt?: Date;
+    images?: string[];
+    description?: string;
+    type?: 'service' | 'ticket' | string;
+    [key: string]: any;
+  };
 
-// Sample financial data structure for reference
-interface FinancialData {
-  totalRevenue: number;
-  weeklyIncome: number;
-  monthlyIncome: number;
-  averageOrderValue: number;
-  totalOrders: number;
-  pendingPayouts: number;
-  topEarners: { name: string; revenue: number; artistId: string }[];
-  revenueData: { month: string; revenue: number }[];
-}
+  type Coupon = {
+    id?: string;
+    name: string;
+    code: string;
+    discount: number | string;
+    type: 'percentage' | 'fixed';
+    expirationDate: any;
+    usageCount?: number;
+    maxUsage?: number;
+    status?: 'active' | 'stopped';
+    description?: string;
+    minOrderAmount?: number;
+    scope?: 'all' | 'services' | 'tickets' | 'selected';
+    targetType?: 'all' | 'service' | 'ticket';
+    targetIds?: string[];
+    [key: string]: any;
+  };
 
-// User type definition
-type User = {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  role: string;
-  status: string;
-  signupDate: Date;
-  lastLogin: Date;
-  revenue: number;
-  region: string;
-  [key: string]: any; // Allow indexing for dynamic field access
-};
+  type UserFilters = { role: string; status: string; region: string };
+  type ServiceFilters = { category: string; status: string; creator: string };
 
-// Service type definition - Updated to match Firebase structure
-type Service = {
-  id: string;
-  name?: string;
-  title?: string; // Services might have title instead of name
-  category: string;
-  creator?: string;
-  artistId?: string; // Creator ID in Firebase
-  status: string;
-  price?: number;
-  basePrice?: number; // Services might have basePrice
-  views?: number;
-  purchases?: number;
-  createdAt: Date;
-  images?: string[];
-  description?: string;
-  type?: 'service' | 'ticket'; // To distinguish between services and tickets
-};
-
-// Coupon type definition
-type Coupon = {
-  id: string;
-  name: string;
-  code: string;
-  discount: number;
-  type: string;
-  expirationDate: Date;
-  usageCount: number;
-  maxUsage: number;
-  status: string;
-};
-
-// Filter types
-type UserFilters = {
-  role: string;
-  status: string;
-  region: string;
-};
-
-type ServiceFilters = {
-  category: string;
-  status: string;
-  creator: string;
-};
-
-export default function AdminPanelScreen() {
-  const { user } = useAuth();
-  const { artists, orders, gigs, tickets } = useApp();
-  const router = useRouter();
-
-  // State management
-  const [activeTab, setActiveTab] = useState('dashboard');
-  // Real users from Firebase
+  // State: collections and loading flags
   const [users, setUsers] = useState<User[]>([]);
-  const [usersLoading, setUsersLoading] = useState(true);
+  const [usersLoading, setUsersLoading] = useState(false);
   const [services, setServices] = useState<Service[]>([]);
-  const [servicesLoading, setServicesLoading] = useState(true);
-  const [coupons, setCoupons] = useState<Coupon[]>(mockCoupons);
-  
-  // Financial data state
-  const [financialData, setFinancialData] = useState({
+  const [servicesLoading, setServicesLoading] = useState(false);
+  const [coupons, setCoupons] = useState<Coupon[]>([]);
+
+  // Financial state
+  const [financialLoading, setFinancialLoading] = useState(false);
+  const [financialData, setFinancialData] = useState<any>({
     totalRevenue: 0,
     weeklyIncome: 0,
     monthlyIncome: 0,
     averageOrderValue: 0,
     totalOrders: 0,
     pendingPayouts: 0,
-    topEarners: [] as { name: string; revenue: number; artistId: string }[],
-    revenueData: [] as { month: string; revenue: number }[],
+    topEarners: [],
+    revenueData: [],
   });
-  const [financialLoading, setFinancialLoading] = useState(true);
-  
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  const [selectedService, setSelectedService] = useState<Service | null>(null);
-  const [selectedCoupon, setSelectedCoupon] = useState<Coupon | null>(null);
+
+  // UI state for tabs/modals
+  const [activeTab, setActiveTab] = useState<'dashboard'|'users'|'services'|'financial'|'coupons'>('dashboard');
   const [showUserModal, setShowUserModal] = useState(false);
-  const [showServiceModal, setShowServiceModal] = useState(false);
-  const [showCouponModal, setShowCouponModal] = useState(false);
-  const [showCreateCouponModal, setShowCreateCouponModal] = useState(false);
-  const [showCreateUserModal, setShowCreateUserModal] = useState(false);
   const [showEditUserModal, setShowEditUserModal] = useState(false);
-  const [newUser, setNewUser] = useState({
-    name: '',
-    email: '',
-    phone: '',
-    role: '',
-    status: 'active',
-    region: '',
-    revenue: 0,
-  });
-  const [editUser, setEditUser] = useState<User | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  
-  // Notification states
-  const [showBulkNotificationModal, setShowBulkNotificationModal] = useState(false);
-  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
-  const [isSelectMode, setIsSelectMode] = useState(false);
-  const [notificationMessage, setNotificationMessage] = useState({
-    title: '',
-    body: '',
-    targetGroup: 'all' // 'all', 'filtered', 'selected'
-  });
-  
+  const [showCreateCouponModal, setShowCreateCouponModal] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  // Current logged-in admin (if any) - placeholder
+  const [user, setUser] = useState<User | null>(null);
+
   // Search queries
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [serviceSearchQuery, setServiceSearchQuery] = useState('');
   const [couponSearchQuery, setCouponSearchQuery] = useState('');
-  
-  // Filters
-  const [userFilters, setUserFilters] = useState<UserFilters>({
-    role: 'all',
-    status: 'all',
-    region: 'all',
-  });
-  
-  const [serviceFilters, setServiceFilters] = useState<ServiceFilters>({
-    category: 'all',
-    status: 'all',
-    creator: 'all',
-  });
 
   // Computed values
   const totalUsers = users.length;
@@ -253,18 +140,28 @@ export default function AdminPanelScreen() {
   const pendingServices = services.filter(s => s.status === 'pending').length;
   const totalRevenue = financialData.totalRevenue;
 
+  // Derived quick counts used in status card
+  const artists = users.filter(u => u?.role === 'artist');
+  const gigs = services; // legacy naming in UI
+  const orders = financialData.totalOrders || 0;
+  const tickets = services.filter(s => s.type === 'ticket');
+
+  // Filters state
+  const [userFilters, setUserFilters] = useState<UserFilters>({ role: 'all', status: 'all', region: 'all' });
+  const [serviceFilters, setServiceFilters] = useState<ServiceFilters>({ category: 'all', status: 'all', creator: 'all' });
+
   // Enhanced filter functions
   const filteredUsers = useMemo(() => {
     return users.filter(user => {
       // Search filter
-      const searchLower = userSearchQuery.toLowerCase().trim();
+      const searchLower = (userSearchQuery || '').toLowerCase().trim();
       const matchesSearch = searchLower === '' || 
         user.name.toLowerCase().includes(searchLower) ||
         user.email.toLowerCase().includes(searchLower) ||
-        user.phone.includes(searchLower);
+        (user.phone || '').toString().includes(searchLower);
       
       // Role filter
-      const matchesRole = userFilters.role === 'all' || user.role === userFilters.role;
+      const matchesRole = userFilters.role === 'all' || (user?.role === userFilters.role);
       
       // Status filter
       const matchesStatus = userFilters.status === 'all' || user.status === userFilters.status;
@@ -279,7 +176,7 @@ export default function AdminPanelScreen() {
   const filteredServices = useMemo(() => {
     return services.filter(service => {
       // Search filter - handle undefined properties
-      const searchLower = serviceSearchQuery.toLowerCase().trim();
+  const searchLower = (serviceSearchQuery || '').toLowerCase().trim();
       const matchesSearch = searchLower === '' || 
         (service.name || service.title || '').toLowerCase().includes(searchLower) ||
         (service.category || '').toLowerCase().includes(searchLower) ||
@@ -301,10 +198,10 @@ export default function AdminPanelScreen() {
   const filteredCoupons = useMemo(() => {
     return coupons.filter(coupon => {
       // Search filter
-      const searchLower = couponSearchQuery.toLowerCase().trim();
+      const searchLower = (couponSearchQuery || '').toLowerCase().trim();
       const matchesSearch = searchLower === '' || 
-        coupon.name.toLowerCase().includes(searchLower) ||
-        coupon.code.toLowerCase().includes(searchLower);
+        (coupon.name || '').toString().toLowerCase().includes(searchLower) ||
+        (coupon.code || '').toString().toLowerCase().includes(searchLower);
       
       return matchesSearch;
     });
@@ -343,12 +240,12 @@ export default function AdminPanelScreen() {
 
   // Get unique values for filter options
   const getUniqueRoles = () => {
-    const roles = [...new Set(users.map(user => user.role))];
+    const roles = [...new Set(users.map(user => user?.role).filter(Boolean))] as string[];
     return [{ label: 'All Roles', value: 'all' }, ...roles.map(role => ({ label: role.charAt(0).toUpperCase() + role.slice(1), value: role }))];
   };
 
   const getUniqueStatuses = () => {
-    const statuses = [...new Set(users.map(user => user.status))];
+    const statuses = [...new Set(users.map(user => user.status).filter(Boolean))] as string[];
     return [{ label: 'All Statuses', value: 'all' }, ...statuses.map(status => ({ label: status.charAt(0).toUpperCase() + status.slice(1), value: status }))];
   };
 
@@ -368,7 +265,7 @@ export default function AdminPanelScreen() {
   };
 
   const getUniqueServiceStatuses = () => {
-    const statuses = [...new Set(services.map(service => service.status))];
+    const statuses = [...new Set(services.map(service => service.status).filter(Boolean))] as string[];
     return [{ label: 'All Statuses', value: 'all' }, ...statuses.map(status => ({ label: status.charAt(0).toUpperCase() + status.slice(1), value: status }))];
   };
 
@@ -514,6 +411,32 @@ export default function AdminPanelScreen() {
       ]
     );
   };
+
+  // --- Local component state (moved here from top-of-file) ---
+  const [newUser, setNewUser] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    role: '',
+    status: 'active',
+    region: '',
+    revenue: 0,
+  });
+  const [editUser, setEditUser] = useState<User | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Notification states
+  const [showBulkNotificationModal, setShowBulkNotificationModal] = useState(false);
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [notificationMessage, setNotificationMessage] = useState({
+    title: '',
+    body: '',
+    targetGroup: 'all' // 'all', 'filtered', 'selected'
+  });
+
+
+  // (filters initialized earlier)
 
   const sendBulkNotificationToUser = async (user: User, title: string, body: string) => {
     try {
@@ -1267,7 +1190,7 @@ service cloud.firestore {
       inactive: filteredUsers.filter(u => u.status === 'inactive').length,
       artists: filteredUsers.filter(u => u.role === 'artist').length,
       clients: filteredUsers.filter(u => u.role === 'client').length,
-      totalRevenue: filteredUsers.reduce((sum, u) => sum + u.revenue, 0),
+      totalRevenue: filteredUsers.reduce((sum, u) => sum + (u.revenue || 0), 0),
     };
 
     const serviceStats = {
@@ -1282,45 +1205,132 @@ service cloud.firestore {
   };
 
  
-  const handleApproveService = (serviceId: string) => {
-    setServices(prev =>
-      prev.map(service =>
-        service.id === serviceId
-          ? { ...service, status: 'approved' }
-          : service
-      )
-    );
+  const handleApproveService = async (serviceId: string) => {
+    const service = services.find(s => s.id === serviceId);
+    if (!service) return;
+
+    try {
+      setServicesLoading(true);
+
+      // Try top-level first
+      const topLevelCollection = service.type === 'service' ? 'services' : 'tickets';
+      const topDocRef = doc(db, topLevelCollection, serviceId);
+      const topSnap = await getDoc(topDocRef);
+      if (topSnap.exists()) {
+        await updateDoc(topDocRef, { status: 'approved', updatedAt: new Date() } as any);
+        console.log(`Updated status to approved at ${topLevelCollection}/${serviceId}`);
+      } else {
+        // Search user subcollections
+        const usersRef = collection(db, 'users');
+        const usersSnap = await getDocs(usersRef);
+        let updated = false;
+        for (const userDoc of usersSnap.docs) {
+          const userServiceRef = doc(db, 'users', userDoc.id, 'services', serviceId);
+          const userServiceSnap = await getDoc(userServiceRef);
+          if (userServiceSnap.exists()) {
+            await updateDoc(userServiceRef, { status: 'approved', updatedAt: new Date() } as any);
+            console.log(`Updated status to approved at users/${userDoc.id}/services/${serviceId}`);
+            updated = true;
+            break;
+          }
+
+          const userTicketRef = doc(db, 'users', userDoc.id, 'tickets', serviceId);
+          const userTicketSnap = await getDoc(userTicketRef);
+          if (userTicketSnap.exists()) {
+            await updateDoc(userTicketRef, { status: 'approved', updatedAt: new Date() } as any);
+            console.log(`Updated status to approved at users/${userDoc.id}/tickets/${serviceId}`);
+            updated = true;
+            break;
+          }
+        }
+
+        if (!updated) {
+          console.warn('Could not find document to approve in known locations');
+        }
+      }
+
+      // Update local state
+      setServices(prev => prev.map(s => s.id === serviceId ? { ...s, status: 'approved' } : s));
+      Alert.alert('Success', 'Service approved');
+    } catch (error) {
+      console.error('Error approving service:', error);
+      Alert.alert('Error', 'Failed to approve service');
+    } finally {
+      setServicesLoading(false);
+    }
   };
 
   const handleRejectService = async (serviceId: string) => {
     const service = services.find(s => s.id === serviceId);
     if (!service) return;
-
+    // Keep old delete handler as 'Suspend' which permanently removes the doc from whichever location it exists
     Alert.alert(
-      'Permanently Delete',
-      `Are you sure you want to permanently delete this ${service.type}? This action cannot be undone.`,
+      'Suspend (Delete)',
+      `Are you sure you want to suspend (delete) this ${service.type}? This action will remove it from Firestore and cannot be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Delete', 
+        {
+          text: 'Suspend',
           style: 'destructive',
           onPress: async () => {
             try {
               setServicesLoading(true);
-              
-              // Delete from Firebase based on type
-              const collectionName = service.type === 'service' ? 'services' : 'tickets';
-              await deleteDoc(doc(db, collectionName, serviceId));
-              
+
+              // Try deleting from top-level collections first
+              const topLevelCollection = service.type === 'service' ? 'services' : 'tickets';
+              try {
+                // Check if doc exists at top-level
+                const topDocRef = doc(db, topLevelCollection, serviceId);
+                const topDocSnap = await getDoc(topDocRef);
+                if (topDocSnap.exists()) {
+                  await deleteDoc(topDocRef);
+                  console.log(`Deleted from top-level ${topLevelCollection}/${serviceId}`);
+                } else {
+                  // Not found at top-level: search users subcollections
+                  const usersRef = collection(db, 'users');
+                  const usersSnap = await getDocs(usersRef);
+                  let deletedFromUser = false;
+                  for (const userDoc of usersSnap.docs) {
+                    const userServiceRef = doc(db, 'users', userDoc.id, 'services', serviceId);
+                    const userServiceSnap = await getDoc(userServiceRef);
+                    if (userServiceSnap.exists()) {
+                      await deleteDoc(userServiceRef);
+                      console.log(`Deleted from users/${userDoc.id}/services/${serviceId}`);
+                      deletedFromUser = true;
+                      break;
+                    }
+                  }
+
+                  if (!deletedFromUser) {
+                    // Could be stored under a different subcollection name (tickets under users/.../tickets)
+                    for (const userDoc of usersSnap.docs) {
+                      const userTicketRef = doc(db, 'users', userDoc.id, 'tickets', serviceId);
+                      const userTicketSnap = await getDoc(userTicketRef);
+                      if (userTicketSnap.exists()) {
+                        await deleteDoc(userTicketRef);
+                        console.log(`Deleted from users/${userDoc.id}/tickets/${serviceId}`);
+                        deletedFromUser = true;
+                        break;
+                      }
+                    }
+                  }
+
+                  if (!deletedFromUser) {
+                    console.warn('Could not find service/ticket document to delete in known locations');
+                  }
+                }
+              } catch (err) {
+                console.error('Error during deletion attempt:', err);
+                throw err;
+              }
+
               // Remove from local state
               setServices(prev => prev.filter(s => s.id !== serviceId));
-              
-              console.log(`✅ Permanently deleted ${service.type} with ID: ${serviceId}`);
-              Alert.alert('Success', `${service.type === 'service' ? 'Service' : 'Ticket'} permanently deleted from Firebase`);
-              
+
+              Alert.alert('Success', `${service.type === 'service' ? 'Service' : 'Ticket'} suspended (deleted)`);
             } catch (error) {
-              console.error(`❌ Error deleting ${service.type}:`, error);
-              Alert.alert('Error', `Failed to delete ${service.type} from Firebase`);
+              console.error('❌ Error suspending (deleting) service:', error);
+              Alert.alert('Error', 'Failed to suspend/delete the item from Firestore');
             } finally {
               setServicesLoading(false);
             }
@@ -1328,6 +1338,11 @@ service cloud.firestore {
         }
       ]
     );
+  };
+
+  // New: a convenience wrapper to call suspend by id (keeps older code semantics)
+  const handleSuspendService = async (serviceId: string) => {
+    await handleRejectService(serviceId);
   };
 
   // Fetch real financial data from Firebase with enhanced data sources
@@ -1382,91 +1397,57 @@ service cloud.firestore {
         }
       };
       
-      // 1. Fetch from global orders collection
-      try {
-        const ordersRef = collection(db, 'orders');
-        const ordersSnapshot = await getDocs(ordersRef);
-        console.log(`📊 Global orders collection: ${ordersSnapshot.docs.length} documents`);
-        
-        ordersSnapshot.docs.forEach(doc => {
-          processOrder(doc.data(), 'global orders');
-        });
-      } catch (error) {
-        console.log('No global orders collection or access denied:', error);
+      // Scan common root collections that may contain orders/payments
+      const rootCollectionsToScan = [
+        'orders',
+        'transactions',
+        'payments',
+        'custom_orders',
+        'incomingCustomOrders',
+        'customOrders',
+        'bookings',
+        'incoming_custom_orders',
+        'clientOrders'
+      ];
+
+      for (const colName of rootCollectionsToScan) {
+        try {
+          const ref = collection(db, colName);
+          const snap = await getDocs(ref);
+          console.log(`Scanning root collection '${colName}': ${snap.docs.length} documents`);
+          snap.docs.forEach(d => processOrder(d.data(), colName));
+        } catch (error) {
+          // ignore missing collections or permission issues for each
+        }
       }
       
-      // 2. Fetch from transactions collection
-      try {
-        const transactionsRef = collection(db, 'transactions');
-        const transactionsSnapshot = await getDocs(transactionsRef);
-        console.log(`💳 Transactions collection: ${transactionsSnapshot.docs.length} documents`);
-        
-        transactionsSnapshot.docs.forEach(doc => {
-          processOrder(doc.data(), 'transactions');
-        });
-      } catch (error) {
-        console.log('No transactions collection:', error);
-      }
-      
-      // 3. Fetch from payments collection
-      try {
-        const paymentsRef = collection(db, 'payments');
-        const paymentsSnapshot = await getDocs(paymentsRef);
-        console.log(`💰 Payments collection: ${paymentsSnapshot.docs.length} documents`);
-        
-        paymentsSnapshot.docs.forEach(doc => {
-          processOrder(doc.data(), 'payments');
-        });
-      } catch (error) {
-        console.log('No payments collection:', error);
-      }
-      
-      // 4. Fetch from user subcollections (users/{id}/orders)
+      // 4. Fetch common user subcollections (users/{id}/orders, incoming_orders, custom_orders, etc.)
       try {
         const usersRef = collection(db, 'users');
         const usersSnapshot = await getDocs(usersRef);
-        console.log(`👥 Checking ${usersSnapshot.docs.length} users for order subcollections`);
-        
+        console.log(`👥 Checking ${usersSnapshot.docs.length} users for order/payment subcollections`);
+
+        const userSubcollectionsToScan = ['orders', 'incoming_orders', 'custom_orders', 'incomingCustomOrders', 'incoming_custom_orders', 'incoming_orders', 'transactions', 'payments', 'bookings'];
+
         for (const userDoc of usersSnapshot.docs) {
           const userData = userDoc.data();
-          const artistName = userData.name || userData.displayName || `User ${userDoc.id}`;
-          
-          // Check user's orders
-          try {
-            const userOrdersRef = collection(db, 'users', userDoc.id, 'orders');
-            const userOrdersSnapshot = await getDocs(userOrdersRef);
-            
-            if (userOrdersSnapshot.docs.length > 0) {
-              console.log(`📋 User ${userDoc.id} has ${userOrdersSnapshot.docs.length} orders`);
+          const actorName = userData.name || userData.displayName || `User ${userDoc.id}`;
+
+          for (const subcol of userSubcollectionsToScan) {
+            try {
+              const ref = collection(db, 'users', userDoc.id, subcol as any);
+              const snap = await getDocs(ref);
+              if (snap.docs.length > 0) {
+                console.log(`User ${userDoc.id} subcollection '${subcol}': ${snap.docs.length} documents`);
+              }
+              snap.docs.forEach(d => processOrder({ ...d.data(), actorName }, `users/${userDoc.id}/${subcol}`));
+            } catch (err) {
+              // ignore missing subcollections or permission issues
             }
-            
-            userOrdersSnapshot.docs.forEach(orderDoc => {
-              const orderData = { ...orderDoc.data(), artistName };
-              processOrder(orderData, `user ${userDoc.id} orders`);
-            });
-          } catch (error) {
-            // Skip users without orders
-          }
-          
-          // Check user's incoming orders
-          try {
-            const incomingOrdersRef = collection(db, 'users', userDoc.id, 'incoming_orders');
-            const incomingOrdersSnapshot = await getDocs(incomingOrdersRef);
-            
-            if (incomingOrdersSnapshot.docs.length > 0) {
-              console.log(`📥 User ${userDoc.id} has ${incomingOrdersSnapshot.docs.length} incoming orders`);
-            }
-            
-            incomingOrdersSnapshot.docs.forEach(orderDoc => {
-              const orderData = { ...orderDoc.data(), artistId: userDoc.id, artistName };
-              processOrder(orderData, `user ${userDoc.id} incoming orders`);
-            });
-          } catch (error) {
-            // Skip users without incoming orders
           }
         }
       } catch (error) {
-        console.log('Error fetching user orders:', error);
+        console.log('Error fetching user subcollections for financial data:', error);
       }
       
       // Calculate averages and weekly/monthly income
@@ -1501,51 +1482,16 @@ service cloud.firestore {
       };
       
       setFinancialData(financialResult);
-      
+
       console.log('=== FINANCIAL DATA RESULTS ===');
       console.log('Total Revenue:', totalRevenue);
       console.log('Total Orders:', totalOrders);
       console.log('Average Order Value:', averageOrderValue);
       console.log('Monthly Income:', monthlyIncome);
       console.log('Top Earners:', topEarners);
-      
+
       if (totalRevenue === 0) {
-        console.log('❌ No financial data found - no orders with valid amounts');
-        Alert.alert(
-          'No Financial Data',
-          'No orders with revenue found in Firebase.\n\nThis could mean:\n1. No orders have been placed yet\n2. Orders are in different collections\n3. Order amounts are stored differently\n\nUsing sample financial data for demo.'
-        );
-        
-        // Set some sample financial data for demo
-        setFinancialData({
-          totalRevenue: 15420,
-          weeklyIncome: 890,
-          monthlyIncome: 3850,
-          averageOrderValue: 125,
-          totalOrders: 123,
-          pendingPayouts: 2140,
-          topEarners: [
-            { name: 'John Photographer', revenue: 3200, artistId: 'artist1' },
-            { name: 'Sarah Events', revenue: 2800, artistId: 'artist2' },
-            { name: 'Mike Design', revenue: 2100, artistId: 'artist3' }
-          ],
-          revenueData: [
-            { month: 'Jan', revenue: 3400 },
-            { month: 'Feb', revenue: 4200 },
-            { month: 'Mar', revenue: 3800 },
-            { month: 'Apr', revenue: 4600 },
-            { month: 'May', revenue: 5200 },
-            { month: 'Jun', revenue: 4800 },
-            { month: 'Jul', revenue: 3850 },
-            { month: 'Aug', revenue: 0 },
-            { month: 'Sep', revenue: 0 },
-            { month: 'Oct', revenue: 0 },
-            { month: 'Nov', revenue: 0 },
-            { month: 'Dec', revenue: 0 }
-          ]
-        });
-      } else {
-        Alert.alert('Financial Data Loaded', `✅ Loaded real financial data!\n\nTotal Revenue: $${totalRevenue.toLocaleString()}\nTotal Orders: ${totalOrders}\nTop Earners: ${topEarners.length}`);
+        console.warn('No financial data found - no orders with valid amounts. Ensure orders exist in Firestore and amounts are stored in expected fields.');
       }
       
     } catch (error) {
@@ -1794,230 +1740,173 @@ service cloud.firestore {
     }
   };
 
-  // Fetch services and tickets from Firebase
+  // Update the fetchServicesAndTickets function to include real-time updates
   const fetchServicesAndTickets = async () => {
     try {
       setServicesLoading(true);
       console.log('=== FETCHING SERVICES AND TICKETS ===');
-      
-      let allItems: Service[] = [];
-      
-      // Try primary collection names first
-      const primaryCollections = [
-        { name: 'services', type: 'service' },
-        { name: 'tickets', type: 'ticket' }
-      ];
-      
-      for (const collectionConfig of primaryCollections) {
-        try {
-          const snapshot = await getDocs(collection(db, collectionConfig.name));
-          console.log(`Found ${snapshot.docs.length} documents in '${collectionConfig.name}' collection`);
-          
-          const items: Service[] = snapshot.docs.map(doc => {
-            const data = doc.data() as any;
-            console.log(`${collectionConfig.type} data:`, data);
-            return {
-              id: doc.id,
-              type: collectionConfig.type as 'service' | 'ticket',
-              name: data.name || data.title || data.eventName || `Untitled ${collectionConfig.type}`,
-              title: data.title || data.name || data.eventName,
-              category: data.category || data.eventType || 'Other',
-              creator: data.creator || data.artistId || data.organizerId || data.createdBy || 'Unknown',
-              artistId: data.artistId || data.organizerId || data.creator || data.createdBy,
-              status: data.status || 'pending',
-              price: data.price || data.basePrice || data.ticketPrice || 0,
-              basePrice: data.basePrice || data.price || data.ticketPrice,
-              views: data.views || 0,
-              purchases: data.purchases || data.orders || data.sales || 0,
-              createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
-              images: data.images || data.eventImages || [],
-              description: data.description || data.eventDescription || ''
-            } as Service;
-          });
-          
-          allItems = [...allItems, ...items];
-        } catch (error) {
-          const errorCode = (error as any).code;
-          if (errorCode === 'permission-denied') {
-            console.error(`❌ Permission denied for '${collectionConfig.name}' collection`);
-          } else {
-            console.error(`❌ Error fetching ${collectionConfig.name}:`, error);
-          }
-        }
-      }
-      
-      // If no data found in primary collections, try alternative names
-      if (allItems.length === 0) {
-        console.log('No data in primary collections, trying alternatives...');
-        const alternativeCollections = [
-          { name: 'gigs', type: 'service' },
-          { name: 'events', type: 'ticket' },
-          { name: 'listings', type: 'service' },
-          { name: 'marketplace', type: 'service' },
-          { name: 'items', type: 'service' }
-        ];
-        
-        for (const altCollectionConfig of alternativeCollections) {
-          try {
-            const snapshot = await getDocs(collection(db, altCollectionConfig.name));
-            console.log(`Collection '${altCollectionConfig.name}': ${snapshot.docs.length} documents`);
-            
-            if (snapshot.docs.length > 0) {
-              console.log(`Sample document from '${altCollectionConfig.name}':`, snapshot.docs[0].data());
-              
-              const items: Service[] = snapshot.docs.map(doc => {
-                const data = doc.data() as any;
-                return {
-                  id: doc.id,
-                  type: altCollectionConfig.type as 'service' | 'ticket',
-                  name: data.name || data.title || data.eventName || `Untitled ${altCollectionConfig.type}`,
-                  title: data.title || data.name || data.eventName,
-                  category: data.category || data.eventType || 'Other',
-                  creator: data.creator || data.artistId || data.organizerId || data.createdBy || 'Unknown',
-                  artistId: data.artistId || data.organizerId || data.creator || data.createdBy,
-                  status: data.status || 'pending',
-                  price: data.price || data.basePrice || data.ticketPrice || 0,
-                  basePrice: data.basePrice || data.price || data.ticketPrice,
-                  views: data.views || 0,
-                  purchases: data.purchases || data.orders || data.sales || 0,
-                  createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
-                  images: data.images || data.eventImages || [],
-                  description: data.description || data.eventDescription || ''
-                } as Service;
-              });
-              
-              allItems = [...allItems, ...items];
-            }
-          } catch (error) {
-            const errorCode = (error as any).code;
-            if (errorCode === 'permission-denied') {
-              console.log(`❌ Permission denied for '${altCollectionConfig.name}' collection`);
-            } else {
-              console.log(`❌ Error checking '${altCollectionConfig.name}':`, (error as Error).message);
-            }
-          }
-        }
-      }
-      
-      setServices(allItems);
-      
-      console.log(`✅ Successfully loaded ${allItems.length} total items`);
-      console.log('All items:', allItems);
-      
-      if (allItems.length === 0) {
-        console.log('❌ No services or tickets found in any collection');
-        
-        Alert.alert(
-          '🔍 No Data Found - Let\'s Find It!', 
-          `All collections checked are empty (0 documents each).
 
-Since you mentioned data exists, it might be:
-1. In different collection names
-2. In subcollections under users
-3. Not created yet
+      // Helper to map a Firestore doc to a fully-formed Service object
+      const mapDocToService = (d: any, inferredType: 'service' | 'ticket'): Service => {
+        const data = d.data ? d.data() : d;
+        const createdAtRaw = data?.createdAt;
+        const createdAt = createdAtRaw
+          ? (typeof createdAtRaw.toDate === 'function' ? createdAtRaw.toDate() : new Date(createdAtRaw))
+          : new Date();
 
-Let's scan ALL collections to find your data!`,
-          [
-            { text: 'Later' },
-            { 
-              text: 'Scan All Collections', 
-              onPress: scanAllCollections
-            },
-            {
-              text: 'Create Test Data',
-              onPress: createTestData
-            }
-          ]
-        );
-      } else {
-        console.log(`✅ Loaded ${allItems.length} items from Firebase`);
-        Alert.alert('Success', `✅ Loaded ${allItems.length} items from Firebase!\n\nTypes found: ${[...new Set(allItems.map(item => item.type))].join(', ')}`);
+        const item: Service = {
+          id: d.id,
+          name: data?.name ?? data?.title ?? '',
+          title: data?.title ?? data?.name ?? '',
+          category: data?.category ?? 'Uncategorized',
+          creator: data?.creator ?? data?.artistId ?? data?.owner ?? 'Unknown',
+          artistId: data?.artistId ?? data?.creator ?? undefined,
+          status: data?.status ?? 'pending',
+          price: data?.price ?? data?.basePrice ?? 0,
+          basePrice: data?.basePrice ?? data?.price ?? 0,
+          views: data?.views ?? 0,
+          purchases: data?.purchases ?? data?.sales ?? 0,
+          createdAt,
+          images: Array.isArray(data?.images) ? data.images : [],
+          description: data?.description ?? '',
+          type: inferredType,
+        };
+
+        return item;
+      };
+
+      const allItems: Service[] = [];
+
+      // Fetch services from the 'services' collection
+      const servicesSnapshot = await getDocs(collection(db, 'services'));
+      servicesSnapshot.forEach((doc) => {
+        allItems.push(mapDocToService(doc, 'service'));
+      });
+
+      // Fetch tickets from the 'tickets' collection
+      const ticketsSnapshot = await getDocs(collection(db, 'tickets'));
+      ticketsSnapshot.forEach((doc) => {
+        allItems.push(mapDocToService(doc, 'ticket'));
+      });
+
+      // Also fetch services stored under users/{userId}/services subcollections
+      try {
+        const userStoredServices = await fetchAllServicesFromFirebase();
+        // Map plain objects to Service shape
+        const mappedUserServices: Service[] = userStoredServices.map((s: any) => {
+          const createdAtRaw = s?.createdAt;
+          const createdAt = createdAtRaw
+            ? (typeof createdAtRaw.toDate === 'function' ? createdAtRaw.toDate() : new Date(createdAtRaw))
+            : new Date();
+
+          return {
+            id: s.id,
+            name: s.name ?? s.title ?? '',
+            title: s.title ?? s.name ?? '',
+            category: s.category ?? 'Uncategorized',
+            creator: s.creator ?? s.artistId ?? s.userId ?? 'Unknown',
+            artistId: s.artistId ?? s.userId ?? undefined,
+            status: s.status ?? 'pending',
+            price: s.price ?? s.basePrice ?? 0,
+            basePrice: s.basePrice ?? s.price ?? 0,
+            views: s.views ?? 0,
+            purchases: s.purchases ?? s.sales ?? 0,
+            createdAt,
+            images: Array.isArray(s.images) ? s.images : [],
+            description: s.description ?? '',
+            type: s.type ?? 'service',
+          } as Service;
+        });
+
+        // Merge and dedupe by id (top-level collection items + user subcollection items)
+        const mergedById = new Map<string, Service>();
+        allItems.forEach(item => mergedById.set(item.id, item));
+        mappedUserServices.forEach(item => mergedById.set(item.id, item));
+
+        const merged = Array.from(mergedById.values());
+        setServices(merged);
+        console.log(`✅ Successfully loaded ${merged.length} items (including user subcollection services)`);
+      } catch (err) {
+        // If helper fails, fall back to what we have
+        setServices(allItems);
+        console.warn('⚠️ Could not fetch services from user subcollections:', err);
+        console.log(`✅ Successfully loaded ${allItems.length} items (top-level only)`);
       }
-      
     } catch (error) {
       console.error('❌ Error fetching services and tickets:', error);
-      
-      // Check for specific Firebase permission errors
-      const errorCode = (error as any).code;
-      let errorMessage = 'Failed to load services and tickets from Firebase';
-      let troubleshootingInfo = '';
-      
-      if (errorCode === 'permission-denied') {
-        errorMessage = 'Permission denied - Admin needs access to services and tickets';
-        troubleshootingInfo = `
-🔧 SOLUTION: Update your Firestore security rules to allow admin access:
-
-1. Go to Firebase Console > Firestore Database > Rules
-2. Add these rules for admin access:
-
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // Allow authenticated users to read/write their own data
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-    }
-    
-    // Admin access to all collections
-    match /{document=**} {
-      allow read, write: if request.auth != null && 
-        (request.auth.token.email == 'admin@inevents.com' ||
-         request.auth.token.email == 'youremail@domain.com' ||
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
-    }
-    
-    // Public read access to services and tickets (for marketplace)
-    match /services/{serviceId} {
-      allow read: if true;
-      allow write: if request.auth != null;
-    }
-    
-    match /tickets/{ticketId} {
-      allow read: if true;
-      allow write: if request.auth != null;
-    }
-    
-    match /gigs/{gigId} {
-      allow read: if true;
-      allow write: if request.auth != null;
-    }
-    
-    match /events/{eventId} {
-      allow read: if true;
-      allow write: if request.auth != null;
-    }
-  }
-}
-
-3. Replace 'youremail@domain.com' with your admin email
-4. Click 'Publish' to save the rules`;
-        
-        Alert.alert(
-          'Permission Denied - Firebase Rules',
-          `${errorMessage}\n\nYour current user doesn't have permission to read services/tickets collections.\n\nCheck console for detailed solution.`,
-          [
-            { text: 'OK' },
-            { 
-              text: 'Show Solution', 
-              onPress: () => {
-                console.log(troubleshootingInfo);
-                Alert.alert('Solution', 'Check the console for detailed Firestore rules setup instructions.');
-              }
-            }
-          ]
-        );
-      } else {
-        Alert.alert('Error', `${errorMessage}: ${(error as Error).message}`);
-      }
-      
-      console.log(troubleshootingInfo);
-      
-      // Set empty array on error
-      setServices([]);
+      Alert.alert('Error', 'Failed to fetch services and tickets.');
     } finally {
       setServicesLoading(false);
     }
   };
+
+  // Add a listener for real-time updates
+  useEffect(() => {
+    const unsubscribeServices = onSnapshot(collection(db, 'services'), (snapshot) => {
+      const updatedServices: Service[] = snapshot.docs.map((doc) => {
+        const data = doc.data();
+        const createdAtRaw = data?.createdAt;
+        const createdAt = createdAtRaw
+          ? (typeof createdAtRaw.toDate === 'function' ? createdAtRaw.toDate() : new Date(createdAtRaw))
+          : new Date();
+
+        return {
+          id: doc.id,
+          name: data?.name ?? data?.title ?? '',
+          title: data?.title ?? data?.name ?? '',
+          category: data?.category ?? 'Uncategorized',
+          creator: data?.creator ?? data?.artistId ?? 'Unknown',
+          artistId: data?.artistId ?? undefined,
+          status: data?.status ?? 'pending',
+          price: data?.price ?? data?.basePrice ?? 0,
+          basePrice: data?.basePrice ?? data?.price ?? 0,
+          views: data?.views ?? 0,
+          purchases: data?.purchases ?? data?.sales ?? 0,
+          createdAt,
+          images: Array.isArray(data?.images) ? data.images : [],
+          description: data?.description ?? '',
+          type: 'service',
+        } as Service;
+      });
+
+      setServices((prev) => [...prev.filter((item) => item.type !== 'service'), ...updatedServices]);
+    });
+
+    const unsubscribeTickets = onSnapshot(collection(db, 'tickets'), (snapshot) => {
+      const updatedTickets: Service[] = snapshot.docs.map((doc) => {
+        const data = doc.data();
+        const createdAtRaw = data?.createdAt;
+        const createdAt = createdAtRaw
+          ? (typeof createdAtRaw.toDate === 'function' ? createdAtRaw.toDate() : new Date(createdAtRaw))
+          : new Date();
+
+        return {
+          id: doc.id,
+          name: data?.name ?? data?.title ?? '',
+          title: data?.title ?? data?.name ?? '',
+          category: data?.category ?? 'Uncategorized',
+          creator: data?.creator ?? data?.artistId ?? 'Unknown',
+          artistId: data?.artistId ?? undefined,
+          status: data?.status ?? 'pending',
+          price: data?.price ?? data?.basePrice ?? 0,
+          basePrice: data?.basePrice ?? data?.price ?? 0,
+          views: data?.views ?? 0,
+          purchases: data?.purchases ?? data?.sales ?? 0,
+          createdAt,
+          images: Array.isArray(data?.images) ? data.images : [],
+          description: data?.description ?? '',
+          type: 'ticket',
+        } as Service;
+      });
+
+      setServices((prev) => [...prev.filter((item) => item.type !== 'ticket'), ...updatedTickets]);
+    });
+
+    return () => {
+      unsubscribeServices();
+      unsubscribeTickets();
+    };
+  }, []);
 
   // Delete user from Firebase
   const handleDeleteUser = async (userId: string) => {
@@ -2081,34 +1970,61 @@ service cloud.firestore {
     name: '',
     code: '',
     discount: '',
-    type: 'percentage',
+    type: 'percentage' as 'percentage' | 'fixed',
     expirationDate: '',
     maxUsage: '',
-    status: 'active',
+    status: 'active' as 'active' | 'stopped',
+    description: '',
+    minOrderAmount: '',
+    scope: 'all' as 'all' | 'services' | 'tickets' | 'selected',
+    targetType: 'all' as 'all' | 'service' | 'ticket',
+    targetIds: [] as string[],
   });
 
   // Create coupon in Firestore
   const handleCreateCoupon = async () => {
-    if (!newCoupon.name || !newCoupon.code || !newCoupon.discount || !newCoupon.expirationDate || !newCoupon.maxUsage) {
-      Alert.alert('Error', 'Please fill all fields');
+    // Basic validation with clear messages
+    const errors: string[] = [];
+    if (!newCoupon.name?.trim()) errors.push('Name');
+    if (!newCoupon.code?.trim()) errors.push('Code');
+    if (!newCoupon.discount?.toString().trim() || isNaN(Number(newCoupon.discount))) errors.push('Valid Discount');
+    if (!newCoupon.maxUsage?.toString().trim() || isNaN(Number(newCoupon.maxUsage))) errors.push('Valid Max Usage');
+    if (!newCoupon.expirationDate?.trim() || isNaN(new Date(newCoupon.expirationDate).getTime())) errors.push('Valid Expiry Date');
+
+    if (newCoupon.scope === 'selected') {
+      if (!newCoupon.targetType || (newCoupon.targetType !== 'service' && newCoupon.targetType !== 'ticket')) {
+        errors.push('Target Type (service or ticket)');
+      }
+      if (!newCoupon.targetIds || newCoupon.targetIds.length === 0) {
+        errors.push('At least one Target');
+      }
+    }
+
+    if (errors.length > 0) {
+      Alert.alert('Missing/Invalid', `Please provide:\n- ${errors.join('\n- ')}`);
       return;
     }
+
     try {
-      const couponData = {
-        name: newCoupon.name,
-        code: newCoupon.code,
+      const couponData: Coupon = {
+        name: newCoupon.name.trim(),
+        code: newCoupon.code.trim(),
         discount: Number(newCoupon.discount),
         type: newCoupon.type,
         expirationDate: new Date(newCoupon.expirationDate),
         usageCount: 0,
         maxUsage: Number(newCoupon.maxUsage),
         status: newCoupon.status,
-      };
+        description: newCoupon.description?.trim() || '',
+        minOrderAmount: Number(newCoupon.minOrderAmount || 0),
+        scope: newCoupon.scope,
+        targetType: newCoupon.scope === 'all' ? 'all' : newCoupon.targetType,
+        targetIds: newCoupon.scope === 'selected' ? (newCoupon.targetIds || []) : [],
+      } as Coupon;
+
       const docRef = await addDoc(collection(db, 'coupons'), couponData);
-      setCoupons(prev => [
-        { ...couponData, id: docRef.id },
-        ...prev,
-      ]);
+      setCoupons(prev => [{ ...(couponData as Coupon), id: docRef.id }, ...prev]);
+
       setShowCreateCouponModal(false);
       setNewCoupon({
         name: '',
@@ -2118,10 +2034,15 @@ service cloud.firestore {
         expirationDate: '',
         maxUsage: '',
         status: 'active',
+        description: '',
+        minOrderAmount: '',
+        scope: 'all',
+        targetType: 'all',
+        targetIds: [],
       });
-      Alert.alert('Success', 'Coupon created successfully');
-    } catch (error) {
-      Alert.alert('Error', 'Failed to create coupon');
+    } catch (error: any) {
+      console.error('Create coupon error:', error);
+      Alert.alert('Error', `Failed to create coupon. ${error?.message || ''}`);
     }
   };
 
@@ -2129,7 +2050,8 @@ service cloud.firestore {
   const handleToggleCouponStatus = async (coupon: Coupon) => {
     try {
       const newStatus = coupon.status === 'active' ? 'stopped' : 'active';
-      await updateDoc(doc(db, 'coupons', coupon.id), { status: newStatus });
+      if (!coupon.id) { Alert.alert('Error', 'Invalid coupon id'); return; }
+      await updateDoc(doc(db, 'coupons', coupon.id as string), { status: newStatus });
       setCoupons(prev => prev.map(c => c.id === coupon.id ? { ...c, status: newStatus } : c));
     } catch (error) {
       Alert.alert('Error', 'Failed to update coupon status');
@@ -2138,13 +2060,16 @@ service cloud.firestore {
 
   // Increment coupon usageCount (simulate usage)
   const handleUseCoupon = async (coupon: Coupon) => {
-    if (coupon.usageCount >= coupon.maxUsage) {
+    const currentUsage = coupon.usageCount ?? 0;
+    const maxUsage = coupon.maxUsage ?? 0;
+    if (currentUsage >= maxUsage && maxUsage > 0) {
       Alert.alert('Limit reached', 'This coupon has reached its max usage.');
       return;
     }
     try {
-      const newUsage = coupon.usageCount + 1;
-      await updateDoc(doc(db, 'coupons', coupon.id), { usageCount: newUsage });
+      const newUsage = (coupon.usageCount ?? 0) + 1;
+      if (!coupon.id) { Alert.alert('Error', 'Invalid coupon id'); return; }
+      await updateDoc(doc(db, 'coupons', coupon.id as string), { usageCount: newUsage });
       setCoupons(prev => prev.map(c => c.id === coupon.id ? { ...c, usageCount: newUsage } : c));
     } catch (error) {
       Alert.alert('Error', 'Failed to increment usage');
@@ -2189,6 +2114,41 @@ service cloud.firestore {
     };
   }, []);
 
+  // Realtime listeners to recompute financial data when relevant collections change
+  React.useEffect(() => {
+    const listeners: Array<() => void> = [];
+    const watchCollections = ['orders','transactions','payments','custom_orders','bookings','customOrders'];
+
+    for (const col of watchCollections) {
+      try {
+        const q = collection(db, col);
+        const unsub = onSnapshot(q, () => {
+          fetchFinancialData().catch(err => console.warn('Error recomputing financials on snapshot', err));
+        }, (err) => {
+          console.warn('Snapshot error for', col, err);
+        });
+        listeners.push(unsub);
+      } catch (err) {
+        // ignore missing collections or permission issues
+      }
+    }
+
+    try {
+      const unsubUsers = onSnapshot(collection(db, 'users'), () => {
+        fetchFinancialData().catch(err => console.warn('Error recomputing financials on users snapshot', err));
+      });
+      listeners.push(unsubUsers);
+    } catch (err) {
+      // ignore
+    }
+
+    return () => {
+      listeners.forEach(unsub => {
+        try { unsub(); } catch (e) { /* ignore */ }
+      });
+    };
+  }, []);
+
   const renderDashboardTab = () => (
     <ScrollView
       style={styles.tabContent}
@@ -2214,7 +2174,7 @@ service cloud.firestore {
 
       {/* Key Metrics */}
       <View style={styles.metricsGrid}>
-        <Card variant="elevated" style={styles.metricCard}>
+        <Card style={styles.metricCard}>
           <View style={styles.metricIconContainer}>
             <Users size={24} color={Theme.colors.primary} />
           </View>
@@ -2223,7 +2183,7 @@ service cloud.firestore {
           <Text style={styles.metricSubtext}>{activeUsers} active</Text>
         </Card>
 
-        <Card variant="elevated" style={styles.metricCard}>
+  <Card style={styles.metricCard}>
           <View style={styles.metricIconContainer}>
             <DollarSign size={24} color={Theme.colors.success} />
           </View>
@@ -2232,7 +2192,7 @@ service cloud.firestore {
           <Text style={styles.metricSubtext}>+12% this month</Text>
         </Card>
 
-        <Card variant="elevated" style={styles.metricCard}>
+  <Card style={styles.metricCard}>
           <View style={styles.metricIconContainer}>
             <ClipboardCheck size={24} color={Theme.colors.warning} />
           </View>
@@ -2241,7 +2201,7 @@ service cloud.firestore {
           <Text style={styles.metricSubtext}>Need approval</Text>
         </Card>
 
-        <Card variant="elevated" style={styles.metricCard}>
+  <Card style={styles.metricCard}>
           <View style={styles.metricIconContainer}>
             <TrendingUp size={24} color={Theme.colors.info} />
           </View>
@@ -2252,7 +2212,7 @@ service cloud.firestore {
       </View>
 
       {/* Quick Actions */}
-      <Card variant="elevated" style={styles.quickActionsCard}>
+  <Card style={styles.quickActionsCard}>
         <Text style={styles.cardTitle}>Quick Actions</Text>
         
         <View style={styles.quickActionsGrid}>
@@ -2378,7 +2338,7 @@ service cloud.firestore {
       </Card>
 
       {/* Platform Status */}
-      <Card variant="elevated" style={styles.statusCard}>
+  <Card style={styles.statusCard}>
         <Text style={styles.cardTitle}>Platform Status - inevents Project</Text>
         <View style={styles.statusGrid}>
           <View style={styles.statusItem}>
@@ -2405,7 +2365,7 @@ service cloud.firestore {
           </View>
           <View style={styles.statusItem}>
             <Text style={styles.statusLabel}>Orders</Text>
-            <Text style={styles.statusValue}>{orders.length}</Text>
+            <Text style={styles.statusValue}>{orders}</Text>
             <Text style={styles.statusSubtext}>Bookings</Text>
           </View>
           <View style={styles.statusItem}>
@@ -2591,7 +2551,7 @@ service cloud.firestore {
                   <View style={styles.userInfo}>
                     <Text style={styles.userName}>{item.name}</Text>
                     <Text style={styles.userEmail}>{item.email}</Text>
-                    <Text style={styles.userRole}>{item.role} • {item.region}</Text>
+                    <Text style={styles.userRole}>{item?.role ?? 'unknown'} • {item?.region ?? 'unknown'}</Text>
                   </View>
                   <View style={styles.userActions}>
                     <View style={[styles.statusBadge, { backgroundColor: item.status === 'active' ? Theme.colors.success : Theme.colors.warning }]}>
@@ -2668,7 +2628,7 @@ service cloud.firestore {
           data={services}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
-            <Card variant="elevated" style={styles.serviceItem}>
+            <Card style={styles.serviceItem}>
               <View style={styles.serviceHeader}>
                 <View style={styles.serviceInfo}>
                   <Text style={styles.serviceName}>{item.name || item.title || 'Untitled'}</Text>
@@ -2697,24 +2657,22 @@ service cloud.firestore {
               <Text style={styles.servicePrice}>${item.price}</Text>
             </View>
 
-            {item.status === 'pending' && (
-              <View style={styles.serviceActions}>
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.approveButton]}
-                  onPress={() => handleApproveService(item.id)}
-                >
-                  <Check size={16} color="white" />
-                  <Text style={styles.actionButtonText}>Approve</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.rejectButton]}
-                  onPress={() => handleRejectService(item.id)}
-                >
-                  <X size={16} color="white" />
-                  <Text style={styles.actionButtonText}>Reject</Text>
-                </TouchableOpacity>
-              </View>
-            )}
+            <View style={styles.serviceActions}>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.approveButton]}
+                onPress={() => handleApproveService(item.id)}
+              >
+                <Check size={16} color="white" />
+                <Text style={styles.actionButtonText}>Approve</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.rejectButton]}
+                onPress={() => handleSuspendService(item.id)}
+              >
+                <X size={16} color="white" />
+                <Text style={styles.actionButtonText}>Suspend</Text>
+              </TouchableOpacity>
+            </View>
           </Card>
         )}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -2741,17 +2699,17 @@ service cloud.firestore {
         <>
           {/* Revenue Cards */}
           <View style={styles.revenueCards}>
-            <Card variant="elevated" style={styles.revenueCard}>
+            <Card style={styles.revenueCard}>
               <Text style={styles.revenueLabel}>Total Revenue</Text>
               <Text style={styles.revenueValue}>${financialData.totalRevenue.toLocaleString()}</Text>
               <Text style={styles.revenueChange}>From {financialData.totalOrders} orders</Text>
             </Card>
-            <Card variant="elevated" style={styles.revenueCard}>
+            <Card style={styles.revenueCard}>
               <Text style={styles.revenueLabel}>Monthly Income</Text>
               <Text style={styles.revenueValue}>${financialData.monthlyIncome.toLocaleString()}</Text>
               <Text style={styles.revenueChange}>Current month</Text>
             </Card>
-            <Card variant="elevated" style={styles.revenueCard}>
+            <Card style={styles.revenueCard}>
               <Text style={styles.revenueLabel}>Average Order</Text>
               <Text style={styles.revenueValue}>${financialData.averageOrderValue}</Text>
               <Text style={styles.revenueChange}>Per transaction</Text>
@@ -2760,17 +2718,17 @@ service cloud.firestore {
           
           {/* Additional Financial Metrics */}
           <View style={styles.revenueCards}>
-            <Card variant="elevated" style={styles.revenueCard}>
+            <Card style={styles.revenueCard}>
               <Text style={styles.revenueLabel}>Weekly Income</Text>
               <Text style={styles.revenueValue}>${financialData.weeklyIncome.toLocaleString()}</Text>
               <Text style={styles.revenueChange}>Estimated weekly</Text>
             </Card>
-            <Card variant="elevated" style={styles.revenueCard}>
+            <Card style={styles.revenueCard}>
               <Text style={styles.revenueLabel}>Pending Payouts</Text>
               <Text style={styles.revenueValue}>${financialData.pendingPayouts.toLocaleString()}</Text>
               <Text style={styles.revenueChange}>To artists</Text>
             </Card>
-            <Card variant="elevated" style={styles.revenueCard}>
+            <Card style={styles.revenueCard}>
               <Text style={styles.revenueLabel}>Total Orders</Text>
               <Text style={styles.revenueValue}>{financialData.totalOrders}</Text>
               <Text style={styles.revenueChange}>All time</Text>
@@ -2779,9 +2737,9 @@ service cloud.firestore {
           
           {/* Top Earners */}
           {financialData.topEarners.length > 0 && (
-            <Card variant="elevated" style={{ marginTop: 20 }}>
+            <Card style={{ marginTop: 20 }}>
               <Text style={[styles.sectionTitle, { fontSize: 18, marginBottom: 15 }]}>Top Earners</Text>
-              {financialData.topEarners.map((earner, index) => (
+              {financialData.topEarners.map((earner: { artistId: string; name: string; revenue: number }, index: number) => (
                 <View key={earner.artistId} style={{
                   flexDirection: 'row',
                   justifyContent: 'space-between',
@@ -2849,12 +2807,14 @@ service cloud.firestore {
       </View>
       <FlatList
         data={coupons}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item, index) => (item.id ? String(item.id) : String(index))}
         renderItem={({ item }) => {
           const isExpired = item.expirationDate < new Date();
           const isStopped = item.status === 'stopped';
-          const isMaxed = item.usageCount >= item.maxUsage;
-          const usagePercent = Math.min(100, Math.round((item.usageCount / item.maxUsage) * 100));
+          const usageCount = item.usageCount ?? 0;
+          const maxUsage = item.maxUsage ?? 0;
+          const isMaxed = maxUsage > 0 && usageCount >= maxUsage;
+          const usagePercent = maxUsage > 0 ? Math.min(100, Math.round((usageCount / maxUsage) * 100)) : 0;
           let statusColor = Theme.colors.success;
           let statusText = 'Active';
           if (isExpired) {
@@ -2865,7 +2825,7 @@ service cloud.firestore {
             statusText = 'Stopped';
           }
           return (
-            <Card variant="elevated" style={[styles.couponItem, { shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8, elevation: 2 }]}> 
+            <Card style={[styles.couponItem, { shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8, elevation: 2 }]}> 
               <View style={styles.couponHeader}>
                 <Text style={styles.couponName}>{item.name}</Text>
                 <View style={[styles.statusBadge, { backgroundColor: statusColor }]}> 
@@ -2931,6 +2891,7 @@ service cloud.firestore {
     </View>
   );
 
+  // User Details Modal
   const renderUserModal = () => (
     <Modal
       visible={showUserModal}
@@ -2961,30 +2922,6 @@ service cloud.firestore {
             <View style={styles.userDetailSection}>
               <Text style={styles.userDetailLabel}>Phone</Text>
               <Text style={styles.userDetailValue}>{selectedUser.phone}</Text>
-            </View>
-
-            <View style={styles.userDetailSection}>
-              <Text style={styles.userDetailLabel}>Role</Text>
-              <Text style={styles.userDetailValue}>{selectedUser.role}</Text>
-            </View>
-
-            <View style={styles.userDetailSection}>
-              <Text style={styles.userDetailLabel}>Signup Date</Text>
-              <Text style={styles.userDetailValue}>
-                {selectedUser.signupDate.toLocaleDateString()}
-              </Text>
-            </View>
-
-            <View style={styles.userDetailSection}>
-              <Text style={styles.userDetailLabel}>Last Login</Text>
-              <Text style={styles.userDetailValue}>
-                {selectedUser.lastLogin.toLocaleDateString()}
-              </Text>
-            </View>
-
-            <View style={styles.userDetailSection}>
-              <Text style={styles.userDetailLabel}>Revenue Generated</Text>
-              <Text style={styles.userDetailValue}>${selectedUser.revenue}</Text>
             </View>
 
             <View style={styles.modalActions}>
@@ -3056,58 +2993,150 @@ service cloud.firestore {
     >
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' }}>
         <View style={{ backgroundColor: 'white', borderRadius: 12, padding: 24, width: '85%' }}>
-          <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 16 }}>Create Coupon</Text>
+          <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 12 }}>Create Coupon</Text>
+
           <TextInput
             placeholder="Name"
             value={newCoupon.name}
             onChangeText={text => setNewCoupon(prev => ({ ...prev, name: text }))}
-            style={{ borderBottomWidth: 1, marginBottom: 12 }}
+            style={{ borderWidth: 1, borderColor: '#eee', padding: 8, borderRadius: 6, marginBottom: 8 }}
           />
+
           <TextInput
             placeholder="Code"
             value={newCoupon.code}
             onChangeText={text => setNewCoupon(prev => ({ ...prev, code: text }))}
-            style={{ borderBottomWidth: 1, marginBottom: 12 }}
+            style={{ borderWidth: 1, borderColor: '#eee', padding: 8, borderRadius: 6, marginBottom: 8 }}
           />
-          <TextInput
-            placeholder="Discount"
-            value={newCoupon.discount}
-            onChangeText={text => setNewCoupon(prev => ({ ...prev, discount: text }))}
-            keyboardType="numeric"
-            style={{ borderBottomWidth: 1, marginBottom: 12 }}
-          />
-          <TextInput
-            placeholder="Type (percentage/fixed)"
-            value={newCoupon.type}
-            onChangeText={text => setNewCoupon(prev => ({ ...prev, type: text }))}
-            style={{ borderBottomWidth: 1, marginBottom: 12 }}
-          />
-          <TextInput
-            placeholder="Expiration Date (YYYY-MM-DD)"
-            value={newCoupon.expirationDate}
-            onChangeText={text => setNewCoupon(prev => ({ ...prev, expirationDate: text }))}
-            style={{ borderBottomWidth: 1, marginBottom: 12 }}
-          />
-          <TextInput
-            placeholder="Max Usage"
-            value={newCoupon.maxUsage}
-            onChangeText={text => setNewCoupon(prev => ({ ...prev, maxUsage: text }))}
-            keyboardType="numeric"
-            style={{ borderBottomWidth: 1, marginBottom: 12 }}
-          />
+
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <TextInput
+              placeholder="Discount"
+              keyboardType="numeric"
+              value={String(newCoupon.discount)}
+              onChangeText={text => setNewCoupon(prev => ({ ...prev, discount: text }))}
+              style={{ flex: 1, borderWidth: 1, borderColor: '#eee', padding: 8, borderRadius: 6, marginBottom: 8, marginRight: 6 }}
+            />
+            <TouchableOpacity
+              onPress={() => setNewCoupon(prev => ({ ...prev, type: prev.type === 'percentage' ? 'fixed' : 'percentage' }))}
+              style={{ width: 140, borderWidth: 1, borderColor: '#eee', padding: 8, borderRadius: 6, marginBottom: 8, alignItems: 'center' }}
+            >
+              <Text>{newCoupon.type === 'percentage' ? 'Type: %' : 'Type: $'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <TextInput
+              placeholder="Max Usage"
+              keyboardType="numeric"
+              value={String(newCoupon.maxUsage)}
+              onChangeText={text => setNewCoupon(prev => ({ ...prev, maxUsage: text }))}
+              style={{ flex: 1, borderWidth: 1, borderColor: '#eee', padding: 8, borderRadius: 6, marginBottom: 8, marginRight: 6 }}
+            />
+                                  <TextInput
+              placeholder="Expires (YYYY-MM-DD)"
+              value={newCoupon.expirationDate}
+              onChangeText={text => setNewCoupon(prev => ({ ...prev, expirationDate: text }))}
+              style={{ flex: 1, borderWidth: 1, borderColor: '#eee', padding: 8, borderRadius: 6, marginBottom: 8 }}
+            />
+          </View>
+
+          {/* Apply To Section */}
+          <Text style={{ fontWeight: '600', marginTop: 8, marginBottom: 6 }}>Apply To</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 8 }}>
+            {(['all','services','tickets','selected'] as const).map(option => (
+              <TouchableOpacity
+                key={option}
+                onPress={() => setNewCoupon(prev => ({ ...prev, scope: option }))}
+                style={{
+                  paddingHorizontal: 10,
+                  paddingVertical: 6,
+                  borderRadius: 6,
+                  borderWidth: 1,
+                  borderColor: newCoupon.scope === option ? Theme.colors.primary : '#ddd',
+                  backgroundColor: newCoupon.scope === option ? 'rgba(67,97,238,0.08)' : 'white',
+                  marginRight: 8,
+                  marginBottom: 8,
+                }}
+              >
+                <Text style={{ color: newCoupon.scope === option ? Theme.colors.primary : Theme.colors.text }}>{option}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Target type toggle (only when not all) */}
+          {newCoupon.scope !== 'all' && (
+            <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+              {(['service','ticket'] as const).map(t => (
+                <TouchableOpacity
+                  key={t}
+                  onPress={() => setNewCoupon(prev => ({ ...prev, targetType: t }))}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 6,
+                    borderRadius: 6,
+                    borderWidth: 1,
+                    borderColor: newCoupon.targetType === t ? Theme.colors.primary : '#ddd',
+                    backgroundColor: newCoupon.targetType === t ? 'rgba(67,97,238,0.08)' : 'white',
+                    marginRight: 8,
+                  }}
+                >
+                  <Text style={{ color: newCoupon.targetType === t ? Theme.colors.primary : Theme.colors.text }}>{t === 'service' ? 'Services' : 'Tickets'}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {/* Minimal multi-select for selected scope */}
+          {newCoupon.scope === 'selected' && (
+            <View style={{ maxHeight: 180, borderWidth: 1, borderColor: '#eee', borderRadius: 8, padding: 8, marginBottom: 8 }}>
+              <Text style={{ marginBottom: 6, color: Theme.colors.textLight }}>Select {newCoupon.targetType === 'service' ? 'Services' : 'Tickets'}</Text>
+              <ScrollView>
+                {services
+                  .filter(s => (newCoupon.targetType === 'service' ? s.type === 'service' : s.type === 'ticket'))
+                  .slice(0, 50)
+                  .map(item => {
+                    const selected = (newCoupon.targetIds || []).includes(item.id);
+                    return (
+                      <TouchableOpacity
+                        key={item.id}
+                        onPress={() => {
+                          setNewCoupon(prev => ({
+                            ...prev,
+                            targetIds: selected
+                              ? (prev.targetIds || []).filter(id => id !== item.id)
+                              : ([...(prev.targetIds || []), item.id])
+                          }));
+                        }}
+                        style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6 }}
+                      >
+                        <View style={{
+                          width: 18, height: 18, borderRadius: 9, borderWidth: 1,
+                          borderColor: selected ? Theme.colors.primary : '#ccc',
+                          backgroundColor: selected ? Theme.colors.primary : 'white',
+                          marginRight: 8,
+                        }} />
+                        <Text style={{ flex: 1 }}>{item.name || item.title || 'Untitled'}</Text>
+                        <Text style={{ color: Theme.colors.textLight, fontSize: 12 }}>{item.category}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+              </ScrollView>
+            </View>
+          )}
+
           <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 16 }}>
             <TouchableOpacity onPress={() => setShowCreateCouponModal(false)} style={{ marginRight: 12 }}>
-              <Text style={{ color: Theme.colors.textDark }}>Cancel</Text>
+              <Text style={{ color: Theme.colors.text }}>Cancel</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={handleCreateCoupon}>
-              <Text style={{ color: Theme.colors.primary, fontWeight: 'bold' }}>Create</Text>
+            <TouchableOpacity onPress={handleCreateCoupon} style={{ backgroundColor: Theme.colors.primary, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 }}>
+              <Text style={{ color: 'white', fontWeight: '600' }}>Create</Text>
             </TouchableOpacity>
           </View>
         </View>
       </View>
     </Modal>
   );
-
   // Bulk Notification Modal
   const renderBulkNotificationModal = () => (
     <Modal
