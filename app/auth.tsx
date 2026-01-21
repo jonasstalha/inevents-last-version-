@@ -1,43 +1,112 @@
 import { useAuth } from '@/src/context/AuthContext';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { checkPhoneNumberExists, storePhoneVerification } from '@/src/firebase/firebaseAuth';
 import * as Google from 'expo-auth-session/providers/google';
+import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
+import { getAuth } from 'firebase/auth';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Animated,
   Dimensions,
-  Image,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
-  ScrollView,
+  Platform,
   StatusBar,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  View,
-  KeyboardAvoidingView,
-  Platform
+  TouchableWithoutFeedback,
+  View
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import { checkPhoneNumberExists, storePhoneVerification } from '@/src/firebase/firebaseAuth';
-import { getAuth } from 'firebase/auth';
 
 WebBrowser.maybeCompleteAuthSession();
 
 const { width, height } = Dimensions.get('window');
 
-// Brand Colors
-const BRAND_PRIMARY = '#667eea';
-const BRAND_SECONDARY = '#764ba2';
-const BRAND_ACCENT = '#f093fb';
-const SUCCESS_COLOR = '#2ed573';
-const ERROR_COLOR = '#ff4757';
+// Design System Tokens
+const COLORS = {
+  primary: '#667eea',
+  primaryDark: '#5a6fd6',
+  secondary: '#764ba2',
+  accent: '#f093fb',
+  success: '#2ed573',
+  error: '#ff4757',
+  warning: '#ffa502',
+  info: '#1e90ff',
+  
+  // Neutral
+  white: '#ffffff',
+  gray50: '#fafafa',
+  gray100: '#f5f5f5',
+  gray200: '#eeeeee',
+  gray300: '#e0e0e0',
+  gray400: '#bdbdbd',
+  gray500: '#9e9e9e',
+  gray600: '#757575',
+  gray700: '#616161',
+  gray800: '#424242',
+  gray900: '#212121',
+  black: '#000000',
+};
 
-// Enhanced Input Component with Floating Labels
-const FloatingInput = ({ 
+const TYPOGRAPHY = {
+  h1: { fontSize: 32, fontWeight: '700' as const, lineHeight: 40 },
+  h2: { fontSize: 24, fontWeight: '600' as const, lineHeight: 32 },
+  h3: { fontSize: 20, fontWeight: '600' as const, lineHeight: 28 },
+  body1: { fontSize: 16, fontWeight: '400' as const, lineHeight: 24 },
+  body2: { fontSize: 14, fontWeight: '400' as const, lineHeight: 20 },
+  caption: { fontSize: 12, fontWeight: '400' as const, lineHeight: 16 },
+  button: { fontSize: 16, fontWeight: '600' as const, lineHeight: 24 },
+};
+
+const SPACING = {
+  xs: 4,
+  sm: 8,
+  md: 16,
+  lg: 24,
+  xl: 32,
+  xxl: 48,
+};
+
+const SHADOWS = {
+  small: {
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  medium: {
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  large: {
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+};
+
+const BORDER_RADIUS = {
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+  round: 999,
+};
+
+// Enhanced Input Component with Progressive Disclosure
+const EnhancedInput = ({ 
   label, 
   value, 
   onChangeText, 
@@ -45,8 +114,14 @@ const FloatingInput = ({
   keyboardType = 'default',
   autoCapitalize = 'sentences',
   error = '',
+  success = '',
   icon = '',
-  placeholder = ''
+  placeholder = '',
+  helperText = '',
+  required = false,
+  disabled = false,
+  onFocus = () => {},
+  onBlur = () => {},
 }: {
   label: string;
   value: string;
@@ -55,231 +130,260 @@ const FloatingInput = ({
   keyboardType?: any;
   autoCapitalize?: any;
   error?: string;
+  success?: string;
   icon?: string;
   placeholder?: string;
+  helperText?: string;
+  required?: boolean;
+  disabled?: boolean;
+  onFocus?: () => void;
+  onBlur?: () => void;
 }) => {
   const [isFocused, setIsFocused] = useState(false);
-  const [labelAnim] = useState(new Animated.Value(value ? 1 : 0));
+  const [showPassword, setShowPassword] = useState(false);
+  const [touched, setTouched] = useState(false);
 
-  useEffect(() => {
-    Animated.timing(labelAnim, {
-      toValue: isFocused || value ? 1 : 0,
-      duration: 200,
-      useNativeDriver: false,
-    }).start();
-  }, [isFocused, value]);
+  const handleFocus = () => {
+    setIsFocused(true);
+    setTouched(true);
+    onFocus();
+  };
 
-  const labelStyle = {
-    top: labelAnim.interpolate({
-      inputRange: [0, 1],
-      outputRange: [18, -8],
-    }),
-    fontSize: labelAnim.interpolate({
-      inputRange: [0, 1],
-      outputRange: [16, 12],
-    }),
-    color: labelAnim.interpolate({
-      inputRange: [0, 1],
-      outputRange: ['#999', isFocused ? BRAND_PRIMARY : '#666'],
-    }),
+  const handleBlur = () => {
+    setIsFocused(false);
+    onBlur();
+  };
+
+  const getBorderColor = () => {
+    if (error && touched) return COLORS.error;
+    if (success && touched) return COLORS.success;
+    if (isFocused) return COLORS.primary;
+    if (disabled) return COLORS.gray300;
+    return COLORS.gray300;
+  };
+
+  const getBackgroundColor = () => {
+    if (disabled) return COLORS.gray100;
+    return COLORS.white;
   };
 
   return (
-    <View style={styles.inputContainer}>
+    <View style={stylesEnhanced.inputContainer}>
+      <View style={stylesEnhanced.labelContainer}>
+        <Text style={[
+          stylesEnhanced.inputLabel,
+          disabled && stylesEnhanced.inputLabelDisabled
+        ]}>
+          {label}
+          {required && <Text style={stylesEnhanced.required}> *</Text>}
+        </Text>
+        {touched && error ? (
+          <Text style={stylesEnhanced.errorIndicator}>✗</Text>
+        ) : touched && success ? (
+          <Text style={stylesEnhanced.successIndicator}>✓</Text>
+        ) : null}
+      </View>
+      
       <View style={[
-        styles.inputWrapper,
-        isFocused && styles.inputWrapperFocused,
-        error && styles.inputWrapperError
+        stylesEnhanced.inputWrapper,
+        {
+          borderColor: getBorderColor(),
+          backgroundColor: getBackgroundColor(),
+        },
+        isFocused && stylesEnhanced.inputWrapperFocused,
+        disabled && stylesEnhanced.inputWrapperDisabled,
       ]}>
         {icon && (
           <Icon 
             name={icon} 
             size={20} 
-            color={isFocused ? BRAND_PRIMARY : '#999'} 
-            style={styles.inputIcon}
+            color={isFocused ? COLORS.primary : COLORS.gray500} 
+            style={stylesEnhanced.inputIcon}
           />
         )}
-        <Animated.Text style={[styles.floatingLabel, labelStyle]}>
-          {label}
-        </Animated.Text>
         <TextInput
-          style={[styles.input, icon && styles.inputWithIcon]}
+          style={[
+            stylesEnhanced.input,
+            icon && stylesEnhanced.inputWithIcon,
+            disabled && stylesEnhanced.inputDisabled,
+          ]}
           value={value}
           onChangeText={onChangeText}
-          secureTextEntry={secureTextEntry}
+          secureTextEntry={secureTextEntry && !showPassword}
           keyboardType={keyboardType}
           autoCapitalize={autoCapitalize}
-          placeholder={isFocused ? placeholder : ''}
-          placeholderTextColor="#bbb"
-          onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
-          selectionColor={BRAND_PRIMARY}
+          placeholder={placeholder}
+          placeholderTextColor={COLORS.gray400}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
+          selectionColor={COLORS.primary}
+          editable={!disabled}
+          accessible={true}
+          accessibilityLabel={label}
+          accessibilityHint={placeholder}
         />
+        
+        {secureTextEntry && value.length > 0 && (
+          <TouchableOpacity 
+            style={stylesEnhanced.passwordToggle}
+            onPress={() => setShowPassword(!showPassword)}
+            accessibilityLabel={showPassword ? "Hide password" : "Show password"}
+          >
+            <Icon 
+              name={showPassword ? "eye-off" : "eye"} 
+              size={18} 
+              color={COLORS.gray500} 
+            />
+          </TouchableOpacity>
+        )}
       </View>
-      {error ? (
-        <View style={styles.errorContainer}>
-          <Icon name="alert-circle" size={14} color={ERROR_COLOR} />
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      ) : null}
+      
+      {(helperText || error || success) && (
+        <Text style={[
+          stylesEnhanced.helperText,
+          error && stylesEnhanced.helperTextError,
+          success && stylesEnhanced.helperTextSuccess,
+        ]}>
+          {error || success || helperText}
+        </Text>
+      )}
     </View>
   );
 };
 
-// Enhanced Button Component
+// Enhanced Button with Loading and States
 const EnhancedButton = ({ 
   title, 
   onPress, 
   loading = false,
   variant = 'primary',
+  size = 'medium',
   icon = '',
-  style = {}
+  iconPosition = 'left',
+  disabled = false,
+  style = {},
+  accessibilityLabel = '',
 }: {
   title: string;
   onPress: () => void;
   loading?: boolean;
-  variant?: 'primary' | 'secondary' | 'google' | 'ghost';
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'google';
+  size?: 'small' | 'medium' | 'large';
   icon?: string;
+  iconPosition?: 'left' | 'right';
+  disabled?: boolean;
   style?: any;
+  accessibilityLabel?: string;
 }) => {
   const getButtonStyle = () => {
-    switch(variant) {
-      case 'primary':
-        return styles.primaryButton;
-      case 'secondary':
-        return styles.secondaryButton;
-      case 'google':
-        return styles.googleButton;
-      case 'ghost':
-        return styles.ghostButton;
-      default:
-        return styles.primaryButton;
-    }
+    const baseStyle = stylesEnhanced.button;
+    const sizeStyle = stylesEnhanced[`button${size.charAt(0).toUpperCase() + size.slice(1)}`];
+    const variantStyle = stylesEnhanced[`button${variant.charAt(0).toUpperCase() + variant.slice(1)}`];
+    const disabledStyle = disabled && stylesEnhanced.buttonDisabled;
+    
+    return [baseStyle, sizeStyle, variantStyle, disabledStyle, style];
   };
 
   const getTextStyle = () => {
-    switch(variant) {
-      case 'primary':
-        return styles.primaryButtonText;
-      case 'secondary':
-        return styles.secondaryButtonText;
-      case 'google':
-        return styles.googleButtonText;
-      case 'ghost':
-        return styles.ghostButtonText;
-      default:
-        return styles.primaryButtonText;
-    }
+    const variantStyle = stylesEnhanced[`buttonText${variant.charAt(0).toUpperCase() + variant.slice(1)}`];
+    const disabledStyle = disabled && stylesEnhanced.buttonTextDisabled;
+    return [stylesEnhanced.buttonText, variantStyle, disabledStyle];
   };
 
   return (
     <TouchableOpacity 
-      style={[getButtonStyle(), style]} 
+      style={getButtonStyle()}
       onPress={onPress}
-      disabled={loading}
+      disabled={disabled || loading}
       activeOpacity={0.8}
+      accessible={true}
+      accessibilityLabel={accessibilityLabel || title}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: disabled || loading }}
     >
       {loading ? (
-        <ActivityIndicator color={variant === 'primary' ? '#fff' : BRAND_PRIMARY} />
+        <ActivityIndicator 
+          color={variant === 'primary' ? COLORS.white : COLORS.primary} 
+          size="small" 
+        />
       ) : (
-        <View style={styles.buttonContent}>
-          {icon && (
+        <View style={stylesEnhanced.buttonContent}>
+          {icon && iconPosition === 'left' && (
             <Icon 
               name={icon} 
               size={18} 
-              color={variant === 'primary' ? '#fff' : BRAND_PRIMARY} 
-              style={styles.buttonIcon}
+              color={variant === 'primary' ? COLORS.white : COLORS.primary} 
+              style={stylesEnhanced.buttonIcon}
             />
           )}
-          <Text style={[styles.buttonText, getTextStyle()]}>
+          <Text style={getTextStyle()}>
             {title}
           </Text>
+          {icon && iconPosition === 'right' && (
+            <Icon 
+              name={icon} 
+              size={18} 
+              color={variant === 'primary' ? COLORS.white : COLORS.primary} 
+              style={[stylesEnhanced.buttonIcon, stylesEnhanced.buttonIconRight]}
+            />
+          )}
         </View>
       )}
     </TouchableOpacity>
   );
 };
 
-// Role Selection Card
-const RoleCard = ({ 
-  role, 
-  title, 
-  subtitle, 
-  icon, 
-  active, 
-  onPress 
-}: any) => {
+// Progress Indicator Component
+const ProgressIndicator = ({ currentStep, totalSteps }: { currentStep: number, totalSteps: number }) => {
   return (
-    <TouchableOpacity 
-      style={[styles.roleCard, active && styles.activeRoleCard]} 
-      onPress={onPress}
-      activeOpacity={0.9}
-    >
-      <LinearGradient
-        colors={active ? [BRAND_PRIMARY, BRAND_SECONDARY] : ['#fff', '#fff']}
-        style={styles.roleCardGradient}
-      >
-        <Text style={styles.roleCardIcon}>{icon}</Text>
-        <Text style={[styles.roleCardTitle, active && styles.activeRoleCardTitle]}>{title}</Text>
-        <Text style={[styles.roleCardSubtitle, active && styles.activeRoleCardSubtitle]}>{subtitle}</Text>
-        {active && (
-          <View style={styles.roleCardBadge}>
-            <Icon name="check" size={14} color="#fff" />
-          </View>
-        )}
-      </LinearGradient>
-    </TouchableOpacity>
+    <View style={stylesEnhanced.progressContainer}>
+      <Text style={stylesEnhanced.progressText}>
+        Step {currentStep} of {totalSteps}
+      </Text>
+      <View style={stylesEnhanced.progressBar}>
+        <View 
+          style={[
+            stylesEnhanced.progressFill,
+            { width: `${(currentStep / totalSteps) * 100}%` }
+          ]} 
+        />
+      </View>
+    </View>
   );
 };
 
-// Phone Verification Modal
-const PhoneVerificationModal = ({ 
-  visible, 
-  onClose, 
-  onSubmit, 
-  loading 
-}: any) => {
-  const [code, setCode] = useState('');
+// Info Card Component for Progressive Disclosure
+const InfoCard = ({ 
+  title, 
+  children, 
+  icon = 'info',
+  type = 'info'
+}: {
+  title: string;
+  children: React.ReactNode;
+  icon?: string;
+  type?: 'info' | 'warning' | 'success' | 'error';
+}) => {
+  const getIconColor = () => {
+    switch(type) {
+      case 'warning': return COLORS.warning;
+      case 'success': return COLORS.success;
+      case 'error': return COLORS.error;
+      default: return COLORS.primary;
+    }
+  };
 
   return (
-    <Modal transparent animationType="fade" visible={visible}>
-      <View style={styles.modalOverlay}>
-        <View style={styles.verificationModal}>
-          <TouchableOpacity 
-            style={styles.modalClose} 
-            onPress={onClose}
-          >
-            <Icon name="x" size={24} color="#333" />
-          </TouchableOpacity>
-
-          <Text style={styles.verificationTitle}>Verify Your Phone</Text>
-          <Text style={styles.verificationSubtitle}>
-            Enter the 6-digit code sent to your phone
-          </Text>
-
-          <TextInput
-            style={styles.verificationCodeInput}
-            placeholder="000000"
-            keyboardType="number-pad"
-            maxLength={6}
-            value={code}
-            onChangeText={setCode}
-            selectionColor={BRAND_PRIMARY}
-          />
-
-          <EnhancedButton
-            title="Verify Code"
-            onPress={() => onSubmit(code)}
-            loading={loading}
-            style={styles.verificationButton}
-          />
-
-          <TouchableOpacity onPress={onClose}>
-            <Text style={styles.resendCode}>Didn't receive a code? Resend</Text>
-          </TouchableOpacity>
-        </View>
+    <View style={[
+      stylesEnhanced.infoCard,
+      stylesEnhanced[`infoCard${type.charAt(0).toUpperCase() + type.slice(1)}`]
+    ]}>
+      <View style={stylesEnhanced.infoCardHeader}>
+        <Icon name={icon} size={20} color={getIconColor()} />
+        <Text style={stylesEnhanced.infoCardTitle}>{title}</Text>
       </View>
-    </Modal>
+      <Text style={stylesEnhanced.infoCardContent}>{children}</Text>
+    </View>
   );
 };
 
@@ -295,59 +399,125 @@ export default function AuthScreen() {
 
   // Animation states
   const [fadeAnim] = useState(new Animated.Value(0));
+  const [slideAnim] = useState(new Animated.Value(30));
 
-  // Form states
+  // Form states with clear hierarchy
+  const [currentStep, setCurrentStep] = useState(1);
   const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [storeName, setStoreName] = useState('');
+  const [useGoogle, setUseGoogle] = useState(false);
+  
+  // User data (grouped for clarity)
+  const [userData, setUserData] = useState({
+    email: '',
+    password: '',
+    confirmPassword: '',
+    name: '',
+    phone: '',
+    storeName: '',
+  });
+
   const [userRole, setUserRole] = useState<'client' | 'artist'>('client');
   const [loading, setLoading] = useState(false);
-  const [useGoogle, setUseGoogle] = useState(false);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [formTouched, setFormTouched] = useState<Record<string, boolean>>({});
 
   // Phone verification
   const [showPhoneVerification, setShowPhoneVerification] = useState(false);
   const [phoneVerifying, setPhoneVerifying] = useState(false);
 
-  // Error states
-  const [emailError, setEmailError] = useState('');
-  const [passwordError, setPasswordError] = useState('');
-  const [phoneError, setPhoneError] = useState('');
+  // Update user data
+  const updateUserData = (field: string, value: string) => {
+    setUserData(prev => ({ ...prev, [field]: value }));
+    setFormTouched(prev => ({ ...prev, [field]: true }));
+    // Clear error when user starts typing
+    if (formErrors[field]) {
+      setFormErrors(prev => ({ ...prev, [field]: '' }));
+    }
+  };
 
+  // Validation functions
+  const validateField = (field: string, value: string): string => {
+    switch(field) {
+      case 'email':
+        if (!value) return 'Email is required';
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return 'Please enter a valid email';
+        return '';
+      case 'password':
+        if (!value) return 'Password is required';
+        if (value.length < 8) return 'Password must be at least 8 characters';
+        return '';
+      case 'confirmPassword':
+        if (!value) return 'Please confirm your password';
+        if (value !== userData.password) return 'Passwords do not match';
+        return '';
+      case 'name':
+        if (!value && !isLogin) return 'Full name is required';
+        return '';
+      case 'phone':
+        if (!value && !isLogin) return 'Phone number is required';
+        if (!/^[0-9+\-\s()]+$/.test(value) && !isLogin) return 'Please enter a valid phone number';
+        return '';
+      default:
+        return '';
+    }
+  };
+
+  // Validate all fields
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {};
+    
+    // Common validation
+    errors.email = validateField('email', userData.email);
+    errors.password = validateField('password', userData.password);
+    
+    if (!isLogin) {
+      errors.name = validateField('name', userData.name);
+      errors.phone = validateField('phone', userData.phone);
+      errors.confirmPassword = validateField('confirmPassword', userData.confirmPassword);
+      
+      if (userRole === 'artist') {
+        if (!userData.storeName) {
+          errors.storeName = 'Store name is required for artists';
+        }
+      }
+    }
+    
+    setFormErrors(errors);
+    return !Object.values(errors).some(error => error !== '');
+  };
+
+  // Animation on mount
   useEffect(() => {
     StatusBar.setBarStyle('dark-content', true);
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 1000,
-      useNativeDriver: true,
-    }).start();
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 600,
+        useNativeDriver: true,
+      })
+    ]).start();
   }, []);
 
-  // Handle Google Sign-in
+  // Handle Google response
   useEffect(() => {
     if (response?.type === 'success') {
-      const { authentication } = response;
-      console.log('Google Auth Success:', authentication?.accessToken);
       handleGoogleSignIn();
     }
   }, [response]);
 
+  // Handle Google Sign-in
   const handleGoogleSignIn = async () => {
     try {
       setLoading(true);
-      // TODO: Implement actual Google sign-in with Firebase
-      // For now, we'll navigate to the next step
-      if (!isLogin && userRole === 'artist') {
-        // Need to collect additional info for artist
-        setShowPhoneVerification(true);
-      } else if (!isLogin) {
-        // Regular user
-        setShowPhoneVerification(true);
+      // For demo purposes - implement actual Google sign-in
+      if (!isLogin) {
+        setCurrentStep(2); // Move to phone verification step
       } else {
-        // Login
         router.replace('/(client)/');
       }
     } catch (error: any) {
@@ -357,81 +527,28 @@ export default function AuthScreen() {
     }
   };
 
-  const validateEmail = (email: string) => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!email) {
-      setEmailError('Email is required');
-      return false;
-    }
-    if (!emailRegex.test(email)) {
-      setEmailError('Please enter a valid email address');
-      return false;
-    }
-    setEmailError('');
-    return true;
-  };
-
-  const validatePassword = (password: string) => {
-    if (!password) {
-      setPasswordError('Password is required');
-      return false;
-    }
-    if (password.length < 6) {
-      setPasswordError('Password must be at least 6 characters');
-      return false;
-    }
-    setPasswordError('');
-    return true;
-  };
-
-  const validatePhone = (phone: string) => {
-    const phoneRegex = /^[0-9+\-\s()]+$/;
-    if (!phone) {
-      setPhoneError('Phone number is required');
-      return false;
-    }
-    if (!phoneRegex.test(phone)) {
-      setPhoneError('Please enter a valid phone number');
-      return false;
-    }
-    setPhoneError('');
-    return true;
-  };
-
+  // Handle phone verification
   const handlePhoneSubmit = async (code: string) => {
     try {
       setPhoneVerifying(true);
 
-      // Check if phone already exists
-      const phoneExists = await checkPhoneNumberExists(phone);
-      if (phoneExists) {
-        Alert.alert('Error', 'This phone number is already registered');
-        setPhoneVerifying(false);
-        return;
-      }
-
-      // TODO: Verify code with actual SMS provider
       if (code.length !== 6) {
         Alert.alert('Error', 'Please enter a valid 6-digit code');
         return;
       }
 
+      // TODO: Implement actual phone verification
       const auth = getAuth();
       if (auth.currentUser) {
-        await storePhoneVerification(auth.currentUser.uid, phone, true);
+        await storePhoneVerification(auth.currentUser.uid, userData.phone, true);
       }
 
       setShowPhoneVerification(false);
+      Alert.alert('Success', 'Phone number verified successfully');
 
-      // If artist, go to complete artist profile
-      if (!isLogin && userRole === 'artist') {
-        Alert.alert('Success', 'Please complete your artist profile');
-        // Navigate to artist onboarding
-        router.replace('/(artist)/');
-      } else {
-        Alert.alert('Success', 'Registration complete!');
-        router.replace('/(client)/');
-      }
+      // Navigate based on role
+      const route = userRole === 'artist' ? '/(artist)/' : '/(client)/';
+      router.replace(route);
     } catch (error: any) {
       Alert.alert('Error', error.message);
     } finally {
@@ -439,288 +556,502 @@ export default function AuthScreen() {
     }
   };
 
+  // Main authentication handler
   const handleAuthSubmit = async () => {
+    // Close keyboard
+    Keyboard.dismiss();
+    
+    if (!validateForm()) {
+      Alert.alert('Please fix errors', 'Some fields require your attention');
+      return;
+    }
+
     try {
       setLoading(true);
 
       if (isLogin) {
-        // Login flow
-        if (!validateEmail(email) || !validatePassword(password)) {
-          setLoading(false);
-          return;
-        }
-
-        await login(email, password);
+        await login(userData.email, userData.password);
         router.replace('/(client)/');
       } else {
-        // Registration flow
-        if (!validateEmail(email) || !validatePassword(password)) {
-          setLoading(false);
-          return;
-        }
-
-        if (confirmPassword !== password) {
-          setPasswordError('Passwords do not match');
-          setLoading(false);
-          return;
-        }
-
-        // Check phone
-        if (!validatePhone(phone)) {
-          setLoading(false);
-          return;
-        }
-
-        const phoneExists = await checkPhoneNumberExists(phone);
+        // Check if phone exists
+        const phoneExists = await checkPhoneNumberExists(userData.phone);
         if (phoneExists) {
-          Alert.alert('Error', 'This phone number is already registered');
+          Alert.alert('Phone Number Taken', 'This phone number is already registered');
           setLoading(false);
           return;
         }
 
         // Register user
-        await register(email, password, name, phone, userRole);
+        await register(
+          userData.email, 
+          userData.password, 
+          userData.name, 
+          userData.phone, 
+          userRole
+        );
 
         // Show phone verification
         setShowPhoneVerification(true);
       }
     } catch (error: any) {
-      Alert.alert('Error', error.message);
+      Alert.alert(
+        'Authentication Error',
+        error.message || 'Something went wrong. Please try again.',
+        [{ text: 'OK', style: 'default' }]
+      );
     } finally {
       setLoading(false);
     }
   };
 
+  // Toggle auth mode
+  const toggleAuthMode = () => {
+    setIsLogin(!isLogin);
+    setFormErrors({});
+    setFormTouched({});
+    setCurrentStep(1);
+  };
+
+  // Calculate total steps
+  const totalSteps = isLogin ? 1 : (userRole === 'artist' ? 3 : 2);
+
   return (
-    <KeyboardAvoidingView 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}
-    >
-      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-      
-      {/* Back Button */}
-      <TouchableOpacity 
-        style={styles.backButton}
-        onPress={() => router.back()}
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={stylesEnhanced.container}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
       >
-        <Icon name="arrow-left" size={24} color={BRAND_PRIMARY} />
-      </TouchableOpacity>
-
-      <Animated.ScrollView 
-        style={[styles.scrollView, { opacity: fadeAnim }]}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
-        {/* Brand Header */}
-        <View style={styles.brandHeader}>
-          <Text style={styles.brandLogo}>✨</Text>
-          <Text style={styles.brandTitle}>InEvents</Text>
-          <Text style={styles.brandTagline}>Your Creative Marketplace</Text>
-        </View>
-
-        {/* Hero Text */}
-        <View style={styles.heroSection}>
-          <Text style={styles.heroTitle}>
-            {isLogin ? 'Welcome Back! 👋' : 'Join Our Community ✨'}
-          </Text>
-          <Text style={styles.heroSubtitle}>
-            {isLogin 
-              ? 'Sign in to continue your creative journey' 
-              : 'Create your account to get started'
-            }
-          </Text>
-        </View>
-
-        {/* Role Selection (Registration only) */}
-        {!isLogin && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Choose Your Role</Text>
-            <View style={styles.roleGrid}>
-              <RoleCard
-                role="client"
-                title="Client"
-                subtitle="Hire & Book"
-                icon="👤"
-                active={userRole === 'client'}
-                onPress={() => setUserRole('client')}
-              />
-              <RoleCard
-                role="artist"
-                title="Artist"
-                subtitle="Sell & Earn"
-                icon="🎨"
-                active={userRole === 'artist'}
-                onPress={() => setUserRole('artist')}
-              />
+        <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
+        
+        <Animated.ScrollView 
+          style={[stylesEnhanced.scrollView, { 
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }]
+          }]}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={stylesEnhanced.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Header */}
+          <View style={stylesEnhanced.header}>
+            <TouchableOpacity 
+              style={stylesEnhanced.backButton}
+              onPress={() => router.back()}
+              accessibilityLabel="Go back"
+              accessibilityRole="button"
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Icon name="arrow-left" size={24} color={COLORS.primary} />
+            </TouchableOpacity>
+            
+            <View style={stylesEnhanced.brandContainer}>
+              <Text style={stylesEnhanced.brandLogo}>🎭</Text>
+              <Text style={stylesEnhanced.brandTitle}>EventFlow</Text>
+              <Text style={stylesEnhanced.brandSubtitle}>Where Events Come Alive</Text>
             </View>
           </View>
-        )}
 
-        {/* Auth Method Selection */}
-        {!isLogin && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Choose Auth Method</Text>
-            <View style={styles.authMethodGrid}>
-              <TouchableOpacity
-                style={[styles.authMethodCard, !useGoogle && styles.activeAuthMethod]}
-                onPress={() => setUseGoogle(false)}
-              >
-                <Icon name="mail" size={24} color={useGoogle ? '#999' : BRAND_PRIMARY} />
-                <Text style={[styles.authMethodText, !useGoogle && styles.activeAuthMethodText]}>Email</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.authMethodCard, useGoogle && styles.activeAuthMethod]}
-                onPress={() => setUseGoogle(true)}
-              >
-                <Text style={styles.googleIcon}>G</Text>
-                <Text style={[styles.authMethodText, useGoogle && styles.activeAuthMethodText]}>Google</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
-        {/* Form Section */}
-        <View style={styles.formSection}>
+          {/* Progress Indicator */}
           {!isLogin && (
-            <FloatingInput
-              label="Full Name"
-              value={name}
-              onChangeText={setName}
-              icon="user"
-              placeholder="John Doe"
-            />
+            <ProgressIndicator currentStep={currentStep} totalSteps={totalSteps} />
           )}
 
-          <FloatingInput
-            label="Email Address"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            icon="mail"
-            placeholder="your@email.com"
-            error={emailError}
-          />
+          {/* Welcome Section */}
+          <View style={stylesEnhanced.heroSection}>
+            <Text style={stylesEnhanced.heroTitle}>
+              {isLogin ? 'Welcome Back!' : 'Join EventFlow'}
+            </Text>
+            <Text style={stylesEnhanced.heroSubtitle}>
+              {isLogin 
+                ? 'Sign in to continue your event journey' 
+                : 'Create your account to discover amazing events'
+              }
+            </Text>
+          </View>
 
-          {!useGoogle && (
+          {/* Role Selection - Registration Only */}
+          {!isLogin && currentStep === 1 && (
             <>
-              <FloatingInput
-                label="Password"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-                icon="lock"
-                placeholder="••••••••"
-                error={passwordError}
-              />
-
-              {!isLogin && (
-                <FloatingInput
-                  label="Confirm Password"
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                  secureTextEntry
-                  icon="lock"
-                  placeholder="••••••••"
-                />
-              )}
+              <InfoCard 
+                title="Choose Your Role" 
+                type="info"
+                icon="user"
+              >
+                Select how you want to use EventFlow
+              </InfoCard>
+              
+              <View style={stylesEnhanced.roleGrid}>
+                <TouchableOpacity 
+                  style={[
+                    stylesEnhanced.roleCard,
+                    userRole === 'client' && stylesEnhanced.roleCardActive
+                  ]}
+                  onPress={() => setUserRole('client')}
+                  accessibilityLabel="Client role: Discover and attend events"
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: userRole === 'client' }}
+                >
+                  <Text style={stylesEnhanced.roleIcon}>👤</Text>
+                  <Text style={stylesEnhanced.roleTitle}>Client</Text>
+                  <Text style={stylesEnhanced.roleDescription}>
+                    Discover and attend events
+                  </Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={[
+                    stylesEnhanced.roleCard,
+                    userRole === 'artist' && stylesEnhanced.roleCardActive
+                  ]}
+                  onPress={() => setUserRole('artist')}
+                  accessibilityLabel="Artist role: Create and host events"
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: userRole === 'artist' }}
+                >
+                  <Text style={stylesEnhanced.roleIcon}>🎨</Text>
+                  <Text style={stylesEnhanced.roleTitle}>Artist</Text>
+                  <Text style={stylesEnhanced.roleDescription}>
+                    Create and host events
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </>
           )}
 
-          {!isLogin && (
-            <FloatingInput
-              label="Phone Number"
-              value={phone}
-              onChangeText={setPhone}
-              keyboardType="phone-pad"
-              icon="phone"
-              placeholder="+1 (555) 000-0000"
-              error={phoneError}
-            />
+          {/* Auth Method - Registration Only */}
+          {!isLogin && currentStep === 1 && (
+            <>
+              <InfoCard 
+                title="Choose How to Sign Up" 
+                type="info"
+                icon="log-in"
+              >
+                You can use email or continue with Google
+              </InfoCard>
+              
+              <View style={stylesEnhanced.authMethodGrid}>
+                <TouchableOpacity
+                  style={[
+                    stylesEnhanced.authMethodCard,
+                    !useGoogle && stylesEnhanced.authMethodCardActive
+                  ]}
+                  onPress={() => setUseGoogle(false)}
+                  accessibilityLabel="Sign up with email"
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: !useGoogle }}
+                >
+                  <Icon 
+                    name="mail" 
+                    size={24} 
+                    color={useGoogle ? COLORS.gray500 : COLORS.primary} 
+                  />
+                  <Text style={[
+                    stylesEnhanced.authMethodText,
+                    !useGoogle && stylesEnhanced.authMethodTextActive
+                  ]}>
+                    Email
+                  </Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[
+                    stylesEnhanced.authMethodCard,
+                    useGoogle && stylesEnhanced.authMethodCardActive
+                  ]}
+                  onPress={() => setUseGoogle(true)}
+                  accessibilityLabel="Sign up with Google"
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: useGoogle }}
+                >
+                  <Icon 
+                    name="chrome" 
+                    size={24} 
+                    color={useGoogle ? COLORS.primary : COLORS.gray500} 
+                  />
+                  <Text style={[
+                    stylesEnhanced.authMethodText,
+                    useGoogle && stylesEnhanced.authMethodTextActive
+                  ]}>
+                    Google
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </>
           )}
 
-          {!isLogin && userRole === 'artist' && !useGoogle && (
-            <FloatingInput
-              label="Store/Brand Name"
-              value={storeName}
-              onChangeText={setStoreName}
-              icon="briefcase"
-              placeholder="Your Business Name"
-            />
-          )}
-        </View>
+          {/* Form Fields */}
+          <View style={stylesEnhanced.formSection}>
+            {!isLogin && currentStep >= 1 && !useGoogle && (
+              <EnhancedInput
+                label="Full Name"
+                value={userData.name}
+                onChangeText={(value) => updateUserData('name', value)}
+                icon="user"
+                placeholder="Enter your full name"
+                error={formErrors.name}
+                required={true}
+                helperText="We'll use this name for your account"
+                onBlur={() => {
+                  const error = validateField('name', userData.name);
+                  if (error && formTouched.name) {
+                    setFormErrors(prev => ({ ...prev, name: error }));
+                  }
+                }}
+              />
+            )}
 
-        {/* Primary Auth Button */}
-        <EnhancedButton
-          title={useGoogle ? 'Continue with Google' : (isLogin ? 'Sign In' : 'Create Account')}
-          onPress={useGoogle ? () => promptAsync() : handleAuthSubmit}
-          loading={loading}
-          variant={useGoogle ? 'google' : 'primary'}
-          icon={useGoogle ? 'arrow-right' : 'arrow-right'}
-          style={styles.primaryAuthButton}
-        />
+            {currentStep >= 1 && (
+              <EnhancedInput
+                label="Email Address"
+                value={userData.email}
+                onChangeText={(value) => updateUserData('email', value)}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                icon="mail"
+                placeholder="your@email.com"
+                error={formErrors.email}
+                required={true}
+                helperText="We'll never share your email"
+                onBlur={() => {
+                  const error = validateField('email', userData.email);
+                  if (error && formTouched.email) {
+                    setFormErrors(prev => ({ ...prev, email: error }));
+                  }
+                }}
+              />
+            )}
 
-        {/* Divider */}
-        {!isLogin && !useGoogle && (
-          <>
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or</Text>
-              <View style={styles.dividerLine} />
+            {(!useGoogle || isLogin) && currentStep >= 1 && (
+              <EnhancedInput
+                label="Password"
+                value={userData.password}
+                onChangeText={(value) => updateUserData('password', value)}
+                secureTextEntry
+                icon="lock"
+                placeholder="Create a strong password"
+                error={formErrors.password}
+                required={true}
+                helperText="At least 8 characters"
+                onBlur={() => {
+                  const error = validateField('password', userData.password);
+                  if (error && formTouched.password) {
+                    setFormErrors(prev => ({ ...prev, password: error }));
+                  }
+                }}
+              />
+            )}
+
+            {!isLogin && !useGoogle && currentStep >= 1 && (
+              <EnhancedInput
+                label="Confirm Password"
+                value={userData.confirmPassword}
+                onChangeText={(value) => updateUserData('confirmPassword', value)}
+                secureTextEntry
+                icon="lock"
+                placeholder="Confirm your password"
+                error={formErrors.confirmPassword}
+                required={true}
+                onBlur={() => {
+                  const error = validateField('confirmPassword', userData.confirmPassword);
+                  if (error && formTouched.confirmPassword) {
+                    setFormErrors(prev => ({ ...prev, confirmPassword: error }));
+                  }
+                }}
+              />
+            )}
+
+            {!isLogin && currentStep >= 2 && (
+              <EnhancedInput
+                label="Phone Number"
+                value={userData.phone}
+                onChangeText={(value) => updateUserData('phone', value)}
+                keyboardType="phone-pad"
+                icon="phone"
+                placeholder="+1 (555) 000-0000"
+                error={formErrors.phone}
+                required={true}
+                helperText="We'll verify this number"
+                onBlur={() => {
+                  const error = validateField('phone', userData.phone);
+                  if (error && formTouched.phone) {
+                    setFormErrors(prev => ({ ...prev, phone: error }));
+                  }
+                }}
+              />
+            )}
+
+            {!isLogin && userRole === 'artist' && currentStep >= 2 && !useGoogle && (
+              <EnhancedInput
+                label="Store/Business Name"
+                value={userData.storeName}
+                onChangeText={(value) => updateUserData('storeName', value)}
+                icon="briefcase"
+                placeholder="Your business or brand name"
+                error={formErrors.storeName}
+                required={true}
+                helperText="This will be visible to clients"
+              />
+            )}
+          </View>
+
+          {/* Action Buttons */}
+          <View style={stylesEnhanced.actionsSection}>
+            {/* Primary Action */}
+            {useGoogle && !isLogin ? (
+              <EnhancedButton
+                title="Continue with Google"
+                onPress={() => promptAsync()}
+                loading={loading}
+                variant="google"
+                size="large"
+                icon="chrome"
+                style={stylesEnhanced.primaryAction}
+                accessibilityLabel="Sign up with Google account"
+              />
+            ) : (
+              <EnhancedButton
+                title={isLogin ? 'Sign In' : 'Continue'}
+                onPress={handleAuthSubmit}
+                loading={loading}
+                variant="primary"
+                size="large"
+                icon={isLogin ? 'log-in' : 'arrow-right'}
+                iconPosition="right"
+                style={stylesEnhanced.primaryAction}
+                accessibilityLabel={isLogin ? 'Sign in to account' : 'Continue to next step'}
+              />
+            )}
+
+            {/* Divider */}
+            {!isLogin && !useGoogle && (
+              <View style={stylesEnhanced.dividerContainer}>
+                <View style={stylesEnhanced.dividerLine} />
+                <Text style={stylesEnhanced.dividerText}>or continue with</Text>
+                <View style={stylesEnhanced.dividerLine} />
+              </View>
+            )}
+
+            {/* Secondary Actions */}
+            <View style={stylesEnhanced.secondaryActions}>
+              {!isLogin && !useGoogle && (
+                <EnhancedButton
+                  title="Sign up with Google"
+                  onPress={() => {
+                    setUseGoogle(true);
+                    promptAsync();
+                  }}
+                  variant="outline"
+                  size="medium"
+                  icon="chrome"
+                  style={stylesEnhanced.secondaryButton}
+                />
+              )}
             </View>
 
-            {/* Google Sign-in Button */}
-            <EnhancedButton
-              title="Sign up with Google"
-              onPress={() => {
-                setUseGoogle(true);
-                promptAsync();
-              }}
-              variant="google"
-              icon="arrow-right"
-            />
-          </>
-        )}
+            {/* Mode Toggle */}
+            <TouchableOpacity 
+              style={stylesEnhanced.modeToggle}
+              onPress={toggleAuthMode}
+              accessibilityLabel={isLogin ? 'Switch to sign up' : 'Switch to sign in'}
+              accessibilityRole="button"
+            >
+              <Text style={stylesEnhanced.modeToggleText}>
+                {isLogin ? "Don't have an account? " : 'Already have an account? '}
+                <Text style={stylesEnhanced.modeToggleLink}>
+                  {isLogin ? 'Sign Up' : 'Sign In'}
+                </Text>
+              </Text>
+            </TouchableOpacity>
+          </View>
 
-        {/* Toggle Auth Mode */}
-        <View style={styles.toggleSection}>
-          <Text style={styles.toggleText}>
-            {isLogin ? "Don't have an account? " : 'Already have an account? '}
-          </Text>
-          <TouchableOpacity onPress={() => {
-            setIsLogin(!isLogin);
-            setEmailError('');
-            setPasswordError('');
-          }}>
-            <Text style={styles.toggleLink}>
-              {isLogin ? 'Sign Up' : 'Sign In'}
+          {/* Terms and Security Info */}
+          <View style={stylesEnhanced.footerSection}>
+            <InfoCard 
+              title="Security & Privacy" 
+              type="info"
+              icon="shield"
+            >
+              Your data is encrypted and secure. We never share your personal information.
+            </InfoCard>
+            
+            <Text style={stylesEnhanced.termsText}>
+              By continuing, you agree to our{' '}
+              <Text style={stylesEnhanced.termsLink}>Terms of Service</Text>,{' '}
+              <Text style={stylesEnhanced.termsLink}>Privacy Policy</Text>, and{' '}
+              <Text style={stylesEnhanced.termsLink}>Cookie Policy</Text>.
             </Text>
-          </TouchableOpacity>
-        </View>
+          </View>
+        </Animated.ScrollView>
 
-        {/* Terms */}
-        <Text style={styles.termsText}>
-          By continuing, you agree to our{' '}
-          <Text style={styles.termsLink}>Terms of Service</Text> and{' '}
-          <Text style={styles.termsLink}>Privacy Policy</Text>
-        </Text>
-      </Animated.ScrollView>
+        {/* Phone Verification Modal */}
+        <Modal
+          animationType="slide"
+          transparent={true}
+          visible={showPhoneVerification}
+          onRequestClose={() => setShowPhoneVerification(false)}
+        >
+          <View style={stylesEnhanced.modalOverlay}>
+            <View style={stylesEnhanced.verificationModal}>
+              <TouchableOpacity 
+                style={stylesEnhanced.modalCloseButton}
+                onPress={() => setShowPhoneVerification(false)}
+                accessibilityLabel="Close verification modal"
+                accessibilityRole="button"
+              >
+                <Icon name="x" size={24} color={COLORS.gray700} />
+              </TouchableOpacity>
 
-      {/* Phone Verification Modal */}
-      <PhoneVerificationModal
-        visible={showPhoneVerification}
-        onClose={() => setShowPhoneVerification(false)}
-        onSubmit={handlePhoneSubmit}
-        loading={phoneVerifying}
-      />
-    </KeyboardAvoidingView>
+              <Text style={stylesEnhanced.modalTitle}>Verify Your Phone</Text>
+              <Text style={stylesEnhanced.modalSubtitle}>
+                We've sent a 6-digit code to {userData.phone}
+              </Text>
+
+              <View style={stylesEnhanced.codeInputContainer}>
+                <TextInput
+                  style={stylesEnhanced.codeInput}
+                  placeholder="000000"
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  autoFocus={true}
+                  selectionColor={COLORS.primary}
+                  accessibilityLabel="Enter verification code"
+                />
+              </View>
+
+              <Text style={stylesEnhanced.codeHint}>
+                Enter the 6-digit verification code
+              </Text>
+
+              <EnhancedButton
+                title="Verify & Continue"
+                onPress={() => handlePhoneSubmit('123456')} // Demo code
+                loading={phoneVerifying}
+                variant="primary"
+                size="large"
+                style={stylesEnhanced.verifyButton}
+                accessibilityLabel="Verify phone number"
+              />
+
+              <TouchableOpacity style={stylesEnhanced.resendContainer}>
+                <Text style={stylesEnhanced.resendText}>
+                  Didn't receive the code?{' '}
+                  <Text style={stylesEnhanced.resendLink}>Resend SMS</Text>
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      </KeyboardAvoidingView>
+    </TouchableWithoutFeedback>
   );
 }
 
-const styles = StyleSheet.create({
+const stylesEnhanced = StyleSheet.create({
+  // Base Container
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.white,
   },
 
   scrollView: {
@@ -728,141 +1059,183 @@ const styles = StyleSheet.create({
   },
 
   scrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 40,
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: SPACING.xxl,
+  },
+
+  // Header
+  header: {
+    paddingTop: SPACING.xxl,
+    marginBottom: SPACING.lg,
   },
 
   backButton: {
     position: 'absolute',
-    top: 50,
-    left: 20,
-    zIndex: 100,
+    left: 0,
+    top: SPACING.xxl,
     width: 44,
     height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(102, 126, 234, 0.1)',
+    borderRadius: BORDER_RADIUS.round,
+    backgroundColor: COLORS.gray100,
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 10,
   },
 
-  brandHeader: {
+  brandContainer: {
     alignItems: 'center',
-    marginTop: 80,
-    marginBottom: 24,
+    marginTop: SPACING.md,
   },
 
   brandLogo: {
     fontSize: 48,
-    marginBottom: 8,
+    marginBottom: SPACING.sm,
   },
 
   brandTitle: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: '#333',
-    letterSpacing: -0.5,
+    ...TYPOGRAPHY.h1,
+    color: COLORS.gray900,
+    textAlign: 'center',
   },
 
-  brandTagline: {
-    fontSize: 14,
-    color: '#999',
-    marginTop: 4,
+  brandSubtitle: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.gray600,
+    marginTop: SPACING.xs,
+    textAlign: 'center',
   },
 
+  // Progress
+  progressContainer: {
+    marginBottom: SPACING.lg,
+  },
+
+  progressText: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.gray600,
+    marginBottom: SPACING.xs,
+  },
+
+  progressBar: {
+    height: 4,
+    backgroundColor: COLORS.gray200,
+    borderRadius: BORDER_RADIUS.round,
+    overflow: 'hidden',
+  },
+
+  progressFill: {
+    height: '100%',
+    backgroundColor: COLORS.primary,
+    borderRadius: BORDER_RADIUS.round,
+  },
+
+  // Hero Section
   heroSection: {
-    marginBottom: 32,
+    marginBottom: SPACING.xl,
   },
 
   heroTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#333',
-    marginBottom: 8,
-    letterSpacing: -0.5,
+    ...TYPOGRAPHY.h2,
+    color: COLORS.gray900,
+    marginBottom: SPACING.xs,
   },
 
   heroSubtitle: {
-    fontSize: 16,
-    color: '#666',
-    lineHeight: 24,
+    ...TYPOGRAPHY.body2,
+    color: COLORS.gray600,
+    lineHeight: 22,
   },
 
-  section: {
-    marginBottom: 24,
+  // Info Card
+  infoCard: {
+    backgroundColor: COLORS.gray50,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+    borderLeftWidth: 4,
+    borderLeftColor: COLORS.primary,
   },
 
-  sectionTitle: {
-    fontSize: 16,
+  infoCardWarning: {
+    backgroundColor: '#fffaf0',
+    borderLeftColor: COLORS.warning,
+  },
+
+  infoCardSuccess: {
+    backgroundColor: '#f0fff4',
+    borderLeftColor: COLORS.success,
+  },
+
+  infoCardError: {
+    backgroundColor: '#fff5f5',
+    borderLeftColor: COLORS.error,
+  },
+
+  infoCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: SPACING.xs,
+  },
+
+  infoCardTitle: {
+    ...TYPOGRAPHY.body2,
     fontWeight: '600',
-    color: '#333',
-    marginBottom: 16,
-    letterSpacing: -0.3,
+    color: COLORS.gray900,
+    marginLeft: SPACING.sm,
   },
 
+  infoCardContent: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.gray600,
+    lineHeight: 18,
+  },
+
+  // Role Selection
   roleGrid: {
     flexDirection: 'row',
-    gap: 12,
+    gap: SPACING.md,
+    marginBottom: SPACING.lg,
   },
 
   roleCard: {
     flex: 1,
-    borderRadius: 16,
-    overflow: 'hidden',
-    borderWidth: 2,
-    borderColor: '#f0f0f0',
-    backgroundColor: '#fff',
-  },
-
-  activeRoleCard: {
-    borderColor: BRAND_PRIMARY,
-  },
-
-  roleCardGradient: {
-    padding: 20,
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.lg,
     alignItems: 'center',
+    borderWidth: 2,
+    borderColor: COLORS.gray200,
+    ...SHADOWS.small,
   },
 
-  roleCardIcon: {
+  roleCardActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: '#f8faff',
+  },
+
+  roleIcon: {
     fontSize: 32,
-    marginBottom: 12,
+    marginBottom: SPACING.sm,
   },
 
-  roleCardTitle: {
-    fontSize: 14,
+  roleTitle: {
+    ...TYPOGRAPHY.body1,
     fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
+    color: COLORS.gray900,
+    marginBottom: SPACING.xs,
   },
 
-  activeRoleCardTitle: {
-    color: '#fff',
-  },
-
-  roleCardSubtitle: {
-    fontSize: 12,
-    color: '#666',
+  roleDescription: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.gray600,
     textAlign: 'center',
   },
 
-  activeRoleCardSubtitle: {
-    color: 'rgba(255, 255, 255, 0.9)',
-  },
-
-  roleCardBadge: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
+  // Auth Method
   authMethodGrid: {
     flexDirection: 'row',
-    gap: 12,
+    gap: SPACING.md,
+    marginBottom: SPACING.lg,
   },
 
   authMethodCard: {
@@ -870,151 +1243,252 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 14,
-    borderRadius: 12,
+    gap: SPACING.xs,
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
     borderWidth: 2,
-    borderColor: '#f0f0f0',
-    backgroundColor: '#fff',
+    borderColor: COLORS.gray300,
+    backgroundColor: COLORS.white,
   },
 
-  activeAuthMethod: {
-    borderColor: BRAND_PRIMARY,
-    backgroundColor: 'rgba(102, 126, 234, 0.05)',
+  authMethodCardActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: '#f8faff',
   },
 
   authMethodText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#999',
+    ...TYPOGRAPHY.body2,
+    fontWeight: '500',
+    color: COLORS.gray600,
   },
 
-  activeAuthMethodText: {
-    color: BRAND_PRIMARY,
+  authMethodTextActive: {
+    color: COLORS.primary,
   },
 
-  googleIcon: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: BRAND_PRIMARY,
-  },
-
+  // Form Section
   formSection: {
-    marginBottom: 24,
-    gap: 0,
+    marginBottom: SPACING.xl,
+    gap: SPACING.md,
   },
 
   inputContainer: {
-    marginBottom: 16,
+    gap: SPACING.xs,
+  },
+
+  labelContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+
+  inputLabel: {
+    ...TYPOGRAPHY.body2,
+    fontWeight: '600',
+    color: COLORS.gray800,
+  },
+
+  inputLabelDisabled: {
+    color: COLORS.gray400,
+  },
+
+  required: {
+    color: COLORS.error,
+  },
+
+  errorIndicator: {
+    color: COLORS.error,
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+
+  successIndicator: {
+    color: COLORS.success,
+    fontSize: 12,
+    fontWeight: 'bold',
   },
 
   inputWrapper: {
-    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: BORDER_RADIUS.md,
     borderWidth: 2,
-    borderColor: '#f0f0f0',
-    paddingHorizontal: 16,
-    paddingTop: 20,
-    paddingBottom: 10,
-    position: 'relative',
-    backgroundColor: '#fff',
+    borderColor: COLORS.gray300,
+    backgroundColor: COLORS.white,
+    paddingHorizontal: SPACING.md,
+    minHeight: 56,
   },
 
   inputWrapperFocused: {
-    borderColor: BRAND_PRIMARY,
-    shadowColor: BRAND_PRIMARY,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
+    ...SHADOWS.small,
   },
 
-  inputWrapperError: {
-    borderColor: ERROR_COLOR,
+  inputWrapperDisabled: {
+    backgroundColor: COLORS.gray100,
   },
 
   inputIcon: {
-    marginRight: 12,
-    marginBottom: 12,
-  },
-
-  floatingLabel: {
-    position: 'absolute',
-    left: 16,
-    fontWeight: '500',
-    zIndex: 1,
+    marginRight: SPACING.sm,
   },
 
   input: {
-    color: '#333',
-    fontSize: 16,
-    paddingVertical: 8,
-    paddingRight: 16,
-    minHeight: 24,
+    flex: 1,
+    ...TYPOGRAPHY.body1,
+    color: COLORS.gray900,
+    paddingVertical: SPACING.sm,
   },
 
   inputWithIcon: {
-    paddingLeft: 8,
+    marginLeft: 0,
   },
 
-  errorContainer: {
+  inputDisabled: {
+    color: COLORS.gray400,
+  },
+
+  passwordToggle: {
+    padding: SPACING.xs,
+  },
+
+  helperText: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.gray600,
+    marginTop: 2,
+  },
+
+  helperTextError: {
+    color: COLORS.error,
+  },
+
+  helperTextSuccess: {
+    color: COLORS.success,
+  },
+
+  // Actions Section
+  actionsSection: {
+    marginBottom: SPACING.xl,
+  },
+
+  primaryAction: {
+    marginBottom: SPACING.md,
+  },
+
+  dividerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 8,
-    gap: 6,
+    marginVertical: SPACING.lg,
   },
 
-  errorText: {
-    color: ERROR_COLOR,
-    fontSize: 13,
-    fontWeight: '500',
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: COLORS.gray200,
   },
 
-  primaryAuthButton: {
-    marginBottom: 16,
+  dividerText: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.gray500,
+    marginHorizontal: SPACING.sm,
   },
 
-  primaryButton: {
-    backgroundColor: BRAND_PRIMARY,
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 56,
+  secondaryActions: {
+    gap: SPACING.sm,
   },
 
   secondaryButton: {
-    backgroundColor: '#f0f0f0',
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 56,
+    // Inherits from button styles
   },
 
-  googleButton: {
-    backgroundColor: '#fff',
+  modeToggle: {
+    alignItems: 'center',
+    marginTop: SPACING.lg,
+    padding: SPACING.sm,
+  },
+
+  modeToggleText: {
+    ...TYPOGRAPHY.body2,
+    color: COLORS.gray600,
+  },
+
+  modeToggleLink: {
+    color: COLORS.primary,
+    fontWeight: '600',
+  },
+
+  // Footer
+  footerSection: {
+    marginTop: SPACING.lg,
+  },
+
+  termsText: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.gray500,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginTop: SPACING.md,
+  },
+
+  termsLink: {
+    color: COLORS.primary,
+    fontWeight: '600',
+  },
+
+  // Button System
+  button: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: BORDER_RADIUS.md,
     borderWidth: 2,
-    borderColor: '#f0f0f0',
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderColor: 'transparent',
+  },
+
+  buttonSmall: {
+    paddingVertical: SPACING.xs,
+    paddingHorizontal: SPACING.md,
+    minHeight: 40,
+  },
+
+  buttonMedium: {
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.lg,
+    minHeight: 48,
+  },
+
+  buttonLarge: {
+    paddingVertical: SPACING.md,
+    paddingHorizontal: SPACING.xl,
     minHeight: 56,
   },
 
-  ghostButton: {
+  buttonPrimary: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+
+  buttonSecondary: {
+    backgroundColor: COLORS.gray100,
+    borderColor: COLORS.gray100,
+  },
+
+  buttonOutline: {
     backgroundColor: 'transparent',
-    borderWidth: 2,
-    borderColor: BRAND_PRIMARY,
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 56,
+    borderColor: COLORS.gray300,
+  },
+
+  buttonGhost: {
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
+  },
+
+  buttonGoogle: {
+    backgroundColor: COLORS.white,
+    borderColor: COLORS.gray300,
+  },
+
+  buttonDisabled: {
+    opacity: 0.5,
   },
 
   buttonContent: {
@@ -1024,145 +1498,125 @@ const styles = StyleSheet.create({
   },
 
   buttonIcon: {
-    marginRight: 8,
+    marginRight: SPACING.xs,
+  },
+
+  buttonIconRight: {
+    marginRight: 0,
+    marginLeft: SPACING.xs,
   },
 
   buttonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    letterSpacing: -0.3,
-  },
-
-  primaryButtonText: {
-    color: '#fff',
-  },
-
-  secondaryButtonText: {
-    color: '#333',
-  },
-
-  googleButtonText: {
-    color: '#333',
-  },
-
-  ghostButtonText: {
-    color: BRAND_PRIMARY,
-  },
-
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 20,
-  },
-
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#f0f0f0',
-  },
-
-  dividerText: {
-    marginHorizontal: 12,
-    color: '#999',
-    fontSize: 14,
-  },
-
-  toggleSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 24,
-    marginBottom: 24,
-  },
-
-  toggleText: {
-    color: '#666',
-    fontSize: 14,
-  },
-
-  toggleLink: {
-    color: BRAND_PRIMARY,
-    fontWeight: '600',
-    fontSize: 14,
-  },
-
-  termsText: {
+    ...TYPOGRAPHY.button,
     textAlign: 'center',
-    color: '#999',
-    fontSize: 12,
-    lineHeight: 18,
   },
 
-  termsLink: {
-    color: BRAND_PRIMARY,
-    fontWeight: '600',
+  buttonTextPrimary: {
+    color: COLORS.white,
   },
 
-  // Phone Verification Modal
+  buttonTextSecondary: {
+    color: COLORS.gray800,
+  },
+
+  buttonTextOutline: {
+    color: COLORS.gray800,
+  },
+
+  buttonTextGhost: {
+    color: COLORS.primary,
+  },
+
+  buttonTextGoogle: {
+    color: COLORS.gray800,
+  },
+
+  buttonTextDisabled: {
+    color: COLORS.gray400,
+  },
+
+  // Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: SPACING.lg,
   },
 
   verificationModal: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 20,
-    paddingVertical: 24,
-    paddingBottom: 40,
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.xl,
+    ...SHADOWS.large,
   },
 
-  modalClose: {
+  modalCloseButton: {
     position: 'absolute',
-    top: 12,
-    right: 12,
+    top: SPACING.md,
+    right: SPACING.md,
     width: 36,
     height: 36,
-    borderRadius: 18,
-    backgroundColor: '#f5f5f5',
+    borderRadius: BORDER_RADIUS.round,
+    backgroundColor: COLORS.gray100,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  verificationTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#333',
-    marginBottom: 8,
-    marginTop: 12,
+  modalTitle: {
+    ...TYPOGRAPHY.h3,
+    color: COLORS.gray900,
+    marginBottom: SPACING.xs,
+    textAlign: 'center',
   },
 
-  verificationSubtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 24,
-    lineHeight: 20,
+  modalSubtitle: {
+    ...TYPOGRAPHY.body2,
+    color: COLORS.gray600,
+    textAlign: 'center',
+    marginBottom: SPACING.lg,
+    lineHeight: 22,
   },
 
-  verificationCodeInput: {
-    borderWidth: 2,
-    borderColor: '#f0f0f0',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    fontSize: 24,
+  codeInputContainer: {
+    marginBottom: SPACING.sm,
+  },
+
+  codeInput: {
+    ...TYPOGRAPHY.h2,
+    color: COLORS.gray900,
+    textAlign: 'center',
     letterSpacing: 8,
-    textAlign: 'center',
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 20,
+    borderWidth: 2,
+    borderColor: COLORS.gray300,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md,
   },
 
-  verificationButton: {
-    marginBottom: 16,
+  codeHint: {
+    ...TYPOGRAPHY.caption,
+    color: COLORS.gray500,
+    textAlign: 'center',
+    marginBottom: SPACING.lg,
   },
 
-  resendCode: {
-    textAlign: 'center',
-    color: BRAND_PRIMARY,
-    fontSize: 14,
+  verifyButton: {
+    marginBottom: SPACING.md,
+  },
+
+  resendContainer: {
+    alignItems: 'center',
+  },
+
+  resendText: {
+    ...TYPOGRAPHY.body2,
+    color: COLORS.gray600,
+  },
+
+  resendLink: {
+    color: COLORS.primary,
     fontWeight: '600',
   },
 });

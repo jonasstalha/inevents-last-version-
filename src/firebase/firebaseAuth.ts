@@ -1,7 +1,7 @@
 // src/firebase/firebaseAuth.ts
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateProfile, getAuth } from 'firebase/auth';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateProfile } from 'firebase/auth';
+import { collection, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
 import { auth, db } from './firebaseConfig';
-import { doc, setDoc, getDoc, query, collection, where, getDocs } from 'firebase/firestore';
 
 export const loginWithEmail = async (email: string, password: string) => {
   try {
