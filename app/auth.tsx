@@ -1,6 +1,8 @@
 import { useAuth } from '@/src/context/AuthContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import * as Google from 'expo-auth-session/providers/google';
+import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -15,20 +17,36 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
+  KeyboardAvoidingView,
+  Platform
 } from 'react-native';
+import Icon from 'react-native-vector-icons/Feather';
+import { checkPhoneNumberExists, storePhoneVerification } from '@/src/firebase/firebaseAuth';
+import { getAuth } from 'firebase/auth';
+
+WebBrowser.maybeCompleteAuthSession();
 
 const { width, height } = Dimensions.get('window');
 
-// Simple Input Component without animations
-const SimpleInput = ({ 
+// Brand Colors
+const BRAND_PRIMARY = '#667eea';
+const BRAND_SECONDARY = '#764ba2';
+const BRAND_ACCENT = '#f093fb';
+const SUCCESS_COLOR = '#2ed573';
+const ERROR_COLOR = '#ff4757';
+
+// Enhanced Input Component with Floating Labels
+const FloatingInput = ({ 
   label, 
   value, 
   onChangeText, 
   secureTextEntry = false, 
   keyboardType = 'default',
   autoCapitalize = 'sentences',
-  error = ''
+  error = '',
+  icon = '',
+  placeholder = ''
 }: {
   label: string;
   value: string;
@@ -37,73 +55,231 @@ const SimpleInput = ({
   keyboardType?: any;
   autoCapitalize?: any;
   error?: string;
+  icon?: string;
+  placeholder?: string;
 }) => {
+  const [isFocused, setIsFocused] = useState(false);
+  const [labelAnim] = useState(new Animated.Value(value ? 1 : 0));
+
+  useEffect(() => {
+    Animated.timing(labelAnim, {
+      toValue: isFocused || value ? 1 : 0,
+      duration: 200,
+      useNativeDriver: false,
+    }).start();
+  }, [isFocused, value]);
+
+  const labelStyle = {
+    top: labelAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [18, -8],
+    }),
+    fontSize: labelAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [16, 12],
+    }),
+    color: labelAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: ['#999', isFocused ? BRAND_PRIMARY : '#666'],
+    }),
+  };
+
   return (
     <View style={styles.inputContainer}>
-      <Text style={styles.inputLabel}>{label}</Text>
-      <TextInput
-        style={[styles.input, error ? styles.inputError : null]}
-        value={value}
-        onChangeText={onChangeText}
-        secureTextEntry={secureTextEntry}
-        keyboardType={keyboardType}
-        autoCapitalize={autoCapitalize}
-        placeholderTextColor="rgba(255, 255, 255, 0.5)"
-      />
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      <View style={[
+        styles.inputWrapper,
+        isFocused && styles.inputWrapperFocused,
+        error && styles.inputWrapperError
+      ]}>
+        {icon && (
+          <Icon 
+            name={icon} 
+            size={20} 
+            color={isFocused ? BRAND_PRIMARY : '#999'} 
+            style={styles.inputIcon}
+          />
+        )}
+        <Animated.Text style={[styles.floatingLabel, labelStyle]}>
+          {label}
+        </Animated.Text>
+        <TextInput
+          style={[styles.input, icon && styles.inputWithIcon]}
+          value={value}
+          onChangeText={onChangeText}
+          secureTextEntry={secureTextEntry}
+          keyboardType={keyboardType}
+          autoCapitalize={autoCapitalize}
+          placeholder={isFocused ? placeholder : ''}
+          placeholderTextColor="#bbb"
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
+          selectionColor={BRAND_PRIMARY}
+        />
+      </View>
+      {error ? (
+        <View style={styles.errorContainer}>
+          <Icon name="alert-circle" size={14} color={ERROR_COLOR} />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : null}
     </View>
   );
 };
 
-// Simple Button Component
-const SimpleButton = ({ 
+// Enhanced Button Component
+const EnhancedButton = ({ 
   title, 
   onPress, 
   loading = false,
+  variant = 'primary',
+  icon = '',
   style = {}
 }: {
   title: string;
   onPress: () => void;
   loading?: boolean;
+  variant?: 'primary' | 'secondary' | 'google' | 'ghost';
+  icon?: string;
   style?: any;
 }) => {
+  const getButtonStyle = () => {
+    switch(variant) {
+      case 'primary':
+        return styles.primaryButton;
+      case 'secondary':
+        return styles.secondaryButton;
+      case 'google':
+        return styles.googleButton;
+      case 'ghost':
+        return styles.ghostButton;
+      default:
+        return styles.primaryButton;
+    }
+  };
+
+  const getTextStyle = () => {
+    switch(variant) {
+      case 'primary':
+        return styles.primaryButtonText;
+      case 'secondary':
+        return styles.secondaryButtonText;
+      case 'google':
+        return styles.googleButtonText;
+      case 'ghost':
+        return styles.ghostButtonText;
+      default:
+        return styles.primaryButtonText;
+    }
+  };
+
   return (
     <TouchableOpacity 
-      style={[styles.button, style]} 
+      style={[getButtonStyle(), style]} 
       onPress={onPress}
       disabled={loading}
+      activeOpacity={0.8}
     >
       {loading ? (
-        <ActivityIndicator color="#fff" />
+        <ActivityIndicator color={variant === 'primary' ? '#fff' : BRAND_PRIMARY} />
       ) : (
-        <Text style={styles.buttonText}>{title}</Text>
+        <View style={styles.buttonContent}>
+          {icon && (
+            <Icon 
+              name={icon} 
+              size={18} 
+              color={variant === 'primary' ? '#fff' : BRAND_PRIMARY} 
+              style={styles.buttonIcon}
+            />
+          )}
+          <Text style={[styles.buttonText, getTextStyle()]}>
+            {title}
+          </Text>
+        </View>
       )}
     </TouchableOpacity>
   );
 };
 
-// Simple Role Button
-const SimpleRoleButton = ({ 
+// Role Selection Card
+const RoleCard = ({ 
   role, 
-  label, 
+  title, 
+  subtitle, 
   icon, 
   active, 
   onPress 
-}: {
-  role: string;
-  label: string;
-  icon: string;
-  active: boolean;
-  onPress: () => void;
-}) => {
+}: any) => {
   return (
     <TouchableOpacity 
-      style={[styles.roleButton, active && styles.activeRoleButton]} 
+      style={[styles.roleCard, active && styles.activeRoleCard]} 
       onPress={onPress}
+      activeOpacity={0.9}
     >
-      <Text style={styles.roleIcon}>{icon}</Text>
-      <Text style={[styles.roleLabel, active && styles.activeRoleLabel]}>{label}</Text>
+      <LinearGradient
+        colors={active ? [BRAND_PRIMARY, BRAND_SECONDARY] : ['#fff', '#fff']}
+        style={styles.roleCardGradient}
+      >
+        <Text style={styles.roleCardIcon}>{icon}</Text>
+        <Text style={[styles.roleCardTitle, active && styles.activeRoleCardTitle]}>{title}</Text>
+        <Text style={[styles.roleCardSubtitle, active && styles.activeRoleCardSubtitle]}>{subtitle}</Text>
+        {active && (
+          <View style={styles.roleCardBadge}>
+            <Icon name="check" size={14} color="#fff" />
+          </View>
+        )}
+      </LinearGradient>
     </TouchableOpacity>
+  );
+};
+
+// Phone Verification Modal
+const PhoneVerificationModal = ({ 
+  visible, 
+  onClose, 
+  onSubmit, 
+  loading 
+}: any) => {
+  const [code, setCode] = useState('');
+
+  return (
+    <Modal transparent animationType="fade" visible={visible}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.verificationModal}>
+          <TouchableOpacity 
+            style={styles.modalClose} 
+            onPress={onClose}
+          >
+            <Icon name="x" size={24} color="#333" />
+          </TouchableOpacity>
+
+          <Text style={styles.verificationTitle}>Verify Your Phone</Text>
+          <Text style={styles.verificationSubtitle}>
+            Enter the 6-digit code sent to your phone
+          </Text>
+
+          <TextInput
+            style={styles.verificationCodeInput}
+            placeholder="000000"
+            keyboardType="number-pad"
+            maxLength={6}
+            value={code}
+            onChangeText={setCode}
+            selectionColor={BRAND_PRIMARY}
+          />
+
+          <EnhancedButton
+            title="Verify Code"
+            onPress={() => onSubmit(code)}
+            loading={loading}
+            style={styles.verificationButton}
+          />
+
+          <TouchableOpacity onPress={onClose}>
+            <Text style={styles.resendCode}>Didn't receive a code? Resend</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
   );
 };
 
@@ -111,7 +287,13 @@ export default function AuthScreen() {
   const { login, register } = useAuth();
   const router = useRouter();
 
-  // Animation state
+  // Google Auth
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    clientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID || '',
+    scopes: ['profile', 'email'],
+  });
+
+  // Animation states
   const [fadeAnim] = useState(new Animated.Value(0));
 
   // Form states
@@ -121,59 +303,60 @@ export default function AuthScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [city, setCity] = useState('');
-  const [userRole, setUserRole] = useState<'client' | 'artist' | 'admin'>('client');
+  const [storeName, setStoreName] = useState('');
+  const [userRole, setUserRole] = useState<'client' | 'artist'>('client');
   const [loading, setLoading] = useState(false);
+  const [useGoogle, setUseGoogle] = useState(false);
+
+  // Phone verification
+  const [showPhoneVerification, setShowPhoneVerification] = useState(false);
+  const [phoneVerifying, setPhoneVerifying] = useState(false);
 
   // Error states
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
-  const [confirmPasswordError, setConfirmPasswordError] = useState('');
+  const [phoneError, setPhoneError] = useState('');
 
-  // Artist-specific states
-  const [storeName, setStoreName] = useState('');
-  const [categories, setCategories] = useState<string[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState('');
-  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  useEffect(() => {
+    StatusBar.setBarStyle('dark-content', true);
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 1000,
+      useNativeDriver: true,
+    }).start();
+  }, []);
 
-  // Available categories for artists
-  const availableCategories = [
-    { name: 'Music', icon: '🎵' },
-    { name: 'Visual Arts', icon: '🎨' },
-    { name: 'Performing Arts', icon: '🎭' },
-    { name: 'Dance', icon: '💃' },
-    { name: 'Photography', icon: '📸' },
-    { name: 'Culinary Arts', icon: '👨‍🍳' },
-    { name: 'Digital Art', icon: '💻' },
-    { name: 'Fashion', icon: '👗' },
-    { name: 'Crafts', icon: '🔨' },
-    { name: 'Literature', icon: '📚' },
-    { name: 'Film & Video', icon: '🎬' },
-    { name: 'Other', icon: '✨' }
-  ];
+  // Handle Google Sign-in
+  useEffect(() => {
+    if (response?.type === 'success') {
+      const { authentication } = response;
+      console.log('Google Auth Success:', authentication?.accessToken);
+      handleGoogleSignIn();
+    }
+  }, [response]);
 
-  // Function to add a category
-  const addCategory = () => {
-    if (selectedCategory && !categories.includes(selectedCategory)) {
-      setCategories([...categories, selectedCategory]);
-      setSelectedCategory('');
+  const handleGoogleSignIn = async () => {
+    try {
+      setLoading(true);
+      // TODO: Implement actual Google sign-in with Firebase
+      // For now, we'll navigate to the next step
+      if (!isLogin && userRole === 'artist') {
+        // Need to collect additional info for artist
+        setShowPhoneVerification(true);
+      } else if (!isLogin) {
+        // Regular user
+        setShowPhoneVerification(true);
+      } else {
+        // Login
+        router.replace('/(client)/');
+      }
+    } catch (error: any) {
+      Alert.alert('Error', 'Failed to sign in with Google');
+    } finally {
+      setLoading(false);
     }
   };
-  
-  // Function to remove a category
-  const removeCategory = (category: string) => {
-    setCategories(categories.filter(c => c !== category));
-  };
-  
-  // Check if artist form is valid
-  const isArtistFormValid = () => {
-    if (userRole !== 'artist') return true;
-    return storeName.trim() !== '' && 
-           city.trim() !== '' && 
-           categories.length > 0;
-  };
 
-  // Validation functions
   const validateEmail = (email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!email) {
@@ -201,684 +384,785 @@ export default function AuthScreen() {
     return true;
   };
 
-  const validateConfirmPassword = (confirmPassword: string, password: string) => {
-    if (!isLogin) {
-      if (!confirmPassword) {
-        setConfirmPasswordError('Please confirm your password');
-        return false;
-      }
-      if (confirmPassword !== password) {
-        setConfirmPasswordError('Passwords do not match');
-        return false;
-      }
+  const validatePhone = (phone: string) => {
+    const phoneRegex = /^[0-9+\-\s()]+$/;
+    if (!phone) {
+      setPhoneError('Phone number is required');
+      return false;
     }
-    setConfirmPasswordError('');
+    if (!phoneRegex.test(phone)) {
+      setPhoneError('Please enter a valid phone number');
+      return false;
+    }
+    setPhoneError('');
     return true;
   };
 
-  useEffect(() => {
-    StatusBar.setBarStyle('light-content', true);
-    createHardcodedAdminAccount();
-
-    // Trigger animation
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 1000,
-      useNativeDriver: true,
-    }).start();
-  }, []);
-
-  // Hardcoded Admin Account Creation
-  const createHardcodedAdminAccount = async () => {
+  const handlePhoneSubmit = async (code: string) => {
     try {
-      const adminEmail = 'admin@inevents.com';
-      const adminPassword = 'admin123456';
-      const adminName = 'System Administrator';
-      
-      console.log('Checking admin account...');
-      
-      // First, try to login to see if the account exists
-      try {
-        const testCredential = await login(adminEmail, adminPassword);
-        if (testCredential === 'admin') {
-          console.log('✅ Admin account already exists with correct role');
-          return;
-        } else {
-          console.log('⚠️ Admin account exists but role is wrong:', testCredential);
-          // Account exists but role is wrong, let's fix it
-          await fixAdminAccountRole();
-          return;
-        }
-      } catch (loginError: any) {
-        console.log('Admin account does not exist or has wrong credentials, creating new one...');
-      }
-      
-      // If we get here, the account doesn't exist, so create it
-      await register(adminEmail, adminPassword, adminName, '', false, 'admin');
-      console.log('✅ Admin account created successfully');
-      
-    } catch (error: any) {
-      if (error.message && error.message.includes('auth/email-already-in-use')) {
-        console.log('✅ Admin account already exists, checking Firestore data...');
-        await fixAdminAccountRole();
-      } else {
-        console.log('⚠️ Admin account setup issue:', error.message);
-      }
-    }
-  };
+      setPhoneVerifying(true);
 
-  // Fix admin account role in Firestore
-  const fixAdminAccountRole = async () => {
-    try {
-      console.log('🔧 Fixing admin account role in Firestore...');
-      
-      // Import Firestore functions
-      const { getFirestore, doc, setDoc, getDoc, Timestamp } = await import('firebase/firestore');
-      
-      const db = getFirestore();
-      
-      // Try to get the admin user by email first
-      // Since we know the admin email, we can try to find the user
-      const adminEmail = 'admin@inevents.com';
-      
-      // First, let's login to get the user ID
-      const { loginWithEmail } = await import('@/src/firebase/firebaseAuth');
-      
-      try {
-        const userCredential = await loginWithEmail(adminEmail, 'admin123456');
-        const adminUserId = userCredential.user.uid;
-        
-        console.log('Found admin user ID:', adminUserId);
-        
-        // Now update/create the Firestore document with admin role
-        const userRef = doc(db, 'users', adminUserId);
-        
-        // Check if document exists
-        const userDoc = await getDoc(userRef);
-        
-        const adminData = {
-          email: adminEmail,
-          name: 'System Administrator',
-          phoneNumber: '',
-          isPhoneVerified: false,
-          role: 'admin',
-          createdAt: userDoc.exists() ? userDoc.data()?.createdAt || Timestamp.now() : Timestamp.now(),
-          signupDate: userDoc.exists() ? userDoc.data()?.signupDate || Timestamp.now() : Timestamp.now(),
-        };
-        
-        await setDoc(userRef, adminData, { merge: true });
-        
-        console.log('✅ Admin account role fixed in Firestore');
-        
-      } catch (authError) {
-        console.error('Failed to authenticate admin user for role fix:', authError);
-      }
-      
-    } catch (error) {
-      console.error('Failed to fix admin account role:', error);
-    }
-  };
-
-  // Main Authentication Handler
-  const handleAuthentication = async () => {
-    try {
-      // Validate form inputs
-      const isEmailValid = validateEmail(email);
-      const isPasswordValid = validatePassword(password);
-      const isConfirmPasswordValid = validateConfirmPassword(confirmPassword, password);
-      
-      if (!isEmailValid || !isPasswordValid || (!isLogin && !isConfirmPasswordValid)) {
+      // Check if phone already exists
+      const phoneExists = await checkPhoneNumberExists(phone);
+      if (phoneExists) {
+        Alert.alert('Error', 'This phone number is already registered');
+        setPhoneVerifying(false);
         return;
       }
 
-      console.log(`Attempting to ${isLogin ? 'login' : 'register'} with email: ${email}`);
-      
-      if (isLogin) {
-        // Perform login
-        setLoading(true);
-        const userRole = await login(email, password);
-        setLoading(false);
-        
-        if (userRole) {
-          console.log(`✅ Login successful! User role: ${userRole}`);
-          
-          // Navigate based on role
-          if (userRole === 'admin') {
-            console.log(`🚀 Navigating to admin panel...`);
-            router.replace('/(admin)');
-          } else if (userRole === 'artist') {
-            console.log(`🚀 Navigating to artist panel...`);
-            router.replace('/(artist)');
-          } else {
-            console.log(`🚀 Navigating to client panel...`);
-            router.replace('/(client)');
-          }
-        }
+      // TODO: Verify code with actual SMS provider
+      if (code.length !== 6) {
+        Alert.alert('Error', 'Please enter a valid 6-digit code');
+        return;
+      }
+
+      const auth = getAuth();
+      if (auth.currentUser) {
+        await storePhoneVerification(auth.currentUser.uid, phone, true);
+      }
+
+      setShowPhoneVerification(false);
+
+      // If artist, go to complete artist profile
+      if (!isLogin && userRole === 'artist') {
+        Alert.alert('Success', 'Please complete your artist profile');
+        // Navigate to artist onboarding
+        router.replace('/(artist)/');
       } else {
-        // Perform registration
-        if (!name.trim()) {
-          Alert.alert('Validation Error', 'Please enter your full name');
-          return;
-        }
-
-        if (userRole === 'artist' && !isArtistFormValid()) {
-          Alert.alert('Validation Error', 'Please fill in all artist information including store name, city, and at least one category');
-          return;
-        }
-
-        setLoading(true);
-        await register(email, password, name, phone, false, userRole);
-        setLoading(false);
-        
-        console.log(`✅ Registration successful! User role: ${userRole}`);
-        
-        // Navigate based on role
-        if (userRole === 'admin') {
-          router.replace('/(admin)');
-        } else if (userRole === 'artist') {
-          router.replace('/(artist)');
-        } else {
-          router.replace('/(client)');
-        }
+        Alert.alert('Success', 'Registration complete!');
+        router.replace('/(client)/');
       }
     } catch (error: any) {
-      setLoading(false);
-      console.error('Authentication error:', error);
-      const errorMessage = error.message || 'An unexpected error occurred. Please try again.';
-      Alert.alert('Authentication Error', errorMessage);
+      Alert.alert('Error', error.message);
+    } finally {
+      setPhoneVerifying(false);
     }
   };
 
-  // Toggle Auth Mode
-  const toggleAuthMode = () => {
-    setIsLogin(!isLogin);
-    // Clear form errors when switching modes
-    setEmailError('');
-    setPasswordError('');
-    setConfirmPasswordError('');
+  const handleAuthSubmit = async () => {
+    try {
+      setLoading(true);
+
+      if (isLogin) {
+        // Login flow
+        if (!validateEmail(email) || !validatePassword(password)) {
+          setLoading(false);
+          return;
+        }
+
+        await login(email, password);
+        router.replace('/(client)/');
+      } else {
+        // Registration flow
+        if (!validateEmail(email) || !validatePassword(password)) {
+          setLoading(false);
+          return;
+        }
+
+        if (confirmPassword !== password) {
+          setPasswordError('Passwords do not match');
+          setLoading(false);
+          return;
+        }
+
+        // Check phone
+        if (!validatePhone(phone)) {
+          setLoading(false);
+          return;
+        }
+
+        const phoneExists = await checkPhoneNumberExists(phone);
+        if (phoneExists) {
+          Alert.alert('Error', 'This phone number is already registered');
+          setLoading(false);
+          return;
+        }
+
+        // Register user
+        await register(email, password, name, phone, userRole);
+
+        // Show phone verification
+        setShowPhoneVerification(true);
+      }
+    } catch (error: any) {
+      Alert.alert('Error', error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <View style={styles.container}>
-      {/* Static Background */}
-      <View style={styles.backgroundContainer}>
-        <Image 
-          source={require('../assets/indexpage/mainpic.png')} 
-          style={styles.heroImage} 
-          resizeMode="cover" 
-        />
-        <LinearGradient
-          colors={['rgba(102, 126, 234, 0.8)', 'rgba(118, 75, 162, 0.9)']}
-          style={styles.gradientOverlay}
-        />
-      </View>
+    <KeyboardAvoidingView 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={styles.container}
+    >
+      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+      
+      {/* Back Button */}
+      <TouchableOpacity 
+        style={styles.backButton}
+        onPress={() => router.back()}
+      >
+        <Icon name="arrow-left" size={24} color={BRAND_PRIMARY} />
+      </TouchableOpacity>
 
-      <Animated.View style={[styles.content, { opacity: fadeAnim }]}> 
-        {/* Form Container */}
-        <View style={styles.formContainer}>
-          <View style={styles.blurContainer}>
-            <ScrollView 
-              contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}
-              bounces={true}
-            >
-              <View style={styles.formHeader}>
-                <Text style={styles.formTitle}>
-                  {isLogin ? 'Welcome Back! 👋' : 'Join Our Community ✨'}
-                </Text>
-                <Text style={styles.formSubtitle}>
-                  {isLogin 
-                    ? 'Sign in to continue your journey' 
-                    : 'Create your account to get started'
-                  }
-                </Text>
-              </View>
-              
-              {!isLogin && (
-                <SimpleInput
-                  label="Full Name"
-                  value={name}
-                  onChangeText={setName}
-                />
-              )}
-              
-              <SimpleInput
-                label="Email Address"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                error={emailError}
+      <Animated.ScrollView 
+        style={[styles.scrollView, { opacity: fadeAnim }]}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* Brand Header */}
+        <View style={styles.brandHeader}>
+          <Text style={styles.brandLogo}>✨</Text>
+          <Text style={styles.brandTitle}>InEvents</Text>
+          <Text style={styles.brandTagline}>Your Creative Marketplace</Text>
+        </View>
+
+        {/* Hero Text */}
+        <View style={styles.heroSection}>
+          <Text style={styles.heroTitle}>
+            {isLogin ? 'Welcome Back! 👋' : 'Join Our Community ✨'}
+          </Text>
+          <Text style={styles.heroSubtitle}>
+            {isLogin 
+              ? 'Sign in to continue your creative journey' 
+              : 'Create your account to get started'
+            }
+          </Text>
+        </View>
+
+        {/* Role Selection (Registration only) */}
+        {!isLogin && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Choose Your Role</Text>
+            <View style={styles.roleGrid}>
+              <RoleCard
+                role="client"
+                title="Client"
+                subtitle="Hire & Book"
+                icon="👤"
+                active={userRole === 'client'}
+                onPress={() => setUserRole('client')}
               />
-              
-              <SimpleInput
+              <RoleCard
+                role="artist"
+                title="Artist"
+                subtitle="Sell & Earn"
+                icon="🎨"
+                active={userRole === 'artist'}
+                onPress={() => setUserRole('artist')}
+              />
+            </View>
+          </View>
+        )}
+
+        {/* Auth Method Selection */}
+        {!isLogin && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Choose Auth Method</Text>
+            <View style={styles.authMethodGrid}>
+              <TouchableOpacity
+                style={[styles.authMethodCard, !useGoogle && styles.activeAuthMethod]}
+                onPress={() => setUseGoogle(false)}
+              >
+                <Icon name="mail" size={24} color={useGoogle ? '#999' : BRAND_PRIMARY} />
+                <Text style={[styles.authMethodText, !useGoogle && styles.activeAuthMethodText]}>Email</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.authMethodCard, useGoogle && styles.activeAuthMethod]}
+                onPress={() => setUseGoogle(true)}
+              >
+                <Text style={styles.googleIcon}>G</Text>
+                <Text style={[styles.authMethodText, useGoogle && styles.activeAuthMethodText]}>Google</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* Form Section */}
+        <View style={styles.formSection}>
+          {!isLogin && (
+            <FloatingInput
+              label="Full Name"
+              value={name}
+              onChangeText={setName}
+              icon="user"
+              placeholder="John Doe"
+            />
+          )}
+
+          <FloatingInput
+            label="Email Address"
+            value={email}
+            onChangeText={setEmail}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            icon="mail"
+            placeholder="your@email.com"
+            error={emailError}
+          />
+
+          {!useGoogle && (
+            <>
+              <FloatingInput
                 label="Password"
                 value={password}
                 onChangeText={setPassword}
-                secureTextEntry={true}
+                secureTextEntry
+                icon="lock"
+                placeholder="••••••••"
                 error={passwordError}
               />
-              
+
               {!isLogin && (
-                <SimpleInput
+                <FloatingInput
                   label="Confirm Password"
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
-                  secureTextEntry={true}
-                  error={confirmPasswordError}
+                  secureTextEntry
+                  icon="lock"
+                  placeholder="••••••••"
                 />
               )}
-              
-              {!isLogin && (
-                <SimpleInput
-                  label="Phone Number"
-                  value={phone}
-                  onChangeText={setPhone}
-                  keyboardType="phone-pad"
-                />
-              )}
-              
-              {!isLogin && (
-                <>
-                  <View style={styles.roleSection}>
-                    <Text style={styles.sectionTitle}>Choose Your Role</Text>
-                    <View style={styles.roleContainer}>
-                      <SimpleRoleButton
-                        role="client"
-                        label="Event Seeker"
-                        icon="🎯"
-                        active={userRole === 'client'}
-                        onPress={() => setUserRole('client')}
-                      />
-                      <SimpleRoleButton
-                        role="artist"
-                        label="Event Creator"
-                        icon="🎨"
-                        active={userRole === 'artist'}
-                        onPress={() => setUserRole('artist')}
-                      />
-                    </View>
-                  </View>
+            </>
+          )}
 
-                  {userRole === 'artist' && (
-                    <View style={styles.artistSection}>
-                      <Text style={styles.sectionTitle}>Artist Information</Text>
-                      
-                      <SimpleInput
-                        label="Store/Business Name"
-                        value={storeName}
-                        onChangeText={setStoreName}
-                      />
-                      
-                      <SimpleInput
-                        label="City"
-                        value={city}
-                        onChangeText={setCity}
-                      />
+          {!isLogin && (
+            <FloatingInput
+              label="Phone Number"
+              value={phone}
+              onChangeText={setPhone}
+              keyboardType="phone-pad"
+              icon="phone"
+              placeholder="+1 (555) 000-0000"
+              error={phoneError}
+            />
+          )}
 
-                      <View style={styles.categorySection}>
-                        <Text style={styles.inputLabel}>Categories</Text>
-                        <TouchableOpacity 
-                          style={styles.categoryButton}
-                          onPress={() => setShowCategoryModal(true)}
-                        >
-                          <Text style={styles.categoryButtonText}>Add Category +</Text>
-                        </TouchableOpacity>
-                        
-                        {categories.length > 0 && (
-                          <View style={styles.selectedCategories}>
-                            {categories.map((category, index) => (
-                              <View key={index} style={styles.categoryTag}>
-                                <Text style={styles.categoryTagText}>{category}</Text>
-                                <TouchableOpacity onPress={() => removeCategory(category)}>
-                                  <Text style={styles.categoryRemove}>×</Text>
-                                </TouchableOpacity>
-                              </View>
-                            ))}
-                          </View>
-                        )}
-                      </View>
-                    </View>
-                  )}
-                </>
-              )}
-              
-              <SimpleButton
-                title={isLogin ? 'Sign In' : 'Create Account'}
-                onPress={handleAuthentication}
-                loading={loading}
-                style={styles.primaryButton}
-              />
-              
-              <TouchableOpacity onPress={toggleAuthMode} style={styles.switchButton}>
-                <Text style={styles.switchText}>
-                  {isLogin ? "Don't have an account? " : 'Already have an account? '}
-                  <Text style={styles.switchLink}>
-                    {isLogin ? 'Sign Up' : 'Sign In'}
-                  </Text>
-                </Text>
-              </TouchableOpacity>
-              
-            </ScrollView>
-          </View>
+          {!isLogin && userRole === 'artist' && !useGoogle && (
+            <FloatingInput
+              label="Store/Brand Name"
+              value={storeName}
+              onChangeText={setStoreName}
+              icon="briefcase"
+              placeholder="Your Business Name"
+            />
+          )}
         </View>
-      </Animated.View>
 
-      {/* Category Selection Modal */}
-      <Modal
-        visible={showCategoryModal}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowCategoryModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Select Category</Text>
-            <ScrollView style={styles.categoryList}>
-              {availableCategories.map((category, index) => (
-                <TouchableOpacity
-                  key={index}
-                  style={styles.categoryOption}
-                  onPress={() => {
-                    setSelectedCategory(category.name);
-                    addCategory();
-                    setShowCategoryModal(false);
-                  }}
-                >
-                  <Text style={styles.categoryOptionIcon}>{category.icon}</Text>
-                  <Text style={styles.categoryOptionText}>{category.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <TouchableOpacity 
-              style={styles.modalCloseButton}
-              onPress={() => setShowCategoryModal(false)}
-            >
-              <Text style={styles.modalCloseText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
+        {/* Primary Auth Button */}
+        <EnhancedButton
+          title={useGoogle ? 'Continue with Google' : (isLogin ? 'Sign In' : 'Create Account')}
+          onPress={useGoogle ? () => promptAsync() : handleAuthSubmit}
+          loading={loading}
+          variant={useGoogle ? 'google' : 'primary'}
+          icon={useGoogle ? 'arrow-right' : 'arrow-right'}
+          style={styles.primaryAuthButton}
+        />
+
+        {/* Divider */}
+        {!isLogin && !useGoogle && (
+          <>
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            {/* Google Sign-in Button */}
+            <EnhancedButton
+              title="Sign up with Google"
+              onPress={() => {
+                setUseGoogle(true);
+                promptAsync();
+              }}
+              variant="google"
+              icon="arrow-right"
+            />
+          </>
+        )}
+
+        {/* Toggle Auth Mode */}
+        <View style={styles.toggleSection}>
+          <Text style={styles.toggleText}>
+            {isLogin ? "Don't have an account? " : 'Already have an account? '}
+          </Text>
+          <TouchableOpacity onPress={() => {
+            setIsLogin(!isLogin);
+            setEmailError('');
+            setPasswordError('');
+          }}>
+            <Text style={styles.toggleLink}>
+              {isLogin ? 'Sign Up' : 'Sign In'}
+            </Text>
+          </TouchableOpacity>
         </View>
-      </Modal>
-    </View>
+
+        {/* Terms */}
+        <Text style={styles.termsText}>
+          By continuing, you agree to our{' '}
+          <Text style={styles.termsLink}>Terms of Service</Text> and{' '}
+          <Text style={styles.termsLink}>Privacy Policy</Text>
+        </Text>
+      </Animated.ScrollView>
+
+      {/* Phone Verification Modal */}
+      <PhoneVerificationModal
+        visible={showPhoneVerification}
+        onClose={() => setShowPhoneVerification(false)}
+        onSubmit={handlePhoneSubmit}
+        loading={phoneVerifying}
+      />
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
-  },
-  
-  backgroundContainer: {
-    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#fff',
   },
 
-  heroImage: {
-    width: '100%',
-    height: '100%',
-  },
-
-  gradientOverlay: {
-    ...StyleSheet.absoluteFillObject,
-  },
-
-  content: {
+  scrollView: {
     flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-  },
-
-  formContainer: {
-    backgroundColor: 'rgba(82, 74, 74, 0.5)',
-    borderRadius: 20,
-    padding: 20,
-    backdropFilter: 'blur(10px)',
-  },
-
-  blurContainer: {
-    backgroundColor: 'transparent',
   },
 
   scrollContent: {
-    paddingVertical: 10,
+    paddingHorizontal: 20,
+    paddingBottom: 40,
   },
 
-  formHeader: {
-    alignItems: 'center',
-    marginBottom: 30,
-  },
-
-  formTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-
-  formSubtitle: {
-    fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.8)',
-    textAlign: 'center',
-  },
-
-  inputContainer: {
-    marginBottom: 20,
-  },
-
-  inputLabel: {
-    fontSize: 16,
-    color: '#fff',
-    marginBottom: 8,
-    fontWeight: '500',
-  },
-
-  input: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 12,
-    padding: 15,
-    color: '#fff',
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-  },
-
-  inputError: {
-    borderColor: '#ff6b6b',
-  },
-
-  errorText: {
-    color: '#ff6b6b',
-    fontSize: 14,
-    marginTop: 5,
-  },
-
-  button: {
-    backgroundColor: '#667eea',
-    borderRadius: 12,
-    padding: 15,
+  backButton: {
+    position: 'absolute',
+    top: 50,
+    left: 20,
+    zIndex: 100,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(102, 126, 234, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 50,
   },
 
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-
-  primaryButton: {
-    marginTop: 20,
-    marginBottom: 20,
-  },
-
-  switchButton: {
+  brandHeader: {
     alignItems: 'center',
-    padding: 10,
+    marginTop: 80,
+    marginBottom: 24,
   },
 
-  switchText: {
-    color: 'rgba(255, 255, 255, 0.8)',
+  brandLogo: {
+    fontSize: 48,
+    marginBottom: 8,
+  },
+
+  brandTitle: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#333',
+    letterSpacing: -0.5,
+  },
+
+  brandTagline: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 4,
+  },
+
+  heroSection: {
+    marginBottom: 32,
+  },
+
+  heroTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#333',
+    marginBottom: 8,
+    letterSpacing: -0.5,
+  },
+
+  heroSubtitle: {
     fontSize: 16,
+    color: '#666',
+    lineHeight: 24,
   },
 
-  switchLink: {
-    color: '#667eea',
-    fontWeight: 'bold',
-  },
-
-  roleSection: {
-    marginBottom: 20,
+  section: {
+    marginBottom: 24,
   },
 
   sectionTitle: {
-    fontSize: 18,
-    color: '#fff',
-    fontWeight: 'bold',
-    marginBottom: 15,
-  },
-
-  roleContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-
-  roleButton: {
-    flex: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 12,
-    padding: 15,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-
-  activeRoleButton: {
-    borderColor: '#667eea',
-    backgroundColor: 'rgba(102, 126, 234, 0.2)',
-  },
-
-  roleIcon: {
-    fontSize: 24,
-    marginBottom: 8,
-  },
-
-  roleLabel: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-
-  activeRoleLabel: {
-    color: '#fff',
-  },
-
-  artistSection: {
-    marginBottom: 20,
-  },
-
-  categorySection: {
-    marginTop: 15,
-  },
-
-  categoryButton: {
-    backgroundColor: 'rgba(102, 126, 234, 0.3)',
-    borderRadius: 8,
-    padding: 12,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-
-  categoryButtonText: {
-    color: '#fff',
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 16,
+    letterSpacing: -0.3,
   },
 
-  selectedCategories: {
+  roleGrid: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+    gap: 12,
   },
 
-  categoryTag: {
-    backgroundColor: '#667eea',
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+  roleCard: {
+    flex: 1,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#f0f0f0',
+    backgroundColor: '#fff',
+  },
+
+  activeRoleCard: {
+    borderColor: BRAND_PRIMARY,
+  },
+
+  roleCardGradient: {
+    padding: 20,
+    alignItems: 'center',
+  },
+
+  roleCardIcon: {
+    fontSize: 32,
+    marginBottom: 12,
+  },
+
+  roleCardTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+
+  activeRoleCardTitle: {
+    color: '#fff',
+  },
+
+  roleCardSubtitle: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+  },
+
+  activeRoleCardSubtitle: {
+    color: 'rgba(255, 255, 255, 0.9)',
+  },
+
+  roleCardBadge: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  authMethodGrid: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+
+  authMethodCard: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#f0f0f0',
+    backgroundColor: '#fff',
+  },
+
+  activeAuthMethod: {
+    borderColor: BRAND_PRIMARY,
+    backgroundColor: 'rgba(102, 126, 234, 0.05)',
+  },
+
+  authMethodText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#999',
+  },
+
+  activeAuthMethodText: {
+    color: BRAND_PRIMARY,
+  },
+
+  googleIcon: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: BRAND_PRIMARY,
+  },
+
+  formSection: {
+    marginBottom: 24,
+    gap: 0,
+  },
+
+  inputContainer: {
+    marginBottom: 16,
+  },
+
+  inputWrapper: {
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#f0f0f0',
+    paddingHorizontal: 16,
+    paddingTop: 20,
+    paddingBottom: 10,
+    position: 'relative',
+    backgroundColor: '#fff',
+  },
+
+  inputWrapperFocused: {
+    borderColor: BRAND_PRIMARY,
+    shadowColor: BRAND_PRIMARY,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+
+  inputWrapperError: {
+    borderColor: ERROR_COLOR,
+  },
+
+  inputIcon: {
+    marginRight: 12,
+    marginBottom: 12,
+  },
+
+  floatingLabel: {
+    position: 'absolute',
+    left: 16,
+    fontWeight: '500',
+    zIndex: 1,
+  },
+
+  input: {
+    color: '#333',
+    fontSize: 16,
+    paddingVertical: 8,
+    paddingRight: 16,
+    minHeight: 24,
+  },
+
+  inputWithIcon: {
+    paddingLeft: 8,
+  },
+
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
     gap: 6,
   },
 
-  categoryTagText: {
-    color: '#fff',
-    fontSize: 14,
+  errorText: {
+    color: ERROR_COLOR,
+    fontSize: 13,
+    fontWeight: '500',
   },
 
-  categoryRemove: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
+  primaryAuthButton: {
+    marginBottom: 16,
   },
 
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
+  primaryButton: {
+    backgroundColor: BRAND_PRIMARY,
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 56,
   },
 
-  modalContent: {
+  secondaryButton: {
+    backgroundColor: '#f0f0f0',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 56,
+  },
+
+  googleButton: {
     backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 20,
-    width: width * 0.9,
-    maxHeight: height * 0.7,
+    borderWidth: 2,
+    borderColor: '#f0f0f0',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 56,
   },
 
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginBottom: 20,
+  ghostButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 2,
+    borderColor: BRAND_PRIMARY,
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 56,
   },
 
-  categoryList: {
-    maxHeight: 400,
-  },
-
-  categoryOption: {
+  buttonContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    justifyContent: 'center',
   },
 
-  categoryOptionIcon: {
-    fontSize: 20,
-    marginRight: 15,
+  buttonIcon: {
+    marginRight: 8,
   },
 
-  categoryOptionText: {
+  buttonText: {
     fontSize: 16,
+    fontWeight: '600',
+    letterSpacing: -0.3,
+  },
+
+  primaryButtonText: {
+    color: '#fff',
+  },
+
+  secondaryButtonText: {
     color: '#333',
   },
 
-  modalCloseButton: {
-    backgroundColor: '#667eea',
-    borderRadius: 12,
-    padding: 15,
-    alignItems: 'center',
-    marginTop: 20,
+  googleButtonText: {
+    color: '#333',
   },
 
-  modalCloseText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+  ghostButtonText: {
+    color: BRAND_PRIMARY,
+  },
+
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#f0f0f0',
+  },
+
+  dividerText: {
+    marginHorizontal: 12,
+    color: '#999',
+    fontSize: 14,
+  },
+
+  toggleSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 24,
+    marginBottom: 24,
+  },
+
+  toggleText: {
+    color: '#666',
+    fontSize: 14,
+  },
+
+  toggleLink: {
+    color: BRAND_PRIMARY,
+    fontWeight: '600',
+    fontSize: 14,
+  },
+
+  termsText: {
+    textAlign: 'center',
+    color: '#999',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+
+  termsLink: {
+    color: BRAND_PRIMARY,
+    fontWeight: '600',
+  },
+
+  // Phone Verification Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+
+  verificationModal: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+    paddingBottom: 40,
+  },
+
+  modalClose: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#f5f5f5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  verificationTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#333',
+    marginBottom: 8,
+    marginTop: 12,
+  },
+
+  verificationSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+
+  verificationCodeInput: {
+    borderWidth: 2,
+    borderColor: '#f0f0f0',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    fontSize: 24,
+    letterSpacing: 8,
+    textAlign: 'center',
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 20,
+  },
+
+  verificationButton: {
+    marginBottom: 16,
+  },
+
+  resendCode: {
+    textAlign: 'center',
+    color: BRAND_PRIMARY,
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
