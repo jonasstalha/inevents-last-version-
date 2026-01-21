@@ -1,7 +1,11 @@
 // src/firebase/firebaseAuth.ts
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateProfile } from 'firebase/auth';
+<<<<<<< HEAD
 import { collection, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
 import { auth, db } from './firebaseConfig';
+=======
+import { auth } from './firebaseConfig';
+>>>>>>> 32ac7b3b02828e0bccb61f3208175ce5f3557bff
 
 export const loginWithEmail = async (email: string, password: string) => {
   try {
@@ -37,6 +41,7 @@ export const logout = async () => {
     throw error;
   }
 };
+<<<<<<< HEAD
 
 // Check if phone number already exists
 export const checkPhoneNumberExists = async (phoneNumber: string) => {
@@ -69,3 +74,5 @@ export const storePhoneVerification = async (userId: string, phoneNumber: string
     throw error;
   }
 };
+=======
+>>>>>>> 32ac7b3b02828e0bccb61f3208175ce5f3557bff

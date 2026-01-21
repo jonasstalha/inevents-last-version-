@@ -1038,7 +1038,10 @@ export default function EventApp() {
                 placeholderTextColor="#9ca3af"
                 value={searchQuery}
                 onChangeText={setSearchQuery}
+<<<<<<< HEAD
                 onFocus={() => router.push('/search')}
+=======
+>>>>>>> 32ac7b3b02828e0bccb61f3208175ce5f3557bff
               />
               {searchQuery.length > 0 && (
                 <TouchableOpacity
