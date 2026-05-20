@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "InEvent",
+    "slug": "inevent",
+    "version": "0.0.1",
+    "runtimeVersion": {
+      "policy": "sdkVersion"
+    },
+    "orientation": "portrait",
+    "icon": "./assets/indexpage/icon.png",
+    "splash": {
+      "image": "./assets/indexpage/icon.png",
+      "backgroundColor": "#5B5BD6",
+      "resizeMode": "contain"
+    },
+    "scheme": "inevent",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "d079d504-69ff-40fc-8cf5-aab12017a523"
+      }
+    },
+    "android": {
+      "package": "com.jonass7896.InEvent"
+    },
+    "plugins": [
+      "expo-font",
+      "expo-maps",
+      "expo-router",
+      "expo-web-browser",
+      "@react-native-community/datetimepicker"
+    ]
+  }
+}

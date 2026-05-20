@@ -1,0 +1,75 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ── helpers ────────────────────────────────────────────────────────────
+    function isAuthenticated() { return request.auth != null; }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == 'admin@inevents.com' ||
+        request.auth.token.email == 'youremail@domain.com'
+      );
+    }
+
+    function isOwnerOrAdmin(userId) {
+      return isAuthenticated() && (request.auth.uid == userId || isAdmin());
+    }
+
+    // ── user service images (public read for marketplace) ───
+    match /users/{userId}/services/{serviceId}/images/{imageName} {
+      allow read: if true;
+      allow write, delete: if isOwnerOrAdmin(userId);
+    }
+
+    // ── legacy user profile images ──────────────────────────
+    match /users/{userId}/profile/{imageName} {
+      allow read: if true;
+      allow write, delete: if isOwnerOrAdmin(userId);
+    }
+
+    // ── profile images (path used by uploadProfileImage) ───
+    match /profile-images/{userId}/{imageName} {
+      allow read: if true;
+      allow write, delete: if isOwnerOrAdmin(userId);
+    }
+
+    // ── user ticket images ──────────────────────────────────
+    match /users/{userId}/tickets/{ticketId}/images/{imageName} {
+      allow read: if true;
+      allow write, delete: if isOwnerOrAdmin(userId);
+    }
+
+    // ── general user uploads ────────────────────────────────
+    match /users/{userId}/{allPaths=**} {
+      allow read: if true;
+      allow write, delete: if isOwnerOrAdmin(userId);
+    }
+
+    // ── invoices ────────────────────────────────────────────
+    // File names are invoice_<firestoreDocId>; only admins may upload
+    match /invoices/{invoiceFile} {
+      allow read:  if isAuthenticated() && isAdmin();
+      allow write: if isAuthenticated() && isAdmin();
+      allow delete: if isAuthenticated() && isAdmin();
+    }
+
+    // ── public / dev uploads ────────────────────────────────
+    match /public/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+
+    // ── service images for marketplace ─────────────────────
+    match /services/{allPaths=**} {
+      allow read: if true;
+      allow write, delete: if isAdmin();
+    }
+
+    // ── admin catch-all ─────────────────────────────────────
+    match /{allPaths=**} {
+      allow read, write: if isAdmin();
+    }
+  }
+}
