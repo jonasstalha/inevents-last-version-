@@ -64,6 +64,7 @@ export interface GigInput {
   basePrice: number;
   category: string;
   options: GigOption[];
+  extras?: GigOption[];
   locationName?: string;
   radius?: number;
 }

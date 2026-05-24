@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ImagePickerAsset } from 'expo-image-picker';
 import * as Location from 'expo-location';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -44,6 +44,22 @@ const MOROCCAN_REGIONS = [
 // Radius options (in km)
 const RADIUS_OPTIONS = [50, 100, 150, 200];
 
+// Simplified mapping of regions to sample cities for dropdown
+const REGION_CITIES: Record<string, string[]> = {
+  'Tanger-Tétouan-Al Hoceïma': ['Tanger', 'Tétouan', 'Al Hoceïma'],
+  "L'Oriental": ['Oujda', 'Nador', 'Berkane'],
+  'Fès-Meknès': ['Fès', 'Meknès', 'Ifrane'],
+  'Rabat-Salé-Kénitra': ['Rabat', 'Salé', 'Kénitra'],
+  'Béni Mellal-Khénifra': ['Béni Mellal', 'Khénifra', 'Khouribga'],
+  'Casablanca-Settat': ['Casablanca', 'Mohammedia', 'El Jadida'],
+  'Marrakech-Safi': ['Marrakech', 'Essaouira', 'Safi'],
+  'Drâa-Tafilalet': ['Errachidia', 'Ouarzazate', 'Zagora'],
+  'Souss-Massa': ['Agadir', 'Inezgane', 'Tiznit'],
+  'Guelmim-Oued Noun': ['Guelmim', 'Tan-Tan'],
+  'Laâyoune-Sakia El Hamra': ['Laâyoune', 'Boujdour'],
+  'Dakhla-Oued Ed-Dahab': ['Dakhla']
+};
+
 interface ServiceFormProps {
   artistId: string;
   initialValues?: {
@@ -55,8 +71,9 @@ interface ServiceFormProps {
     options: GigOption[];
     images: string[];
     video?: string;
-    locationName?: string;    // new field
-    radius?: number;          // new field
+      locationName?: string;    // new field
+      radius?: number;          // new field
+      extras?: GigOption[];
   };
   onSuccess: () => void;
   onCancel: () => void;
@@ -80,12 +97,16 @@ export const ServiceForm: React.FC<ServiceFormProps> = ({
   
   // Location fields
   const [locationName, setLocationName] = useState(initialValues?.locationName || '');
+  const [region, setRegion] = useState('');
+  const [city, setCity] = useState('');
   const [mapVisible, setMapVisible] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<{latitude: number; longitude: number} | null>(null);
   const [serviceRadius, setServiceRadius] = useState(initialValues?.radius || 50);
   
   // Dropdown modals
   const [categoryModalVisible, setCategoryModalVisible] = useState(false);
+  const [regionModalVisible, setRegionModalVisible] = useState(false);
+  const [cityModalVisible, setCityModalVisible] = useState(false);
   
   // Map state
   const [mapRegion, setMapRegion] = useState({
@@ -157,6 +178,13 @@ export const ServiceForm: React.FC<ServiceFormProps> = ({
   const [optionDescription, setOptionDescription] = useState('');
   const [optionPrice, setOptionPrice] = useState('');
   const [optionMaxQuantity, setOptionMaxQuantity] = useState('');
+
+  // Extras (similar to options but optional and different color)
+  const [extras, setExtras] = useState<GigOption[]>(initialValues?.extras || []);
+  const [extraTitle, setExtraTitle] = useState('');
+  const [extraDescription, setExtraDescription] = useState('');
+  const [extraPrice, setExtraPrice] = useState('');
+  const [extraMaxQuantity, setExtraMaxQuantity] = useState('');
   
   // Handle image selection (unchanged)
   const handleSelectImages = async () => {
@@ -250,6 +278,64 @@ export const ServiceForm: React.FC<ServiceFormProps> = ({
   const removeOption = (id: string) => {
     setOptions(options.filter(option => option.id !== id));
   };
+
+  // Add an extra (optional)
+  const addExtra = () => {
+    if (!extraTitle || !extraDescription || !extraPrice) {
+      Alert.alert('Missing Information', 'Please fill in all extra fields');
+      return;
+    }
+    const newExtra: GigOption = {
+      id: Math.random().toString(36).substr(2, 9),
+      title: extraTitle,
+      description: extraDescription,
+      price: Number(extraPrice),
+      maxQuantity: extraMaxQuantity ? Number(extraMaxQuantity) : undefined
+    };
+    setExtras([...extras, newExtra]);
+    setExtraTitle('');
+    setExtraDescription('');
+    setExtraPrice('');
+    setExtraMaxQuantity('');
+  };
+
+  const removeExtra = (id: string) => {
+    setExtras(extras.filter(e => e.id !== id));
+  };
+
+  const updateExtra = (idx: number, key: 'title' | 'description' | 'price' | 'maxQuantity', value: string) => {
+    const updated = [...extras];
+    const extra = updated[idx];
+    if (!extra) return;
+    if (key === 'price') {
+      extra.price = Number(value || 0);
+    } else if (key === 'maxQuantity') {
+      extra.maxQuantity = value ? Number(value) : undefined;
+    } else {
+      (extra as any)[key] = value;
+    }
+    updated[idx] = extra;
+    setExtras(updated);
+  };
+
+  const addEmptyExtra = () => {
+    const newExtra: GigOption = {
+      id: Math.random().toString(36).substr(2, 9),
+      title: '',
+      description: '',
+      price: 0,
+    };
+    setExtras([...extras, newExtra]);
+  };
+
+  // If creating a new service, show one empty extra row by default so the
+  // Extras section is visible and editable after reload.
+  useEffect(() => {
+    if (!initialValues && extras.length === 0) {
+      addEmptyExtra();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   
   // Form submission
   const handleSubmit = async () => {
@@ -270,6 +356,7 @@ export const ServiceForm: React.FC<ServiceFormProps> = ({
       basePrice: Number(basePrice),
       category,
       options,
+      extras,
       locationName,
       radius: serviceRadius
     };
@@ -565,6 +652,16 @@ export const ServiceForm: React.FC<ServiceFormProps> = ({
           onChangeText={setCategory}
         />
         
+        {/* Region and City dropdowns for better UX */}
+        <Text style={styles.sectionTitle}>Region & City</Text>
+        {renderDropdown('Region', region, (val) => { setRegion(val); setCity(''); }, Object.keys(REGION_CITIES), regionModalVisible, setRegionModalVisible)}
+        <View style={{ height: 8 }} />
+        {region ? (
+          renderDropdown('City', city, setCity, REGION_CITIES[region] || [], cityModalVisible, setCityModalVisible)
+        ) : (
+          <Text style={styles.dropdownPlaceholder}>Select a region first to choose a city</Text>
+        )}
+        
         {/* Location Fields */}
         <Text style={styles.sectionTitle}>Service Location</Text>
         <TextInput
@@ -598,6 +695,83 @@ export const ServiceForm: React.FC<ServiceFormProps> = ({
         
         {/* Options Section */}
         {renderOptions()}
+
+        {/* Extras Section (optional) - editable list like service items */}
+        <View style={styles.extrasContainer}>
+          <Text style={styles.sectionTitle}>Extras (optional)</Text>
+          {extras.length > 0 ? (
+            extras.map((extra, idx) => (
+              <View key={extra.id} style={[styles.extraItem, { flexDirection: 'column' }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                  <TextInput
+                    style={[styles.input, { flex: 2, marginRight: 8 }]}
+                    placeholder="Extra title"
+                    value={extra.title}
+                    onChangeText={v => updateExtra(idx, 'title', v)}
+                  />
+                  <TextInput
+                    style={[styles.input, { width: 100 }]}
+                    placeholder="Price"
+                    keyboardType="decimal-pad"
+                    value={String(extra.price || '')}
+                    onChangeText={v => updateExtra(idx, 'price', v)}
+                  />
+                  <TouchableOpacity onPress={() => removeExtra(extra.id)} style={{ marginLeft: 8 }}>
+                    <Ionicons name="remove-circle" size={22} color="#ff3b30" />
+                  </TouchableOpacity>
+                </View>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Extra description"
+                  value={extra.description}
+                  onChangeText={v => updateExtra(idx, 'description', v)}
+                  multiline
+                />
+                <TextInput
+                  style={[styles.input, { width: 140 }]}
+                  placeholder="Max Quantity (optional)"
+                  keyboardType="number-pad"
+                  value={extra.maxQuantity ? String(extra.maxQuantity) : ''}
+                  onChangeText={v => updateExtra(idx, 'maxQuantity', v)}
+                />
+              </View>
+            ))
+          ) : (
+            <Text style={styles.noOptionsText}>No extras added</Text>
+          )}
+
+          <View style={styles.addOptionForm}>
+            <TextInput
+              style={styles.input}
+              placeholder="Extra Title"
+              value={extraTitle}
+              onChangeText={setExtraTitle}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Extra Description"
+              value={extraDescription}
+              onChangeText={setExtraDescription}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Price"
+              keyboardType="decimal-pad"
+              value={extraPrice}
+              onChangeText={setExtraPrice}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Max Quantity (optional)"
+              keyboardType="number-pad"
+              value={extraMaxQuantity}
+              onChangeText={setExtraMaxQuantity}
+            />
+            <TouchableOpacity style={[styles.addOptionButton, styles.addExtraButton]} onPress={addExtra}>
+              <Text style={styles.buttonText}>Add Extra</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
         
         {/* Buttons */}
         <View style={styles.buttonContainer}>
@@ -965,6 +1139,24 @@ const styles = StyleSheet.create({
     padding: Theme.spacing.md,
     borderRadius: Theme.borderRadius.md,
     marginTop: Theme.spacing.sm,
+  },
+  extrasContainer: {
+    marginTop: Theme.spacing.md,
+    marginBottom: Theme.spacing.lg,
+    backgroundColor: '#FFF7F0',
+    padding: Theme.spacing.md,
+    borderRadius: Theme.borderRadius.md,
+  },
+  extraItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF3E0',
+    borderRadius: Theme.borderRadius.sm,
+    marginBottom: Theme.spacing.sm,
+    padding: Theme.spacing.sm,
+  },
+  addExtraButton: {
+    backgroundColor: '#FF9800',
   },
   addOptionButton: {
     backgroundColor: Theme.colors.secondary,

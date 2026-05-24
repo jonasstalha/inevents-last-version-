@@ -8,6 +8,7 @@ import { Alert, Animated, Image, Modal, ScrollView, StatusBar, StyleSheet, Text,
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchServicesByArtistId } from '../../firebase/artistServices';
 import { addServiceToFirebase, addTicketToFirebase, fetchArtistById } from '../../firebase/artistsService';
+import uploadServiceImage from '../../firebase/uploadServiceImage';
 import AnalyticsPage from './AnalyticsPage';
 import { useArtistStore } from './ArtistStore';
 import CalendarPage from './CalendarPage';
@@ -164,7 +165,7 @@ const ArtistMobileApp = () => {
           maxQuantity: '10',
           category: serviceToEdit.category || '',
           images: serviceToEdit.images || [],
-          addOns: [{ name: '', price: '', type: 'checkbox' }],
+          addOns: serviceToEdit.extras || serviceToEdit.addOns || [{ name: '', price: '', type: 'checkbox' }],
           providerName: artistProfile.name,
           providerAvatar: artistProfile.image,
           rating: serviceToEdit.rating || 0,
@@ -177,7 +178,9 @@ const ArtistMobileApp = () => {
 
         // Also populate individual states
         setServiceImages(serviceToEdit.images || []);
-        setServiceLocation({ city: '' });
+        setServiceLocation({ city: serviceToEdit.city || '' });
+        // Load extras/addOns into local state
+        setAddOns(serviceToEdit.extras || serviceToEdit.addOns || [{ name: '', price: '', type: 'checkbox' }]);
         
         // Set editing mode
         setEditingServiceId(serviceId);
@@ -229,13 +232,46 @@ const ArtistMobileApp = () => {
     tags: '',
   });
   const [serviceImages, setServiceImages] = useState<string[]>([]);
+  const [isUploadingImages, setIsUploadingImages] = useState(false);
   const [serviceOptions, setServiceOptions] = useState([
     { title: '', price: '', description: '' }
   ]);
   const [serviceLocation, setServiceLocation] = useState({ city: '' });
+  const [showCreateServiceModal, setShowCreateServiceModal] = useState(false);
+  const [showRegionModal, setShowRegionModal] = useState(false);
+  const [showCityModal, setShowCityModal] = useState(false);
+  const MOROCCAN_REGIONS = [
+    'Tanger-Tétouan-Al Hoceïma',
+    "L'Oriental",
+    'Fès-Meknès',
+    'Rabat-Salé-Kénitra',
+    'Béni Mellal-Khénifra',
+    'Casablanca-Settat',
+    'Marrakech-Safi',
+    'Drâa-Tafilalet',
+    'Souss-Massa',
+    'Guelmim-Oued Noun',
+    'Laâyoune-Sakia El Hamra',
+    'Dakhla-Oued Ed-Dahab'
+  ];
+  const MOROCCAN_CITIES: { [key: string]: string[] } = {
+    'Tanger-Tétouan-Al Hoceïma': ['Tanger', 'Tétouan', 'Al Hoceïma'],
+    "L'Oriental": ['Oujda', 'Nador', 'Berkane'],
+    'Fès-Meknès': ['Fès', 'Meknès', 'Ifrane'],
+    'Rabat-Salé-Kénitra': ['Rabat', 'Salé', 'Kénitra'],
+    'Béni Mellal-Khénifra': ['Béni Mellal', 'Khénifra', 'Khouribga'],
+    'Casablanca-Settat': ['Casablanca', 'Mohammedia', 'El Jadida'],
+    'Marrakech-Safi': ['Marrakech', 'Essaouira', 'Safi'],
+    'Drâa-Tafilalet': ['Errachidia', 'Ouarzazate', 'Zagora'],
+    'Souss-Massa': ['Agadir', 'Inezgane', 'Tiznit'],
+    'Guelmim-Oued Noun': ['Guelmim', 'Tan-Tan'],
+    'Laâyoune-Sakia El Hamra': ['Laâyoune', 'Boujdour'],
+    'Dakhla-Oued Ed-Dahab': ['Dakhla']
+  };
   const [addOns, setAddOns] = useState([
     { name: '', price: '', type: 'checkbox' },
   ]);
+  const [addOnsPending, setAddOnsPending] = useState<{ name?: string; price?: string }>({ name: '', price: '' });
   const [isAvailable, setIsAvailable] = useState(true);
   const [minQuantity, setMinQuantity] = useState('1');
   const [maxQuantity, setMaxQuantity] = useState('10');
@@ -258,6 +294,7 @@ const ArtistMobileApp = () => {
       quality: 0.7,
     });
     if (!result.canceled && result.assets && result.assets.length > 0) {
+      // Keep local URIs for preview; actual upload happens in addService()
       setServiceImages([...serviceImages, ...result.assets.map(a => a.uri)]);
     }
   };
@@ -358,6 +395,7 @@ const ArtistMobileApp = () => {
       basePrice: Number(newService.basePrice),
       price: Number(newService.basePrice), // Add price field for compatibility
       images: serviceImages,
+      extras: addOns.map(a => ({ id: a.name ? a.name.toString().slice(0,8) : Math.random().toString(36).slice(2,9), name: a.name, price: Number(a.price || 0), type: a.type || 'checkbox' })),
       options: serviceOptions.map(opt => ({
         id: Date.now().toString() + Math.random(),
         title: opt.title,
@@ -378,9 +416,33 @@ const ArtistMobileApp = () => {
       artistId: currentUser.uid,
     };
     try {
-      console.log('Attempting to add service to Firebase:', serviceData);
-      Alert.alert('Debug', 'Attempting to add service to Firebase. Check console for details.');
-      const result = await addServiceToFirebase(currentUser.uid, serviceData);
+      let result: any = null;
+      // If there are local images, upload them first and replace local URIs with download URLs
+      if (serviceImages && serviceImages.length > 0) {
+        setIsUploadingImages(true);
+        const generatedServiceId = `${Date.now()}-${Math.random().toString(36).slice(2,9)}`;
+        try {
+          console.log('Uploading images before creating service...', { count: serviceImages.length });
+          const uploaded = await Promise.all(serviceImages.map(uri => uploadServiceImage(uri, currentUser.uid, generatedServiceId)));
+          console.log('Images uploaded, URLs:', uploaded);
+          serviceData.images = uploaded;
+          // Pass the same generated ID so storage path matches service doc
+          var serviceIdToUse = generatedServiceId;
+        } catch (uploadErr) {
+          console.error('Error uploading images before creating service:', uploadErr);
+          Alert.alert('Image Upload Error', 'Failed to upload images. Please try again.');
+          return;
+        } finally {
+          setIsUploadingImages(false);
+        }
+        console.log('Attempting to add service to Firebase with uploaded images:', serviceData);
+        Alert.alert('Debug', 'Attempting to add service to Firebase. Check console for details.');
+        result = await addServiceToFirebase(currentUser.uid, serviceData, serviceIdToUse);
+      } else {
+        console.log('Attempting to add service to Firebase:', serviceData);
+        Alert.alert('Debug', 'Attempting to add service to Firebase. Check console for details.');
+        result = await addServiceToFirebase(currentUser.uid, serviceData);
+      }
       console.log('Service added to Firebase result:', result);
       Alert.alert('Success', 'Service added to Firebase!');
       // Fetch all services from Firebase and update local gigs state
@@ -423,6 +485,7 @@ const ArtistMobileApp = () => {
       setServiceImages([]);
       setServiceOptions([{ title: '', price: '', description: '' }]);
       setServiceLocation({ city: '' });
+      setAddOns([{ name: '', price: '', type: 'checkbox' }]);
       setSelectedCategory(null);
     } catch (error) {
       setServiceError('Failed to add service to Firebase.');
@@ -648,6 +711,99 @@ const ArtistMobileApp = () => {
             </View>
           </View>
         </View>
+      </Modal>
+      {/* Create Service Modal (quick form) */}
+      <Modal visible={showCreateServiceModal} transparent animationType="slide" onRequestClose={() => setShowCreateServiceModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '90%' }]}>
+            <Text style={[styles.modalTitle, { marginBottom: 8 }]}>Create Service</Text>
+            <ScrollView>
+              <Text style={styles.inputLabel}>Title</Text>
+              <TextInput style={styles.textInput} placeholder="Service title" value={newService.title} onChangeText={t => setNewService({ ...newService, title: t })} />
+              <Text style={styles.inputLabel}>Description</Text>
+              <TextInput style={[styles.textInput, styles.textArea]} placeholder="Description" value={newService.description} onChangeText={t => setNewService({ ...newService, description: t })} multiline numberOfLines={3} />
+              <Text style={styles.inputLabel}>Base Price (MAD)</Text>
+              <TextInput style={styles.textInput} placeholder="0" keyboardType="numeric" value={newService.basePrice} onChangeText={t => setNewService({ ...newService, basePrice: t.replace(/[^0-9]/g, '') })} />
+
+              <Text style={styles.inputLabel}>Region</Text>
+              <TouchableOpacity style={[styles.dropdownButtonCompact, { justifyContent: 'space-between' }]} onPress={() => setShowRegionModal(true)}>
+                <Text style={serviceLocation.region ? { color: '#111' } : { color: '#777' }}>{(serviceLocation as any).region || 'Select a region'}</Text>
+                <Ionicons name="chevron-down" size={18} color="#777" />
+              </TouchableOpacity>
+
+              <Text style={styles.inputLabel}>City</Text>
+              <TouchableOpacity style={[styles.dropdownButtonCompact, { justifyContent: 'space-between' }]} onPress={() => { if (!(serviceLocation as any).region) { setServiceError('Select a region first'); return; } setShowCityModal(true); }}>
+                <Text style={(serviceLocation as any).city ? { color: '#111' } : { color: '#777' }}>{(serviceLocation as any).city || 'Select a city'}</Text>
+                <Ionicons name="chevron-down" size={18} color="#777" />
+              </TouchableOpacity>
+
+              {/* Extras UI */}
+              <Text style={[styles.inputLabel, { marginTop: 12 }]}>Extras (optional)</Text>
+              {addOns.map((a, idx) => (
+                <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                  <View style={{ flex: 2 }}>
+                    <Text style={{ fontWeight: '600' }}>{a.name}</Text>
+                    <Text style={{ color: '#666' }}>{a.type}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={{ marginRight: 8 }}>{a.price} MAD</Text>
+                    <TouchableOpacity onPress={() => removeAddOn(idx)}>
+                      <Ionicons name="remove-circle" size={22} color="#ff3b30" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                <TextInput style={[styles.textInput, { flex: 2 }]} placeholder="Extra name" value={(addOnsPending && addOnsPending.name) || ''} onChangeText={v => setAddOnsPending({ ...addOnsPending, name: v })} />
+                <TextInput style={[styles.textInput, { width: 100 }]} placeholder="Price" keyboardType="numeric" value={(addOnsPending && addOnsPending.price) || ''} onChangeText={v => setAddOnsPending({ ...addOnsPending, price: v.replace(/[^0-9]/g, '') })} />
+              </View>
+              <View style={{ flexDirection: 'row', marginTop: 8 }}>
+                <TouchableOpacity onPress={() => { if (!addOnsPending || !addOnsPending.name) { Alert.alert('Missing', 'Enter extra name'); return; } setAddOns([...addOns, { name: addOnsPending.name, price: addOnsPending.price, type: 'checkbox' }]); setAddOnsPending({ name: '', price: '' }); }} style={{ marginRight: 12 }}>
+                  <Text style={{ color: '#667eea' }}>Add Extra</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => { setShowCreateServiceModal(false); }}>
+                  <Text style={{ color: '#666' }}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+            <TouchableOpacity style={[styles.submitButton]} onPress={async () => { await addService(); setShowCreateServiceModal(false); }}>
+              <LinearGradient colors={['#667eea', '#764ba2']} style={styles.submitButtonGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+                <Ionicons name="add-circle" size={20} color="#fff" />
+                <Text style={styles.submitButtonText}>Create Service</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Region Modal */}
+      <Modal transparent animationType="fade" visible={showRegionModal} onRequestClose={() => setShowRegionModal(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowRegionModal(false)}>
+          <View style={styles.modalContentList}>
+            <ScrollView>
+              {MOROCCAN_REGIONS.map(r => (
+                <TouchableOpacity key={r} style={styles.modalOption} onPress={() => { setServiceLocation(prev => ({ ...(prev as any), region: r, city: '' })); setShowRegionModal(false); setServiceError(''); }}>
+                  <Text style={styles.modalOptionText}>{r}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* City Modal */}
+      <Modal transparent animationType="fade" visible={showCityModal} onRequestClose={() => setShowCityModal(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowCityModal(false)}>
+          <View style={styles.modalContentList}>
+            <ScrollView>
+              {((MOROCCAN_CITIES as any)[(serviceLocation as any).region] || []).map(c => (
+                <TouchableOpacity key={c} style={styles.modalOption} onPress={() => { setServiceLocation(prev => ({ ...(prev as any), city: c })); setShowCityModal(false); setServiceError(''); }}>
+                  <Text style={styles.modalOptionText}>{c}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
       </Modal>
     </ScrollView>
   );
@@ -917,7 +1073,7 @@ const OrderManagementPage = () => {
       {/* Quick Actions */}
       <View style={styles.quickActions}>
         <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <TouchableOpacity style={styles.quickActionButton}>
+        <TouchableOpacity style={styles.quickActionButton} onPress={() => setShowCreateServiceModal(true)}>
           <Ionicons name="add-circle" size={24} color="#6a0dad" />
           <Text style={styles.quickActionText}>Create Service Package</Text>
         </TouchableOpacity>
@@ -1414,6 +1570,43 @@ const styles = StyleSheet.create({
   textArea: {
     height: 100,
     textAlignVertical: 'top',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: '92%',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+  },
+  modalContentList: {
+    width: '80%',
+    maxHeight: 400,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 8,
+  },
+  modalOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  modalOptionText: {
+    fontSize: 16,
+    color: '#111827',
+  },
+  dropdownButtonCompact: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
   },
   addServiceButton: {
     backgroundColor: '#6a0dad',

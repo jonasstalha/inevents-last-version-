@@ -223,8 +223,16 @@ service cloud.firestore {
       allow create, update: if isAuthenticated() && request.auth.uid == userId;
       allow delete: if isAdmin();
     }
-    
+
+    // Point-reward rules (admin-configurable; clients read to display UI)
+    match /pointsConfig/{ruleId} {
+      allow read:               if isAuthenticated();    // any logged-in user
+      allow create, update:     if isAuthenticated();    // system: seeded once, authenticated users can update
+      allow delete:             if isAdmin();
+    }
+
     // Reward transactions (transaction history)
+
     match /rewardTransactions/{transactionId} {
       allow read: if isAuthenticated() && 
         (request.auth.uid == resource.data.userId || isAdmin());

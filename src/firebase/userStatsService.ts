@@ -1,8 +1,65 @@
 import { collection, doc, getDoc, getDocs, getFirestore, query, setDoc, where } from 'firebase/firestore';
 import app from './firebaseConfig';
-import { getUserRewards } from './rewardsService';
+import { getUserRewards, getRewardRules, REWARDS_CONFIG } from './rewardsService';
+import { getPointsConfig, PointsConfigResult } from './pointsConfigService';
 
 const db = getFirestore(app);
+
+/**
+ * Setup rules—helper used by the profile on mount.
+ * Pulls live rules from Firestore so userStatsService calculation logic (below)
+ * always uses the same dynamic values as rewardsService.
+ */
+let _statsRules: {
+  orderPoints:              number;
+  ticketPoints:             number;
+  spendingRatePerMad:       number;
+} = {
+  orderPoints:             REWARDS_CONFIG.orderPoints,
+  ticketPoints:            REWARDS_CONFIG.ticketPoints,
+  spendingRatePerMad:      10,
+};
+
+// Cache to prevent repeated loads
+let _rulesLoadInProgress = false;
+let _rulesLastLoaded = 0;
+const RULES_CACHE_TTL = 60000; // 1 minute cache
+
+export async function loadStatsRules(): Promise<void> {
+  // Return immediately if load is already in progress
+  if (_rulesLoadInProgress) {
+    return;
+  }
+
+  // Return if cache is still valid
+  const now = Date.now();
+  if (_rulesLastLoaded && (now - _rulesLastLoaded) < RULES_CACHE_TTL) {
+    return;
+  }
+
+  _rulesLoadInProgress = true;
+  try {
+    const cfg: PointsConfigResult = await getPointsConfig();
+    _statsRules = {
+      orderPoints:        cfg.orderPoints,
+      ticketPoints:       cfg.ticketPoints,
+      spendingRatePerMad: cfg.spendingRatePerMad,
+    };
+    _rulesLastLoaded = now;
+    console.log('[userStatsService] Rules loaded:', _statsRules);
+  } catch (err) {
+    console.warn('[userStatsService] Could not load Firestore rules:', err);
+  } finally {
+    _rulesLoadInProgress = false;
+  }
+}
+
+/**
+ * Returns the current cached rules for use in calculations below.
+ */
+export function getStatsRules() {
+  return { ..._statsRules };
+}
 
 export interface UserStats {
   orders: number;
@@ -129,13 +186,15 @@ export const updateStatisticsAfterPurchase = async (
       totalSpent: 0
     };
     
-    const orderAmount = typeof orderData.total === 'number' ? orderData.total : parseFloat(orderData.total) || 0;
+    const orderAmount   = typeof orderData.total === 'number' ? orderData.total : parseFloat(orderData.total || '0') || 0;
     const isTicketPurchase = orderData.type === 'ticket';
-    
-    // Calculate new points based on purchase type
-    const newOrderPoints = isTicketPurchase ? 0 : 10; // 10 points per service order
-    const newTicketPoints = isTicketPurchase ? 5 : 0; // 5 points per ticket
-    const newSpendingPoints = Math.floor(orderAmount / 10); // 1 point per 10 MAD spent
+
+    // ── Firestore-backed rules ────────────────────────────────────────────────
+    const rules = _statsRules;           // populated at mount by `loadStatsRules()`
+    const newOrderPoints      = isTicketPurchase ? 0 : rules.orderPoints;
+    const newTicketPoints     = isTicketPurchase ? rules.ticketPoints : 0;
+    const newSpendingPoints   = Math.floor(orderAmount / rules.spendingRatePerMad);
+    // ────────────────────────────────────────────────────────────────────────
     
     const updatedStats: UserStats = {
       orders: currentStats.orders + (isTicketPurchase ? 0 : 1),
@@ -211,6 +270,9 @@ export const getUserStatistics = async (userId: string): Promise<UserStats> => {
 export const recalculateUserStatistics = async (userId: string): Promise<UserStats> => {
   try {
     console.log(`🔄 Recalculating statistics for user: ${userId}`);
+
+    // Ensure we use the latest Firestore rules for the recalculation
+    await loadStatsRules();
 
     // Get fresh statistics by re-scanning all data
     const freshStats = await fetchUserStatistics(userId);

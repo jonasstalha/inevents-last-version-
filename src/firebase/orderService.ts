@@ -1,7 +1,8 @@
 import { getAuth } from 'firebase/auth';
-import { addDoc, collection, doc, getDoc, getDocs, getFirestore, increment, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, getFirestore, increment, onSnapshot, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import app from './firebaseConfig';
 import { awardTicketPoints } from './rewardsService';
+import { toTimestampString } from '../utils/timestampUtils';
 
 /**
  * Order Service
@@ -11,13 +12,20 @@ import { awardTicketPoints } from './rewardsService';
  * - Fetching orders for clients
  * - Managing order status updates
  * - Reducing ticket quantities when purchases are made
+ * - Real-time custom service order streaming (forallfeed)
+ * - Traceability helpers (notification history per order)
  * 
- * When a ticket is purchased, the following inventory updates occur:
- * 1. In the artist's ticket collection: 
- *    - Updates specific ticket type quantities if they exist
- *    - Otherwise decrements the overall availableQuantity
- * 2. In the global tickets collection:
- *    - Decrements the availableTickets counter
+ * Firestore wiring
+ * ---------------
+ * Ticket orders:
+ *   users/{clientId}/orders   ← source of truth (client side)
+ *   users/{artistId}/incoming_orders  ← copy for the artist
+ *   orders (global)           ← copy for artist tab
+ * 
+ * Service orders (custom orders):
+ *   customOrders              ← top-level tl
+ *   users/{artistId}/incoming_custom_orders  ← copy for the artist
+ *   users/{clientId}/notifications  {type:' )">order_status'} ← traceability feed2
  */
 
 // Interface for order creation
@@ -425,3 +433,150 @@ export const cancelOrder = async (orderId: string): Promise<void> => {
     throw error;
   }
 };
+
+// ─── Custom / Service-Order types ──────────────────────────────────────────────
+
+export type CustomOrderStatus = 'pending' | 'confirmed' | 'rejected' | 'completed';
+
+export interface CustomOrderField {
+  clientId:    string;
+  artistId:    string;
+  serviceId:   string;
+  serviceName: string;
+  clientPrice: number;
+  realPrice:   number;
+  message:     string;
+  status?:     CustomOrderStatus | string;
+  clientInfo?: {
+    fullName: string;
+    email: string;
+    phone: string;
+    address: string;
+    city: string;
+    country: string;
+  };
+  customization?: {
+    eventDate:  string;
+    eventTime:  string;
+    duration:   string;
+    location:   string;
+    guestCount: string;
+    specificRequests: string;
+  };
+  priceProposal?: {
+    proposedPrice:     string;
+    budgetRange:       string;
+    priceJustification: string;
+  };
+  personalInfo?: {
+    fullName:    string;
+    email:       string;
+    phone:       string;
+    address:     string;
+    city:        string;
+    country:     string;
+    additionalNotes?: string;
+  };
+  createdAt?:  string;
+  updatedAt?:  string;
+  [key: string]: any;
+}
+
+// ─── Realtime custom-order stream (client side) ─────────────────────────────────
+
+/** Server-side filter on `customOrders` where clientId matches — no index needed for a single where. */
+export function getClientCustomOrdersRealtime(
+  clientId: string,
+  onNext:    (orders: CustomOrderField[]) => void,
+  onError?:  (err: Error) => void,
+): () => void {
+  const db        = getFirestore(app);
+  const customRef = collection(db, 'customOrders');
+  const q         = query(customRef, where('clientId', '==', clientId));
+
+  const unsub = onSnapshot(
+    q,
+    (snap) => {
+      const orders = snap.docs.map(dc => ({
+        id:    dc.id,
+        ...(dc.data() as CustomOrderField),
+      }));
+      onNext(orders);
+    },
+    (err) => { onError?.(err as Error); },
+  );
+  return unsub;
+}
+
+// ─── Traceability helper ───────────────────────────────────────────────────────
+
+/** Domain-level meaning of each status the artist can set on a custom order. */
+const SERVICE_STATUS_LABEL: Record<string, string> = {
+  pending:    'Waiting for artist response',
+  confirmed:  'Approved',
+  rejected:   'Declined',
+  completed:  'Completed',
+};
+
+/**
+ * Fetches `users/{clientUid}/notifications` filtered by `orderId` and `type:'order_status'`,
+ * then enriches each entry with artist display name.
+ * Returns an ordered array (oldest first) representing the full traceability chain.
+ */
+export async function getOrderTraceability(
+  db:   ReturnType<typeof getFirestore>,
+  clientUid: string,
+  orderId:   string,
+): Promise<Array<{
+  id:           string;
+  status:       string;
+  title:        string;
+  body:         string;
+  isRead:       boolean;
+  createdAt:    string;
+  artistId:     string;
+  artistName:   string;
+  displayLabel: string;
+}>> {
+  const notifsRef = collection(db, 'users', clientUid, 'notifications');
+  // onSnapshot gives us a whole query; caller wraps it or we return a snapshot handler.
+  // Here we return a static snapshot so this helper stays promise-based.
+  const q      = query(notifsRef, where('orderId', '==', orderId));
+  const snap   = await getDocs(q);
+  const result: any[] = [];
+
+  // Build artist-name lookup from all matching docs
+  const allArtistIds = [...new Set(
+    snap.docs.map(d => (d.data() as any).artistId).filter(Boolean) as string[]
+  )];
+  const artistNameMap: Record<string, string> = {};
+  if (allArtistIds.length) {
+    const userSnap = await getDocs(collection(db, 'users'));
+    for (const u of userSnap.docs) {
+      const d = u.data() as any;
+      if (allArtistIds.includes(u.id)) {
+        artistNameMap[u.id] = d.storeName || d.name || d.displayName || `Artist ${u.id.slice(0, 6)}`;
+      }
+    }
+  }
+
+  for (const dc of snap.docs) {
+    const d    = dc.data() as any;
+    const stat = d.status || 'pending';
+    result.push({
+      id:           dc.id,
+      status:       stat,
+      title:        d.title || SERVICE_STATUS_LABEL[stat] || stat,
+      body:         d.body || '',
+      isRead:       !!d.isRead,
+      createdAt:    toTimestampString(d.createdAt) || new Date().toISOString(),
+      artistId:     d.artistId || '',
+      artistName:   artistNameMap[d.artistId] || 'Service Provider',
+      displayLabel: SERVICE_STATUS_LABEL[stat] || stat,
+    });
+  }
+
+  result.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  return result;
+}
+

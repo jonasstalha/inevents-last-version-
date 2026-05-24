@@ -285,16 +285,9 @@ export default function Layout() {
              title: 'Tickets',
              tabBarIcon: ({ color, size }) => <FontAwesome5 name="ticket-alt" color={color} size={size} />,
            }}
-         />
-         <Tabs.Screen
-           name="invoices"
-           options={{
-             title: 'Invoices',
-             tabBarIcon: ({ color, size }) => <FontAwesome5 name="file-invoice" color={color} size={size} />,
-           }}
-         />
-         <Tabs.Screen
-           name="profile"
+          />
+          <Tabs.Screen
+            name="profile"
            options={{
              title: 'Profile',
              tabBarIcon: ({ color, size }) => <FontAwesome5 name="user" color={color} size={size} />,

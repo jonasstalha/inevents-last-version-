@@ -20,6 +20,12 @@ type Order = {
     quantity: number;
     price: number;
   }>;
+  extras?: Array<{
+    id: string;
+    title: string;
+    quantity: number;
+    price: number;
+  }>;
   totalPrice: number;
   status: 'pending' | 'accepted' | 'declined' | 'confirmed' | 'rejected' | 'completed';
   createdAt: string;
@@ -507,35 +513,51 @@ export default function OrderDetailsPage() {
           </View>
         )}
 
-        {/* Order items/tickets - detailed view */}
-        {order.type === 'ticket' && (
-          <View style={styles.detailSection}>
-            <Text style={styles.sectionTitle}>🎫 Order Items</Text>
-            {hasDetailedItems ? (
-              order.ticketQuantities!.map((orderItem, index) => (
-                <View key={index} style={styles.itemDetailRow}>
-                  <View style={styles.itemInfo}>
-                    <Text style={styles.itemTitle}>{orderItem.type || `Item ${index + 1}`}</Text>
-                    <Text style={styles.itemQuantity}>Quantity: {orderItem.quantity}</Text>
-                  </View>
-                  <Text style={styles.itemPrice}>{orderItem.quantity} × {orderItem.price} MAD</Text>
-                </View>
-              ))
-            ) : orderItems.length > 0 ? (
-              orderItems.map((orderItem, index) => (
-                <View key={index} style={styles.itemDetailRow}>
-                  <View style={styles.itemInfo}>
-                    <Text style={styles.itemTitle}>{'title' in orderItem ? orderItem.title : orderItem.type || `Item ${index + 1}`}</Text>
-                    <Text style={styles.itemQuantity}>Quantity: {orderItem.quantity}</Text>
-                  </View>
-                  <Text style={styles.itemPrice}>{orderItem.quantity} × {orderItem.price} MAD</Text>
-                </View>
-              ))
-            ) : (
-              <Text style={styles.noItems}>No items details available</Text>
-            )}
-          </View>
-        )}
+         {/* Order items/tickets - detailed view */}
+         {order.type === 'ticket' && (
+           <View style={styles.detailSection}>
+             <Text style={styles.sectionTitle}>🎫 Order Items</Text>
+             {hasDetailedItems ? (
+               order.ticketQuantities!.map((orderItem, index) => (
+                 <View key={index} style={styles.itemDetailRow}>
+                   <View style={styles.itemInfo}>
+                     <Text style={styles.itemTitle}>{orderItem.type || `Item ${index + 1}`}</Text>
+                     <Text style={styles.itemQuantity}>Quantity: {orderItem.quantity}</Text>
+                   </View>
+                   <Text style={styles.itemPrice}>{orderItem.quantity} × {orderItem.price} MAD</Text>
+                 </View>
+               ))
+             ) : orderItems.length > 0 ? (
+               orderItems.map((orderItem, index) => (
+                 <View key={index} style={styles.itemDetailRow}>
+                   <View style={styles.itemInfo}>
+                     <Text style={styles.itemTitle}>{'title' in orderItem ? orderItem.title : orderItem.type || `Item ${index + 1}`}</Text>
+                     <Text style={styles.itemQuantity}>Quantity: {orderItem.quantity}</Text>
+                   </View>
+                   <Text style={styles.itemPrice}>{orderItem.quantity} × {orderItem.price} MAD</Text>
+                 </View>
+               ))
+             ) : (
+               <Text style={styles.noItems}>No items details available</Text>
+             )}
+           </View>
+         )}
+         
+         {/* Order extras - detailed view */}
+         {order.type === 'ticket' && order.extras && order.extras.length > 0 && (
+           <View style={styles.detailSection}>
+             <Text style={styles.sectionTitle}>✨ Order Extras</Text>
+             {order.extras.map((extra, index) => (
+               <View key={index} style={styles.itemDetailRow}>
+                 <View style={styles.itemInfo}>
+                   <Text style={styles.itemTitle}>{extra.title || `Extra ${index + 1}`}</Text>
+                   <Text style={styles.itemQuantity}>Quantity: {extra.quantity}</Text>
+                 </View>
+                 <Text style={styles.itemPrice}>{extra.quantity} × {extra.price} MAD</Text>
+               </View>
+             ))}
+           </View>
+         )}
 
         {/* Message from client */}
         {order.message && order.message.trim() && (

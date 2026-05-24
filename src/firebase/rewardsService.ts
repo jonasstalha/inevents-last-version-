@@ -1,15 +1,25 @@
-import { addDoc, collection, doc, getDoc, getDocs, increment, orderBy, query, setDoc, Timestamp, updateDoc, where } from 'firebase/firestore';
-import { db } from './firebaseConfig';
+/**
+ * rewardsService.ts
+ * ────────────────
+ * Points / rewards engine — fully Firestore-driven.
+ *
+ * Firestore data-flow
+ * ────────────────────
+ * rewardTransactions/{doc}  ← one doc per points event
+ * userRewards/{userId}      ← live balance, lifetime, level
+ * pointsConfig/{rulesDoc}   ← point rules (editable in real-time; need an admin UI)
+ */
 
-// Rewards configuration
-export const REWARDS_CONFIG = {
-  ORDER_POINTS: 50,        // Points per order
-  TICKET_POINTS: 25,       // Points per ticket
-  SERVICE_ORDER_POINTS: 75, // Points per service order
-  CUSTOM_ORDER_POINTS: 100, // Points per custom order
-  REVIEW_POINTS: 10,       // Points per review
-  REFERRAL_POINTS: 200,    // Points per referral
-};
+import { addDoc, collection, doc, getDoc, getDocs, getFirestore, increment, onSnapshot, orderBy, query, setDoc, Timestamp, updateDoc, where } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
+import app from './firebaseConfig';
+import { getPointsConfig, PointsConfigResult, WritePointsConfig } from './pointsConfigService';
+
+const db = getFirestore(app);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
 
 export interface RewardTransaction {
   id?: string;
@@ -17,7 +27,7 @@ export interface RewardTransaction {
   type: 'order' | 'ticket' | 'service_order' | 'custom_order' | 'review' | 'referral' | 'redemption';
   points: number;
   description: string;
-  relatedId?: string; // Order ID, Ticket ID, etc.
+  relatedId?: string;
   timestamp: Date;
   metadata?: {
     orderAmount?: number;
@@ -37,92 +47,192 @@ export interface UserRewards {
   lastUpdated: Date;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Reward levels
+// ─────────────────────────────────────────────────────────────────────────────
+
 const REWARD_LEVELS = [
-  { level: 1, name: 'Bronze Explorer', minPoints: 0, maxPoints: 499 },
-  { level: 2, name: 'Silver Adventurer', minPoints: 500, maxPoints: 999 },
-  { level: 3, name: 'Gold Enthusiast', minPoints: 1000, maxPoints: 1999 },
-  { level: 4, name: 'Platinum VIP', minPoints: 2000, maxPoints: 4999 },
-  { level: 5, name: 'Diamond Elite', minPoints: 5000, maxPoints: 9999 },
-  { level: 6, name: 'Crystal Legend', minPoints: 10000, maxPoints: Infinity },
+  { level: 1, name: 'Bronze Explorer',   minPoints: 0,    maxPoints: 499  },
+  { level: 2, name: 'Silver Adventurer', minPoints: 500,  maxPoints: 999  },
+  { level: 3, name: 'Gold Enthusiast',   minPoints: 1000, maxPoints: 1999 },
+  { level: 4, name: 'Platinum VIP',      minPoints: 2000, maxPoints: 4999 },
+  { level: 5, name: 'Diamond Elite',     minPoints: 5000, maxPoints: 9999 },
+  { level: 6, name: 'Crystal Legend',    minPoints: 10000, maxPoints: Infinity },
 ];
 
-/**
- * Calculate user level based on total points
- */
-export function calculateUserLevel(totalPoints: number) {
-  const level = REWARD_LEVELS.find(l => totalPoints >= l.minPoints && totalPoints <= l.maxPoints) || REWARD_LEVELS[0];
-  const nextLevel = REWARD_LEVELS.find(l => l.level === level.level + 1);
-  
-  return {
-    level: level.level,
-    levelName: level.name,
-    nextLevelPoints: nextLevel ? nextLevel.minPoints - totalPoints : 0,
-    isMaxLevel: !nextLevel,
-  };
+// ─────────────────────────────────────────────────────────────────────────────
+// In-memory rules cache (populated from Firestore)
+// ─────────────────────────────────────────────────────────────────────────────
+
+type CachedRules = {
+  orderPoints:                number;
+  ticketPoints:               number;
+  serviceOrderPoints:         number;
+  customOrderPoints:          number;
+  serviceOrderSpendingPoints: number;
+  ticketSpendingPoints:       number;
+  spendingRatePerMad:         number;
+  reviewPoints:               number;
+  referralPoints:             number;
+};
+
+export let REWARDS_CONFIG: CachedRules = {
+  orderPoints:                50,
+  ticketPoints:               25,
+  serviceOrderPoints:         75,
+  customOrderPoints:          100,
+  serviceOrderSpendingPoints: 10,
+  ticketSpendingPoints:       5,
+  spendingRatePerMad:         10,
+  reviewPoints:               10,
+  referralPoints:             200,
+};
+
+// Cache to prevent repeated loads
+let _rewardsLoadInProgress = false;
+let _rewardsLastLoaded = 0;
+const REWARDS_CACHE_TTL = 60000; // 1 minute cache
+
+/** Pull Firestore rules once. Call at app start or whenever you want to refresh rules. */
+export async function loadRewardRules(): Promise<void> {
+  // Return immediately if load is already in progress
+  if (_rewardsLoadInProgress) {
+    return;
+  }
+
+  // Return if cache is still valid
+  const now = Date.now();
+  if (_rewardsLastLoaded && (now - _rewardsLastLoaded) < REWARDS_CACHE_TTL) {
+    return;
+  }
+
+  _rewardsLoadInProgress = true;
+  try {
+    const cfg: PointsConfigResult = await getPointsConfig();
+    REWARDS_CONFIG = {
+      orderPoints:                cfg.orderPoints,
+      ticketPoints:               cfg.ticketPoints,
+      serviceOrderPoints:         cfg.serviceOrderPoints,
+      customOrderPoints:          cfg.customOrderPoints,
+      serviceOrderSpendingPoints: cfg.serviceOrderSpendingPoints,
+      ticketSpendingPoints:       cfg.ticketSpendingPoints,
+      spendingRatePerMad:         cfg.spendingRatePerMad,
+      reviewPoints:               cfg.reviewPoints,
+      referralPoints:             cfg.referralPoints,
+    };
+    _rewardsLastLoaded = now;
+    console.log('[rewardsService] Rules loaded from Firestore:', REWARDS_CONFIG);
+  } catch (err) {
+    console.warn('[rewardsService] Could not load Firestore rules; using defaults:', err);
+  } finally {
+    _rewardsLoadInProgress = false;
+  }
 }
 
 /**
- * Get user rewards data
+ * Subscribe to Firestore rule changes.
+ * Returns an unsubscribe function.
  */
+export function subscribeRewardRules(onNext: () => void): () => void {
+  return getPointsConfig().then(() => onNext());
+}
+
+/** Expose the currently cached rules — call after `loadRewardRules()` first. */
+export function getRewardRules() {
+  return { ...REWARDS_CONFIG };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Level helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function calculateUserLevel(totalPoints: number) {
+  const level =
+    REWARD_LEVELS.find(
+      (l) => totalPoints >= l.minPoints && totalPoints <= l.maxPoints
+    ) || REWARD_LEVELS[0];
+  const next =
+    REWARD_LEVELS.find((l) => l.level === level.level + 1) || null;
+
+  return {
+    level: level.level,
+    levelName: level.name,
+    nextLevelPoints: next ? next.minPoints - totalPoints : 0,
+    isMaxLevel: !next,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Read
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function getUserRewards(userId: string): Promise<UserRewards | null> {
   try {
     const userRewardsRef = doc(db, 'userRewards', userId);
     const userRewardsSnap = await getDoc(userRewardsRef);
-    
+
     if (userRewardsSnap.exists()) {
-      const data = userRewardsSnap.data();
-      const levelInfo = calculateUserLevel(data.totalPoints);
-      
+      const d = userRewardsSnap.data();
+      const li = calculateUserLevel(d.totalPoints ?? 0);
       return {
         userId,
-        totalPoints: data.totalPoints || 0,
-        lifetimePoints: data.lifetimePoints || 0,
-        level: levelInfo.level,
-        levelName: levelInfo.levelName,
-        nextLevelPoints: levelInfo.nextLevelPoints,
-        lastUpdated: data.lastUpdated?.toDate() || new Date(),
+        totalPoints:    d.totalPoints    ?? 0,
+        lifetimePoints: d.lifetimePoints ?? 0,
+        level:          li.level,
+        levelName:      li.levelName,
+        nextLevelPoints: li.nextLevelPoints,
+        lastUpdated:    (d.lastUpdated as any)?.toDate?.() ?? new Date(),
       };
     }
-    
-    // Create initial rewards record if it doesn't exist
-    const initialRewards: UserRewards = {
+
+    // boot record
+    const li = calculateUserLevel(0);
+    await setDoc(
+      doc(db, 'userRewards', userId),
+      {
+        userId,
+        totalPoints:    0,
+        lifetimePoints: 0,
+        level:          li.level,
+        levelName:      li.levelName,
+        nextLevelPoints: li.nextLevelPoints,
+        lastUpdated:    Timestamp.now(),
+      },
+      { merge: true },
+    );
+
+    return {
       userId,
-      totalPoints: 0,
+      totalPoints:    0,
       lifetimePoints: 0,
-      level: 1,
-      levelName: 'Bronze Explorer',
-      nextLevelPoints: 500,
-      lastUpdated: new Date(),
+      level:          li.level,
+      levelName:      li.levelName,
+      nextLevelPoints: li.nextLevelPoints,
+      lastUpdated:    new Date(),
     };
-    
-    await setDoc(userRewardsRef, {
-      ...initialRewards,
-      lastUpdated: Timestamp.fromDate(initialRewards.lastUpdated),
-    });
-    
-    return initialRewards;
   } catch (error) {
     console.error('Error getting user rewards:', error);
     return null;
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Mutations
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * Add points to user account
+ * Add (or deduct) points from a user account and record the transaction.
  */
 export async function addPoints(
-  userId: string, 
-  points: number, 
-  type: RewardTransaction['type'], 
+  userId:    string,
+  points:    number,
+  type:      RewardTransaction['type'],
   description: string,
   relatedId?: string,
-  metadata?: RewardTransaction['metadata']
+  metadata?:  RewardTransaction['metadata'],
 ): Promise<boolean> {
   try {
-    console.log(`Adding ${points} points to user ${userId} for ${type}`);
-    
-    // Add transaction record
+    // ── Transaction record ────────────────────────────────────────────────────
     const transaction: Omit<RewardTransaction, 'id'> = {
       userId,
       type,
@@ -132,37 +242,36 @@ export async function addPoints(
       timestamp: new Date(),
       metadata,
     };
-    
-    const transactionsRef = collection(db, 'rewardTransactions');
-    await addDoc(transactionsRef, {
+
+    await addDoc(collection(db, 'rewardTransactions'), {
       ...transaction,
       timestamp: Timestamp.fromDate(transaction.timestamp),
     });
-    
-    // Update user rewards
-    const userRewardsRef = doc(db, 'userRewards', userId);
+
+    // ── Update user rewards ───────────────────────────────────────────────────
+    const userRewardsRef  = doc(db, 'userRewards', userId);
     const userRewardsSnap = await getDoc(userRewardsRef);
-    
+
     if (userRewardsSnap.exists()) {
-      // Update existing record
       await updateDoc(userRewardsRef, {
-        totalPoints: increment(points),
-        lifetimePoints: increment(points),
-        lastUpdated: Timestamp.fromDate(new Date()),
+        totalPoints:     increment(points),
+        lifetimePoints:  increment(points),
+        lastUpdated:     Timestamp.now(),
       });
     } else {
-      // Create new record
-      const levelInfo = calculateUserLevel(points);
+      const li = calculateUserLevel(points);
       await setDoc(userRewardsRef, {
-        totalPoints: points,
+        userId,
+        totalPoints:    points,
         lifetimePoints: points,
-        level: levelInfo.level,
-        levelName: levelInfo.levelName,
-        lastUpdated: Timestamp.fromDate(new Date()),
+        level:          li.level,
+        levelName:      li.levelName,
+        nextLevelPoints: li.nextLevelPoints,
+        lastUpdated:    Timestamp.now(),
       });
     }
-    
-    console.log(`Successfully added ${points} points to user ${userId}`);
+
+    console.log(`✅ [addPoints] ${points} pts → user ${userId} (${type})`);
     return true;
   } catch (error) {
     console.error('Error adding points:', error);
@@ -170,129 +279,118 @@ export async function addPoints(
   }
 }
 
-/**
- * Award points for order completion
- */
+// ─────────────────────────────────────────────────────────────────────────────
+// Award helpers — all read REWARDS_CONFIG which is sourced from Firestore
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function awardOrderPoints(
-  userId: string, 
-  orderId: string, 
-  orderAmount: number
+  userId:     string,
+  orderId:    string,
+  orderAmount: number,
 ): Promise<boolean> {
-  const points = REWARDS_CONFIG.ORDER_POINTS;
-  const description = `Earned ${points} points for completing order #${orderId.slice(-6)}`;
-  
-  return await addPoints(
-    userId, 
-    points, 
-    'order', 
-    description, 
-    orderId,
-    { orderAmount }
-  );
+  const basePoints = REWARDS_CONFIG.orderPoints;
+  const spendingPoints = Math.floor(orderAmount / REWARDS_CONFIG.spendingRatePerMad);
+  const totalPts = basePoints + spendingPoints;
+  const desc = `Earned ${basePoints} pts (order) + ${spendingPoints} pts (${orderAmount} MAD) = ${totalPts} pts total`;
+  return addPoints(userId, totalPts, 'order', desc, orderId, { orderAmount, basePoints, spendingPoints });
 }
 
-/**
- * Award points for ticket purchase
- */
 export async function awardTicketPoints(
-  userId: string, 
-  ticketId: string, 
-  ticketPrice: number,
-  eventName?: string
+  userId:       string,
+  ticketId:     string,
+  ticketPrice:  number,
+  eventName?:   string,
 ): Promise<boolean> {
-  const points = REWARDS_CONFIG.TICKET_POINTS;
-  const description = `Earned ${points} points for purchasing ticket${eventName ? ` to ${eventName}` : ''}`;
-  
-  return await addPoints(
-    userId, 
-    points, 
-    'ticket', 
-    description, 
-    ticketId,
-    { ticketPrice, eventName }
-  );
+  const basePoints = REWARDS_CONFIG.ticketPoints;
+  const spendingPoints = Math.floor(ticketPrice / REWARDS_CONFIG.spendingRatePerMad);
+  const totalPts = basePoints + spendingPoints;
+  const desc = `Earned ${basePoints} pts (ticket) + ${spendingPoints} pts (${ticketPrice} MAD)${eventName ? ` for ${eventName}` : ''}`;
+  return addPoints(userId, totalPts, 'ticket', desc, ticketId, { ticketPrice, eventName, basePoints, spendingPoints });
 }
 
-/**
- * Award points for service order
- */
 export async function awardServiceOrderPoints(
-  userId: string, 
-  serviceOrderId: string, 
-  serviceName: string,
-  orderAmount?: number
+  userId:         string,
+  serviceOrderId: string,
+  serviceName:    string,
+  orderAmount?:   number,
 ): Promise<boolean> {
-  const points = REWARDS_CONFIG.SERVICE_ORDER_POINTS;
-  const description = `Earned ${points} points for ordering ${serviceName}`;
-  
-  return await addPoints(
-    userId, 
-    points, 
-    'service_order', 
-    description, 
-    serviceOrderId,
-    { serviceName, orderAmount }
-  );
+  const basePoints = REWARDS_CONFIG.serviceOrderPoints;
+  const spendingPoints = orderAmount ? Math.floor(orderAmount / REWARDS_CONFIG.spendingRatePerMad) : 0;
+  const totalPts = basePoints + spendingPoints;
+  const desc = `Earned ${basePoints} pts (service order: ${serviceName})${spendingPoints > 0 ? ` + ${spendingPoints} pts (${orderAmount} MAD)` : ''}`;
+  return addPoints(userId, totalPts, 'service_order', desc, serviceOrderId, { serviceName, orderAmount, basePoints, spendingPoints });
 }
 
-/**
- * Award points for custom order
- */
 export async function awardCustomOrderPoints(
-  userId: string, 
-  customOrderId: string, 
-  serviceName: string,
-  orderAmount?: number
+  userId:         string,
+  customOrderId:  string,
+  serviceName:    string,
+  orderAmount?:   number,
 ): Promise<boolean> {
-  const points = REWARDS_CONFIG.CUSTOM_ORDER_POINTS;
-  const description = `Earned ${points} points for custom order: ${serviceName}`;
-  
-  return await addPoints(
-    userId, 
-    points, 
-    'custom_order', 
-    description, 
-    customOrderId,
-    { serviceName, orderAmount }
-  );
+  const basePoints = REWARDS_CONFIG.customOrderPoints;
+  const spendingPoints = orderAmount ? Math.floor(orderAmount / REWARDS_CONFIG.spendingRatePerMad) : 0;
+  const totalPts = basePoints + spendingPoints;
+  const desc = `Earned ${basePoints} pts (custom order: ${serviceName})${spendingPoints > 0 ? ` + ${spendingPoints} pts (${orderAmount} MAD)` : ''}`;
+  return addPoints(userId, totalPts, 'custom_order', desc, customOrderId, { serviceName, orderAmount, basePoints, spendingPoints });
 }
 
-/**
- * Get user reward transactions
- */
+export async function awardReviewPoints(
+  userId:   string,
+  reviewId: string,
+  rating:   number,
+): Promise<boolean> {
+  const pts  = REWARDS_CONFIG.reviewPoints;
+  const desc = `Earned ${pts} pts for leaving a review (${rating}★)`;
+  return addPoints(userId, pts, 'review', desc, reviewId, { rating });
+}
+
+export async function awardReferralPoints(
+  userId:       string,
+  referralCode: string,
+  referredUserId?: string,
+): Promise<boolean> {
+  const pts  = REWARDS_CONFIG.referralPoints;
+  const desc = `Earned ${pts} pts for referring a friend`;
+  return addPoints(userId, pts, 'referral', desc, referralCode, { referredUserId });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Read transaction history
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function getUserTransactions(
-  userId: string, 
-  limit: number = 20
+  userId: string,
+  limit:  number = 20,
 ): Promise<RewardTransaction[]> {
   try {
     const transactionsRef = collection(db, 'rewardTransactions');
     const q = query(
       transactionsRef,
       where('userId', '==', userId),
-      orderBy('timestamp', 'desc')
+      orderBy('timestamp', 'desc'),
     );
-    
-    const querySnapshot = await getDocs(q);
-    const transactions: RewardTransaction[] = [];
-    
-    querySnapshot.forEach((doc) => {
-      const data = doc.data();
-      transactions.push({
-        id: doc.id,
-        userId: data.userId,
-        type: data.type,
-        points: data.points,
-        description: data.description,
-        relatedId: data.relatedId,
-        timestamp: data.timestamp?.toDate() || new Date(),
-        metadata: data.metadata,
+
+    const snapshot = await getDocs(q);
+    const result: RewardTransaction[] = [];
+
+    snapshot.forEach((dc) => {
+      const d = dc.data();
+      result.push({
+        id:         dc.id,
+        userId:     d.userId,
+        type:       d.type,
+        points:     d.points,
+        description: d.description,
+        relatedId:  d.relatedId,
+        timestamp:  (d.timestamp as any)?.toDate?.() ?? new Date(),
+        metadata:   d.metadata,
       });
     });
-    
-    return transactions.slice(0, limit);
+
+    return result.slice(0, limit);
   } catch (error: any) {
     if (error.message?.includes('index')) {
-      console.warn('[getUserTransactions] Index building, returning empty list.');
+      console.warn('[rewardsService] Index building; returning empty list.');
     } else {
       console.error('Error getting user transactions:', error);
     }
@@ -300,67 +398,54 @@ export async function getUserTransactions(
   }
 }
 
-/**
- * Redeem points (for future features like discounts)
- */
+// ─────────────────────────────────────────────────────────────────────────────
+// Redemption
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function redeemPoints(
-  userId: string, 
-  points: number, 
+  userId:    string,
+  points:    number,
   description: string,
-  rewardId?: string
+  rewardId?: string,
 ): Promise<boolean> {
   try {
-    // Check if user has enough points
     const userRewards = await getUserRewards(userId);
     if (!userRewards || userRewards.totalPoints < points) {
-      console.log('Insufficient points for redemption');
+      console.log('[rewardsService] Insufficient points for redemption.');
       return false;
     }
-    
-    // Deduct points (negative transaction)
-    return await addPoints(
-      userId, 
-      -points, 
-      'redemption', 
-      description, 
-      rewardId
-    );
+    return addPoints(userId, -points, 'redemption', description, rewardId);
   } catch (error) {
     console.error('Error redeeming points:', error);
     return false;
   }
 }
 
-/**
- * Get rewards summary for admin/analytics
- */
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin summary
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function getRewardsSummary() {
   try {
-    // This would be used for admin dashboard
     const transactionsRef = collection(db, 'rewardTransactions');
-    const querySnapshot = await getDocs(transactionsRef);
-    
+    const snapshot       = await getDocs(transactionsRef);
+
     let totalPointsAwarded = 0;
-    let totalTransactions = 0;
+    let totalTransactions  = 0;
     const typeBreakdown: Record<string, number> = {};
-    
-    querySnapshot.forEach((doc) => {
-      const data = doc.data();
-      totalPointsAwarded += data.points;
+
+    snapshot.forEach((dc) => {
+      const d  = dc.data();
+      totalPointsAwarded += d.points;
       totalTransactions++;
-      
-      if (data.type in typeBreakdown) {
-        typeBreakdown[data.type] += data.points;
+      if (d.type in typeBreakdown) {
+        typeBreakdown[d.type] += d.points;
       } else {
-        typeBreakdown[data.type] = data.points;
+        typeBreakdown[d.type] = d.points;
       }
     });
-    
-    return {
-      totalPointsAwarded,
-      totalTransactions,
-      typeBreakdown,
-    };
+
+    return { totalPointsAwarded, totalTransactions, typeBreakdown };
   } catch (error) {
     console.error('Error getting rewards summary:', error);
     return null;

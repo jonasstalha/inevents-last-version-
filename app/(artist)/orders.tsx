@@ -16,18 +16,24 @@ type Order = {
   gigId?: string;
   gigTitle?: string;
   message?: string;
-   items?: Array<{
-     id: string;
-     title: string;
-     quantity: number;
-     price: number;
-   }>;
-   totalPrice: number;
-   status: 'pending' | 'accepted' | 'declined' | 'confirmed' | 'rejected' | 'completed';
-   createdAt: string;
-   updatedAt?: string;
-   invoiceUrl?: string;
-   clientName?: string;
+  items?: Array<{
+    id: string;
+    title: string;
+    quantity: number;
+    price: number;
+  }>;
+  extras?: Array<{
+    id: string;
+    title: string;
+    quantity: number;
+    price: number;
+  }>;
+  totalPrice: number;
+  status: 'pending' | 'accepted' | 'declined' | 'confirmed' | 'rejected' | 'completed';
+  createdAt: string;
+  updatedAt?: string;
+  invoiceUrl?: string;
+  clientName?: string;
   clientImage?: string;
   ticketName?: string;
   ticketQuantities?: Array<{

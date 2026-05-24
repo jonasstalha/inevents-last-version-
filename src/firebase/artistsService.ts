@@ -86,26 +86,26 @@ export const setUserPersonalInfo = async (artistId: string, info: any) => {
   }
 };
 import {
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  getFirestore,
-  limit,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-  where
+    addDoc,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    getFirestore,
+    limit,
+    orderBy,
+    query,
+    serverTimestamp,
+    setDoc,
+    updateDoc,
+    where
 } from 'firebase/firestore';
 import { ServiceData, ServiceItem, TicketData, TicketType } from './firebaseTypes';
 import { uploadServiceImages, uploadServiceVideo } from './storageService';
 /**
  * Add a new service to Firestore under the artist's account with proper validation
  */
-export const addServiceToFirebase = async (artistId: string, service: ServiceData) => {
+export const addServiceToFirebase = async (artistId: string, service: ServiceData, serviceId?: string) => {
   try {
     console.log('[addServiceToFirebase] Called with artistId:', artistId);
     console.log('[addServiceToFirebase] Service data:', service);
@@ -145,8 +145,8 @@ export const addServiceToFirebase = async (artistId: string, service: ServiceDat
       : [];
     
     // First, create the service in Firestore to get the ID
-    // Don't include images/video in initial creation - will be added after upload
-    const { images: _, video: __, ...serviceWithoutMedia } = service;
+    // Don't include images/video fields in initial creation - they will be added after upload
+    const { images: _, video: __, videos: ___, ...serviceWithoutMedia } = service;
     const newService = {
       ...serviceWithoutMedia,
       // Format or clean fields
@@ -167,8 +167,16 @@ export const addServiceToFirebase = async (artistId: string, service: ServiceDat
       // Media will be uploaded and fields will be added after upload
     };
     
-    const docRef = await addDoc(servicesRef, newService);
-    console.log('[addServiceToFirebase] Service added with ID:', docRef.id);
+    let docRef: any;
+    if (serviceId) {
+      // Create document with provided ID
+      docRef = doc(db, 'users', artistId, 'services', serviceId);
+      await setDoc(docRef, newService as any);
+      console.log('[addServiceToFirebase] Service created with provided ID:', serviceId);
+    } else {
+      docRef = await addDoc(servicesRef, newService as any);
+      console.log('[addServiceToFirebase] Service added with generated ID:', docRef.id);
+    }
     
     // Now upload images if they exist
     let imageUrls: string[] = [];
@@ -177,17 +185,24 @@ export const addServiceToFirebase = async (artistId: string, service: ServiceDat
       console.log('[addServiceToFirebase] Image URIs:', service.images);
       
       try {
-        // Convert image URIs to ImagePickerAsset format for uploadServiceImages
-        const imageAssets = service.images.map((uri, index) => ({
-          uri,
-          width: 0,
-          height: 0,
-          type: 'image' as const,
-          fileName: `image_${index}.jpg`,
-        }));
-        
-        imageUrls = await uploadServiceImages(imageAssets, artistId, docRef.id);
-        console.log('[addServiceToFirebase] Images uploaded successfully, URLs:', imageUrls);
+        // If the image URIs are already remote download URLs, skip re-upload
+        const first = service.images[0];
+        const allAreUrls = service.images.every((u: string) => typeof u === 'string' && (u.startsWith('http://') || u.startsWith('https://')));
+        if (allAreUrls) {
+          console.log('[addServiceToFirebase] Images are already URLs; skipping upload');
+          imageUrls = service.images as string[];
+        } else {
+          // Convert image URIs to ImagePickerAsset format for uploadServiceImages
+          const imageAssets = service.images.map((uri, index) => ({
+            uri,
+            width: 0,
+            height: 0,
+            type: 'image' as const,
+            fileName: `image_${index}.jpg`,
+          }));
+          imageUrls = await uploadServiceImages(imageAssets, artistId, serviceId || docRef.id);
+          console.log('[addServiceToFirebase] Images uploaded successfully, URLs:', imageUrls);
+        }
         
       } catch (uploadError) {
         console.error('[addServiceToFirebase] Error uploading images:', uploadError);
@@ -200,7 +215,7 @@ export const addServiceToFirebase = async (artistId: string, service: ServiceDat
     // Upload video if provided
     let videoUrl: string | undefined;
     if (service.video) {
-      console.log('[addServiceToFirebase] Uploading video to Firebase Storage...');
+      console.log('[addServiceToFirebase] Uploading single video to Firebase Storage...');
       try {
         const videoAsset = {
           uri: service.video,
@@ -217,9 +232,41 @@ export const addServiceToFirebase = async (artistId: string, service: ServiceDat
         // Don't throw - service was created, just without video
       }
     } else {
-      console.log('[addServiceToFirebase] No video to upload');
+      console.log('[addServiceToFirebase] No single video to upload');
     }
-    
+
+    // Upload multiple videos if provided
+    let videoUrls: string[] = [];
+    if (service.videos && Array.isArray(service.videos) && service.videos.length > 0) {
+      console.log('[addServiceToFirebase] Uploading multiple videos to Firebase Storage...');
+      try {
+        const allAreUrls = service.videos.every((u: string) => typeof u === 'string' && (u.startsWith('http://') || u.startsWith('https://')));
+        if (allAreUrls) {
+          console.log('[addServiceToFirebase] Videos are already URLs; skipping upload');
+          videoUrls = service.videos as string[];
+        } else {
+          for (let index = 0; index < service.videos.length; index++) {
+            const uri = service.videos[index];
+            const videoAsset = {
+              uri,
+              width: 0,
+              height: 0,
+              type: 'video' as const,
+              fileName: `service_video_${index}.mp4`,
+            };
+            const uploadedUrl = await uploadServiceVideo(videoAsset, artistId, docRef.id);
+            videoUrls.push(uploadedUrl);
+          }
+          console.log('[addServiceToFirebase] Multiple videos uploaded successfully, URLs:', videoUrls);
+        }
+      } catch (uploadError) {
+        console.error('[addServiceToFirebase] Error uploading multiple videos:', uploadError);
+        // Don't throw - service was created, just without videos
+      }
+    } else {
+      console.log('[addServiceToFirebase] No videos array to upload');
+    }
+
     // Update the service document with media URLs
     const updateData: any = {};
     if (imageUrls.length > 0) {
@@ -228,8 +275,11 @@ export const addServiceToFirebase = async (artistId: string, service: ServiceDat
     if (videoUrl) {
       updateData.video = videoUrl;
     }
-    
-    if (Object.keys(updateData).length > 0) {
+    if (videoUrls.length > 0) {
+      updateData.videos = videoUrls;
+      if (!updateData.video) {
+        updateData.video = videoUrls[0];
+      }
       await updateDoc(docRef, updateData);
       console.log('[addServiceToFirebase] Service document updated with media URLs');
     }

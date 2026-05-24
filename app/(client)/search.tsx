@@ -779,7 +779,6 @@ export default function SearchScreen() {
   const [searchInput, setSearchInput] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [activeTab, setActiveTab] = useState('services');
-  const [filteredGigs, setFilteredGigs] = useState<any[]>([]);
   const [filteredArtists, setFilteredArtists] = useState<Artist[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -812,6 +811,8 @@ export default function SearchScreen() {
     }),
     [priceMin, priceMax, minRating, selectedCity, selectedCategory]
   );
+
+  const filteredGigs = useMemo(() => services, [services]);
 
   // ── Fetch artists once ────────────────────────────────────────────────────
   useEffect(() => {
@@ -849,10 +850,8 @@ export default function SearchScreen() {
     // Only re-run when filters actually change
   }, [activeFilters]);
 
-  // ── Filter side-effect on artists + gigs ─────────────────────────────────
   useEffect(() => {
     const timeout = setTimeout(() => {
-      // Artist filtering (client-side)
       let artistResults = [...artists];
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
@@ -869,10 +868,9 @@ export default function SearchScreen() {
         );
       }
       setFilteredArtists(artistResults);
-      setFilteredGigs(services);
     }, 300);
     return () => clearTimeout(timeout);
-  }, [searchQuery, selectedCategory, artists, services]);
+  }, [searchQuery, selectedCategory, artists]);
 
   // ── Load more (used by both prefetch + onEndReached) ────────────────────
   const loadMore = useCallback(async () => {
@@ -894,14 +892,12 @@ export default function SearchScreen() {
       );
 
       if (result.services.length > 0) {
+        const merged = [...services, ...result.services];
         lastDocRef.current = result.lastDoc;
         hasMoreRef.current = result.hasMore;
         setHasMoreDisplay(result.hasMore);
-        setLocalServices(prev => {
-          const merged = [...prev, ...result.services];
-          setServices(merged);
-          return merged;
-        });
+        setLocalServices(merged);
+        setServices(merged);
       } else {
         hasMoreRef.current = false;
         setHasMoreDisplay(false);
@@ -912,7 +908,7 @@ export default function SearchScreen() {
       setLoadingMore(false);
       loadingMoreRef.current = false;
     }
-  }, [activeFilters, setServices]);
+  }, [activeFilters, services, setServices]);
 
   // ── Scroll handler with 50% prefetch ────────────────────────────────────
   const handleScroll = useMemo(

@@ -5,24 +5,23 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  Image,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    Image,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { addServiceToFirebase, addTicketToFirebase } from '../../firebase/artistsService';
-import { uploadServiceVideo } from '../../firebase/storageService';
 import { useArtistStore } from './ArtistStore';
 
 // Map components - loaded lazily to avoid initialization errors
@@ -138,11 +137,14 @@ export default function Ticket() {
   });
   const [serviceImages, setServiceImages] = useState<string[]>([]);
   const [serviceVideos, setServiceVideos] = useState<string[]>([]);
+  
   const [submitting, setSubmitting] = useState(false);
   const [serviceSubmitting, setServiceSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [serviceError, setServiceError] = useState('');
   const [locationModalVisible, setLocationModalVisible] = useState(false);
+  const [showRegionModal, setShowRegionModal] = useState(false);
+  const [showCityModal, setShowCityModal] = useState(false);
   const [mapRegion, setMapRegion] = useState<{ latitude: number; longitude: number; latitudeDelta: number; longitudeDelta: number } | null>(null);
   const [pickedLocation, setPickedLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [loadingLocation, setLoadingLocation] = useState(false);
@@ -464,6 +466,7 @@ export default function Ticket() {
     const items = serviceForm.items.filter((_, i) => i !== idx);
     setServiceForm({ ...serviceForm, items });
   };
+  
   const handleTicketTypeChange = (idx: number, key: 'price' | 'quantity', value: string) => {
     const ticketTypes = [...form.ticketTypes];
     ticketTypes[idx][key] = value;
@@ -588,26 +591,12 @@ export default function Ticket() {
           mapLatitude: pickedLocation.latitude,
           mapLongitude: pickedLocation.longitude,
         } : {}),
+      
       };
       
       console.log('[handleServiceSubmit] Service data with price:', serviceDataWithPrice);
       const serviceResult = await addServiceToFirebase(user.uid, serviceDataWithPrice);
       const serviceId = serviceResult.id;
-      
-      // Upload videos if any
-      if (serviceVideos.length > 0 && serviceId) {
-        console.log('[handleServiceSubmit] Uploading videos:', serviceVideos);
-        try {
-          for (const videoUri of serviceVideos) {
-            const videoAsset = { uri: videoUri } as any;
-            await uploadServiceVideo(videoAsset, user.uid, serviceId);
-          }
-          console.log('[handleServiceSubmit] Videos uploaded successfully');
-        } catch (videoError) {
-          console.error('[handleServiceSubmit] Error uploading videos:', videoError);
-          // Don't fail the entire service creation if video upload fails
-        }
-      }
       
       setServiceForm({
         title: '',
@@ -750,53 +739,68 @@ export default function Ticket() {
           </View>
         </View>
         
-        {/* Region Selection */}
+        {/* Region & City Dropdowns (modal) */}
         <View style={styles.inputGroup}>
-          <Text style={styles.inputLabel}>Select Region:</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {MOROCCAN_REGIONS.map((region) => (
-              <TouchableOpacity
-                key={region}
-                style={{
-                  backgroundColor: serviceForm.region === region ? '#667eea' : '#f8fafc',
-                  borderRadius: 8,
-                  paddingHorizontal: 12,
-                  paddingVertical: 8,
-                  borderWidth: 1,
-                  borderColor: serviceForm.region === region ? '#667eea' : '#e2e8f0',
-                }}
-                onPress={() => handleServiceChange('region', region)}
-              >
-                <Text style={{ color: serviceForm.region === region ? '#fff' : '#374151', fontSize: 13 }}>{region}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          <Text style={styles.inputLabel}>Region</Text>
+          <TouchableOpacity
+            style={[styles.dropdownButtonCompact, { justifyContent: 'space-between' }]}
+            onPress={() => setShowRegionModal(true)}
+          >
+            <Text style={serviceForm.region ? { color: '#111' } : { color: '#777' }}>
+              {serviceForm.region || 'Select a region'}
+            </Text>
+            <Ionicons name="chevron-down" size={18} color="#777" />
+          </TouchableOpacity>
         </View>
-        
-        {/* City Selection (based on region) */}
-        {serviceForm.region && MOROCCAN_CITIES[serviceForm.region] && (
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Select City:</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              {MOROCCAN_CITIES[serviceForm.region].map((city) => (
-                <TouchableOpacity
-                  key={city}
-                  style={{
-                    backgroundColor: serviceForm.locationName === city ? '#667eea' : '#f8fafc',
-                    borderRadius: 8,
-                    paddingHorizontal: 12,
-                    paddingVertical: 8,
-                    borderWidth: 1,
-                    borderColor: serviceForm.locationName === city ? '#667eea' : '#e2e8f0',
-                  }}
-                  onPress={() => handleServiceChange('locationName', city)}
-                >
-                  <Text style={{ color: serviceForm.locationName === city ? '#fff' : '#374151', fontSize: 13 }}>{city}</Text>
-                </TouchableOpacity>
-              ))}
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.inputLabel}>City</Text>
+          <TouchableOpacity
+            style={[styles.dropdownButtonCompact, { justifyContent: 'space-between' }]}
+            onPress={() => {
+              if (!serviceForm.region) {
+                setServiceError('Please select a region first');
+                return;
+              }
+              setShowCityModal(true);
+            }}
+          >
+            <Text style={serviceForm.locationName ? { color: '#111' } : { color: '#777' }}>
+              {serviceForm.locationName || 'Select a city'}
+            </Text>
+            <Ionicons name="chevron-down" size={18} color="#777" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Region Modal */}
+        <Modal transparent animationType="fade" visible={showRegionModal} onRequestClose={() => setShowRegionModal(false)}>
+          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowRegionModal(false)}>
+            <View style={styles.modalContentList}>
+              <ScrollView>
+                {MOROCCAN_REGIONS.map((r) => (
+                  <TouchableOpacity key={r} style={styles.modalOption} onPress={() => { setServiceForm(prev => ({ ...prev, region: r, locationName: '' })); setShowRegionModal(false); setServiceError(''); }}>
+                    <Text style={styles.modalOptionText}>{r}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
             </View>
-          </View>
-        )}
+          </TouchableOpacity>
+        </Modal>
+
+        {/* City Modal */}
+        <Modal transparent animationType="fade" visible={showCityModal} onRequestClose={() => setShowCityModal(false)}>
+          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowCityModal(false)}>
+            <View style={styles.modalContentList}>
+              <ScrollView>
+                {(MOROCCAN_CITIES[serviceForm.region] || []).map((c) => (
+                  <TouchableOpacity key={c} style={styles.modalOption} onPress={() => { handleServiceChange('locationName', c); setShowCityModal(false); }}>
+                    <Text style={styles.modalOptionText}>{c}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </TouchableOpacity>
+        </Modal>
         {/* Category Dropdown */}
         <View style={styles.inputGroup}>
           <Text style={styles.inputLabel}>Category *</Text>
@@ -959,6 +963,7 @@ export default function Ticket() {
             <Text style={{ color: '#667eea', marginLeft: 4 }}>Add Item</Text>
           </TouchableOpacity>
         </View>
+        
         {serviceError ? (
           <View style={styles.errorContainer}>
             <Ionicons name="alert-circle" size={20} color="#ef4444" />
@@ -1780,6 +1785,37 @@ const styles = StyleSheet.create({
   modalContainer: {
     flex: 1,
     backgroundColor: '#fff',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContentList: {
+    width: '80%',
+    maxHeight: 400,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 8,
+  },
+  modalOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  modalOptionText: {
+    fontSize: 16,
+    color: '#111827',
+  },
+  dropdownButtonCompact: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
   },
   modalHeader: {
     flexDirection: 'row',

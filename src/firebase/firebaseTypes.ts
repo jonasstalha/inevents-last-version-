@@ -47,6 +47,7 @@ export interface ServiceData {
   items: ServiceItem[];
   images?: string[];
   video?: string;
+  videos?: string[];
   basePrice?: number;
   serviceRadius?: number;
   createdAt?: string | Date;

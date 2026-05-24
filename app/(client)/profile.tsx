@@ -1,6 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
 import * as Linking from 'expo-linking';
-import { FontAwesome5 } from '@expo/vector-icons';
+import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { ChevronRight, Clock, RefreshCw, Zap } from 'lucide-react-native';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -30,11 +30,8 @@ import {
   where,
   db,
 } from '@/src/firebase/firebaseConfig';
-import {
-  fetchUserStatistics,
-  recalculateUserStatistics,
-  UserStats,
-} from '@/src/firebase/userStatsService';
+import { fetchUserStatistics, loadStatsRules, getStatsRules, recalculateUserStatistics, UserStats } from '@/src/firebase/userStatsService';
+import { loadRewardRules } from '@/src/firebase/rewardsService';
 
 interface RecentActivityItem {
   id: string;
@@ -63,8 +60,21 @@ export default function ProfileScreen() {
     totalSpent: 0,
   });
 
+  // ── points-config rules (loaded from Firestore) ──────────────────────────────
+  const [pointRules, setPointRules] = useState<ReturnType<typeof getStatsRules> | null>(null);
+
+  const refreshPointRules = useCallback(async () => {
+    try {
+      await loadStatsRules();
+      await loadRewardRules();
+      setPointRules(getStatsRules());
+    } catch (e) {
+      console.error('Error refreshing point rules:', e);
+    }
+  }, []);
+
   // ── helpers ──────────────────────────────────────────────────────────────
-  const refreshUserStats = async () => {
+  const refreshUserStats = useCallback(async () => {
     if (!user?.uid) return;
     try {
       setStatsLoading(true);
@@ -75,7 +85,7 @@ export default function ProfileScreen() {
     } finally {
       setStatsLoading(false);
     }
-  };
+  }, [user?.uid]);
 
   const syncLiveStats = () => {
     if (!user?.uid) return () => {};
@@ -130,52 +140,61 @@ export default function ProfileScreen() {
   useEffect(() => {
     if (!user?.uid) return;
     setSyncing(true);
+    setStatsLoading(true);
 
     // refresh AuthContext user from Firestore so name/image stay current
     refreshUser().finally(() => setSyncing(false));
 
-    if (user.uid) {
-      setActivityLoading(true);
-      const q = query(
-        collection(db, 'rewardTransactions'),
-        where('userId', '==', user.uid),
-        orderBy('timestamp', 'desc'),
-      );
+    // load dynamic points rules from Firestore
+    refreshPointRules();
 
-      const unsubActivity = onSnapshot(
-        q,
-        (snap: any) => {
-          const items: RecentActivityItem[] = snap.docs.map((docSnap: any) => {
-            const d = docSnap.data();
-            return {
-              id: docSnap.id,
-              description: d.description || '',
-              points: d.points || 0,
-              type: d.type || '',
-              timestamp: d.timestamp?.toDate?.() || new Date(),
-            };
-          });
-          setRecentActivity(items.slice(0, 8));
-          setActivityLoading(false);
-        },
-        (err: any) => {
-          if (err.message?.includes('index')) {
-            console.warn('[recent-activity] Index building, showing empty state.');
-          } else {
-            console.error('Activity listener error:', err);
-          }
-          setRecentActivity([]);
-          setActivityLoading(false);
-        },
-      );
+    // Load initial statistics
+    refreshUserStats().finally(() => {
+      // Set up live listeners after initial load
+      if (user.uid) {
 
-      const unsubStats = syncLiveStats();
+        setActivityLoading(true);
+        const q = query(
+          collection(db, 'rewardTransactions'),
+          where('userId', '==', user.uid),
+          orderBy('timestamp', 'desc'),
+        );
 
-      return () => {
-        unsubActivity();
-        if (typeof unsubStats === 'function') unsubStats();
-      };
-    }
+        const unsubActivity = onSnapshot(
+          q,
+          (snap: any) => {
+            const items: RecentActivityItem[] = snap.docs.map((docSnap: any) => {
+              const d = docSnap.data();
+              return {
+                id: docSnap.id,
+                description: d.description || '',
+                points: d.points || 0,
+                type: d.type || '',
+                timestamp: d.timestamp?.toDate?.() || new Date(),
+              };
+            });
+            setRecentActivity(items.slice(0, 8));
+            setActivityLoading(false);
+          },
+          (err: any) => {
+            if (err.message?.includes('index')) {
+              console.warn('[recent-activity] Index building, showing empty state.');
+            } else {
+              console.error('Activity listener error:', err);
+            }
+            setRecentActivity([]);
+            setActivityLoading(false);
+          },
+        );
+
+        const unsubStats = syncLiveStats();
+
+        return () => {
+          unsubActivity();
+          if (typeof unsubStats === 'function') unsubStats();
+        };
+      }
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
 
@@ -186,7 +205,9 @@ export default function ProfileScreen() {
       // Quick refetch — live listeners will already show the latest values,
       // this is a safety net to force a full recalculation
       refreshUser().catch(console.error);
-    }, [user?.uid, refreshUser]),
+      // Refresh points rules so the config card stays in sync with Firestore changes
+      refreshPointRules();
+    }, [user?.uid, refreshUser, refreshPointRules]),
   );
 
   // ── logout ───────────────────────────────────────────────────────────────
@@ -413,6 +434,52 @@ export default function ProfileScreen() {
               </View>
             )}
           </>
+        )}
+      </Card>
+
+      {/* ── Points Config (live rules from Firestore) ── */}
+      <Card variant="elevated" style={styles.pointsConfigCard}>
+        <View style={styles.pointsConfigHeader}>
+          <Ionicons name="flash" size={18} color={Theme.colors.primary} />
+          <Text style={styles.pointsConfigTitle}>Points Config</Text>
+          <TouchableOpacity
+            onPress={refreshPointRules}
+            style={styles.pointsRefreshBtn}
+            disabled={statsLoading}
+          >
+            <Ionicons
+              name="refresh"
+              size={14}
+              color={statsLoading ? Theme.colors.textLight : Theme.colors.primary}
+            />
+          </TouchableOpacity>
+        </View>
+
+        {pointRules && (
+          <View style={styles.pointsConfigGrid}>
+            {[
+              ['Ticket Purchase',   pointRules.ticketPoints,       '🎫'],
+              ['Service Order',     pointRules.serviceOrderPoints,  '📦'],
+              ['Custom Order',      pointRules.customOrderPoints,   '🎯'],
+              ['Spending per MAD',  pointRules.spendingRatePerMad,  '💰'],
+              ['Review',            pointRules.reviewPoints,        '⭐'],
+              ['Referral',          pointRules.referralPoints,      '🤝'],
+            ].map(([label, value, icon]: [string, number, string], i: number) => (
+              <View
+                key={label}
+                style={[
+                  styles.pointsConfigItem,
+                  i < 5 && styles.pointsConfigDivider,
+                ]}
+              >
+                <Text style={styles.pointsConfigIcon}>{icon}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.pointsConfigLabel}>{label}</Text>
+                  <Text style={styles.pointsConfigValue}>{value} pts</Text>
+                </View>
+              </View>
+            ))}
+          </View>
         )}
       </Card>
 
@@ -816,11 +883,63 @@ const styles = StyleSheet.create({
   },
 
   // ── Activity Card ──
-  activityCard: {
+   activityCard: {
     marginHorizontal: Theme.spacing.lg,
     marginBottom: Theme.spacing.lg,
-    overflow: 'hidden',
   },
+  pointsConfigCard: {
+    marginHorizontal: Theme.spacing.lg,
+    marginBottom: Theme.spacing.lg,
+  },
+  pointsConfigHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Theme.spacing.md,
+    paddingTop: Theme.spacing.md,
+    paddingBottom: Theme.spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: Theme.colors.border,
+  },
+  pointsConfigTitle: {
+    fontFamily: Theme.typography.fontFamily.bold,
+    fontSize: Theme.typography.fontSize.md,
+    color: Theme.colors.textDark,
+    marginLeft: Theme.spacing.sm,
+    flex: 1,
+  },
+  pointsRefreshBtn: {
+    padding: Theme.spacing.sm,
+    borderRadius: Theme.borderRadius.sm,
+  },
+  pointsConfigGrid: {
+    paddingVertical: Theme.spacing.sm,
+  },
+  pointsConfigItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Theme.spacing.sm,
+    paddingHorizontal: Theme.spacing.md,
+    gap: Theme.spacing.sm,
+  },
+  pointsConfigDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: Theme.colors.border,
+  },
+  pointsConfigIcon: { fontSize: 18 },
+  pointsConfigLabel: {
+    fontFamily: Theme.typography.fontFamily.regular,
+    fontSize: Theme.typography.fontSize.sm,
+    color: Theme.colors.textLight,
+    flex: 1,
+  },
+  pointsConfigValue: {
+    fontFamily: Theme.typography.fontFamily.bold,
+    fontSize: Theme.typography.fontSize.md,
+    color: Theme.colors.primary,
+  },
+
+
+
   activityHeader: {
     flexDirection: 'row',
     alignItems: 'center',

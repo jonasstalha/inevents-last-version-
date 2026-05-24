@@ -2,13 +2,15 @@ import { Theme } from '@/src/constants/theme';
 import { fetchArtistById } from '@/src/firebase/artistsService';
 import { recordCouponUsage } from '@/src/firebase/couponService';
 import { fetchServiceByIdFromFirebase } from '@/src/firebase/fetchAllServices';
+import { storage } from '@/src/firebase/firebaseConfig';
 import { validatePromoCode } from '@/src/firebase/promoService';
 import { addServiceReview } from '@/src/firebase/reviewService';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { Video } from 'expo-av';
+import { ResizeMode, Video } from 'expo-av';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getAuth } from 'firebase/auth';
+import { getDownloadURL, ref as storageRef } from 'firebase/storage';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -49,17 +51,21 @@ export default function ServiceDetailScreen() {
   const [reviewText, setReviewText] = useState('');
   const [reviewRating, setReviewRating] = useState(5);
   
-  const [clientBudget, setClientBudget] = useState('');
-  const [personalInfo, setPersonalInfo] = useState({
-    fullName: '',
-    email: '',
-    phone: '',
-    address: '',
-    city: '',
-    country: '',
-    eventDate: '',
-    eventLocation: ''
-  });
+   const [clientBudget, setClientBudget] = useState('');
+   const [personalInfo, setPersonalInfo] = useState({
+     fullName: '',
+     email: '',
+     phone: '',
+     address: '',
+     city: '',
+     country: '',
+     eventDate: '',
+     eventLocation: ''
+   });
+   const [showDatePicker, setShowDatePicker] = useState(false);
+   const [tempEventDate, setTempEventDate] = useState(new Date());
+   const [selectedLocation, setSelectedLocation] = useState<any>(null);
+   const [showLocationPicker, setShowLocationPicker] = useState(false);
   
    const [reviews, setReviews] = useState<Array<{
      user: string;
@@ -75,25 +81,11 @@ export default function ServiceDetailScreen() {
    const [discount, setDiscount] = useState(0);
    const [promoError, setPromoError] = useState<string | null>(null);
    const [showAllReviews, setShowAllReviews] = useState(false);
+  const [serviceData, setServiceData] = useState<any>(null);
+  const [serviceVideos, setServiceVideos] = useState<string[]>([]);
+  const [providerData, setProviderData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
    const [isLoading, setIsLoading] = useState(true);
-   const [serviceData, setServiceData] = useState<any>(null);
-   const [providerData, setProviderData] = useState<any>(null);
-   const [error, setError] = useState<string | null>(null);
-
-   // Date picker state
-   const [showDatePicker, setShowDatePicker] = useState(false);
-   const [tempEventDate, setTempEventDate] = useState(new Date());
-
-   // Location picker state
-   const [showLocationPicker, setShowLocationPicker] = useState(false);
-   const [selectedLocation, setSelectedLocation] = useState<{
-     latitude: number;
-     longitude: number;
-     address: string;
-   } | null>(null);
-   const [locationSearch, setLocationSearch] = useState('');
-  
-   // Full screen preview state
    const [showFullScreenPreview, setShowFullScreenPreview] = useState(false);
    const [previewMedia, setPreviewMedia] = useState<{type: 'image' | 'video', uri: string, index: number} | null>(null);
    const videoRef = useRef<any>(null);
@@ -127,6 +119,37 @@ export default function ServiceDetailScreen() {
         // Fetch service data
         const service = await fetchServiceByIdFromFirebase(String(gigId));
         setServiceData(service);
+
+        const resolveServiceStorageUrl = async (uri?: string | null) => {
+          if (!uri) return null;
+          const value = String(uri).trim();
+          if (!value) return null;
+          if (value.startsWith('http://') || value.startsWith('https://') || value.startsWith('data:')) {
+            return value;
+          }
+          try {
+            return await getDownloadURL(storageRef(storage, value));
+          } catch (resolveError) {
+            console.warn('Unable to resolve video storage URL:', value, resolveError);
+            return null;
+          }
+        };
+
+        const serviceAny = service as any;
+        const rawServiceVideos = Array.from(new Set([
+          serviceAny.video,
+          serviceAny.videoUrl,
+          serviceAny.videoUri,
+          ...(Array.isArray(serviceAny.videos) ? serviceAny.videos : []),
+          ...(Array.isArray(serviceAny.videoUrls) ? serviceAny.videoUrls : []),
+          ...(Array.isArray(serviceAny.videoUris) ? serviceAny.videoUris : []),
+        ].filter(Boolean)));
+
+        const resolvedVideos = (
+          await Promise.all(rawServiceVideos.map(resolveServiceStorageUrl))
+        ).filter((uri): uri is string => !!uri);
+
+        setServiceVideos(resolvedVideos);
 
         // If service has a userId, fetch the provider/artist details
         if (service.userId) {
@@ -199,20 +222,24 @@ export default function ServiceDetailScreen() {
     : '0.0';
 
   // Set up default service data structure
+  const actualImageSources = Array.from(
+    new Set([
+      serviceData?.cover,
+      ...(Array.isArray(serviceData?.images) ? serviceData.images : []),
+      serviceData?.image,
+    ].filter(Boolean))
+  ) as string[];
+
   const defaultServiceData = {
     title: serviceData?.title || "Loading...",
 
     description: serviceData?.description || "Loading service details...",
 
-    images: serviceData?.cover
-      ? [serviceData.cover]
-      : serviceData?.images?.length > 0
-      ? serviceData.images
-      : serviceData?.image
-      ? [serviceData.image]
-      : [DEFAULT_SERVICE_IMAGE],
+    images: actualImageSources.length > 0 ? actualImageSources : (serviceVideos.length > 0 ? [] : [DEFAULT_SERVICE_IMAGE]),
 
-    video: serviceData?.video,
+    video: serviceVideos.length > 0 ? serviceVideos[0] : null,
+
+    videos: serviceVideos,
 
     basePrice: serviceData?.price || serviceData?.basePrice || 0,
 
@@ -233,10 +260,18 @@ export default function ServiceDetailScreen() {
     },
   };
 
-  const mediaItems = [
-    ...defaultServiceData.images.map((uri: string) => ({ type: 'image', uri })),
-    ...(defaultServiceData.video ? [{ type: 'video', uri: defaultServiceData.video }] : []),
-  ];
+  const mediaItems = actualImageSources.length > 0 || serviceVideos.length > 0
+    ? [
+      ...actualImageSources.map((uri: string) => ({ type: 'image' as const, uri })),
+      ...serviceVideos.map((uri: string) => ({ type: 'video' as const, uri })),
+    ]
+    : [{ type: 'image' as const, uri: DEFAULT_SERVICE_IMAGE }];
+
+  useEffect(() => {
+    if (selectedImage >= mediaItems.length && mediaItems.length > 0) {
+      setSelectedImage(0);
+    }
+  }, [mediaItems.length, selectedImage]);
 
   // Set up main service
   const services = {
@@ -271,11 +306,15 @@ export default function ServiceDetailScreen() {
 
   // No longer need toggle function since service items are removed
 
+  const getExtraPrice = (extra: any) => {
+    if (!extra) return 0;
+    return typeof extra.price === 'number' ? extra.price : parseFloat(String(extra.price || 0));
+  };
+
   const calculatePrice = () => {
-    // Calculate base price for all selected items
+    // Calculate base price for all selected items and extras
     let total = 0;
     
-    // Add prices for each selected service item from Firebase
     if (serviceData?.items) {
       serviceData.items.forEach((item: any, index: number) => {
         const itemId = `item_${index}`;
@@ -286,8 +325,18 @@ export default function ServiceDetailScreen() {
         }
       });
     }
+
+    const extrasList = serviceData?.extras || serviceData?.addOns || [];
+    if (Array.isArray(extrasList)) {
+      extrasList.forEach((extra: any, index: number) => {
+        const extraId = `extra_${index}`;
+        const quantity = serviceQuantities[extraId] || 0;
+        if (quantity > 0) {
+          total += getExtraPrice(extra) * quantity;
+        }
+      });
+    }
     
-    // Apply discount if coupon is applied
     if (couponApplied) total -= discount;
     
     return Math.max(total, 0);
@@ -685,62 +734,75 @@ export default function ServiceDetailScreen() {
         >
           <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
             
-             {/* Hero Media Gallery - Images + Video */}
-             <View style={styles.imageSection}>
-               <TouchableOpacity onPress={() => {
-                 const media = mediaItems[selectedImage];
-                 if (media.type === 'video') {
-                   setPreviewMedia({ type: 'video', uri: media.uri, index: selectedImage });
-                 } else {
-                   setPreviewMedia({ type: 'image', uri: selectedImage < (defaultServiceData.images?.length || 0) ? defaultServiceData.images[selectedImage] : '', index: selectedImage });
-                 }
-                 setShowFullScreenPreview(true);
-               }}>
-                 {mediaItems[selectedImage]?.type === 'video' ? (
-                   <View style={styles.videoMainContainer}>
-                     <Video
-                       ref={videoRef}
-                       source={{ uri: mediaItems[selectedImage].uri }}
-                       style={styles.mainImage}
-                       resizeMode="contain"
-                       useNativeControls
-                       isLooping={false}
-                       onError={(e) => console.error('Video error:', e)}
-                     />
-                     <View style={styles.videoPlayButtonOverlay}>
-                       <Ionicons name="play-circle" size={80} color="#fff" />
-                     </View>
-                   </View>
-                 ) : (
-                   <Image source={{ uri: defaultServiceData.images[selectedImage] }} style={styles.mainImage} />
-                 )}
-               </TouchableOpacity>
-               
-               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.thumbnailContainer}>
-                 {mediaItems.map((media: any, index: number) => {
-                   const isVideo = media.type === 'video';
-                   const isSelected = selectedImage === index;
-                   
-                   return (
-                     <TouchableOpacity
-                       key={index}
-                       onPress={() => setSelectedImage(index)}
-                       style={[styles.thumbnail, isSelected && styles.thumbnailSelected]}
-                     >
-                       {isVideo ? (
-                         <View style={styles.videoThumbnailContainer}>
-                           <Image source={{ uri: defaultServiceData.images[0] || DEFAULT_SERVICE_IMAGE }} style={styles.thumbnailImage} />
-                           <View style={styles.videoThumbnailOverlay}>
-                             <Ionicons name="play" size={24} color="#fff" />
+              {/* Hero Media Gallery - Images + Video */}
+              <View style={styles.imageSection}>
+                {mediaItems?.[selectedImage]?.type === 'video' ? (
+                  // Video: no TouchableOpacity wrapper, no overlay
+                  <Video
+                    ref={videoRef}
+                    source={{ uri: mediaItems?.[selectedImage]?.uri }}
+                    style={styles.mainImage}
+                    useNativeControls
+                    isLooping={false}
+                    resizeMode={ResizeMode.CONTAIN}
+                    onError={(e) => console.error('Video error:', e)}
+                  />
+                ) : (
+                  // Image: keep TouchableOpacity for fullscreen
+                  <TouchableOpacity onPress={() => {
+                    const media = mediaItems?.[selectedImage];
+                    if (media && media.uri) {
+                      setPreviewMedia({ type: 'image', uri: media.uri, index: selectedImage });
+                      setShowFullScreenPreview(true);
+                    }
+                  }}>
+                    {mediaItems?.[selectedImage] && mediaItems?.[selectedImage]?.uri ? (
+                      <Image source={{ uri: mediaItems?.[selectedImage]?.uri }} style={styles.mainImage} />
+                    ) : null}
+                  </TouchableOpacity>
+                )}
+                
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                  style={styles.thumbnailRow}  
+                  contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 10 }}
+                >
+                  {mediaItems.map((media: any, index: number) => {
+                    // Safety check for media item
+                    if (!media) {
+                      return null;
+                    }
+                    
+                    const isVideo = media?.type === 'video';
+                    const isSelected = selectedImage === index;
+                    
+                    return (
+                      <TouchableOpacity
+                        key={index}
+                        onPress={() => setSelectedImage(index)}
+                        style={[styles.thumbnail, isSelected && styles.thumbnailSelected]}
+                      >
+{isVideo ? (
+                           <View style={styles.videoThumbnailContainer}>
+                             <View style={styles.videoThumbnailPlaceholder}>
+                               <Ionicons name="play" size={20} color="#fff" />
+                               <Text style={styles.videoThumbnailLabel}>Video</Text>
+                             </View>
                            </View>
-                         </View>
-                       ) : (
-                         <Image source={{ uri: media.uri }} style={styles.thumbnailImage} />
-                       )}
-                     </TouchableOpacity>
-                   );
-                 })}
-               </ScrollView>
+                         ) : (
+                           <>
+                             {/* Safety check for uri */}
+                             {media?.uri ? (
+                               <Image source={{ uri: media.uri }} style={styles.thumbnailImage} />
+                             ) : null}
+                           </>
+                         )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+                {serviceData?.video ? (
+                  <Text style={styles.galleryHintText}>Tap thumbnails to preview images and the service video.</Text>
+                ) : null}
               </View>
 
              {/* Main Content */}
@@ -850,7 +912,103 @@ export default function ServiceDetailScreen() {
                   </View>
                 )}
 
-                {/* Additional services section removed */}
+                {/* Extras Section */}
+                <View style={styles.extrasSection}>
+                  <Text style={styles.sectionTitle}>Extras</Text>
+                  {Array.isArray(serviceData?.extras) && serviceData.extras.length > 0 ? (
+                    serviceData.extras.map((extra: any, index: number) => {
+                      const extraKey = `extra_${index}`;
+                      const quantity = serviceQuantities[extraKey] || 0;
+                      return (
+                        <View key={`extra-${index}`} style={styles.extraCard}>
+                          <View style={styles.serviceHeader}>
+                            <Text style={styles.serviceName}>{extra.title || extra.name || `Extra ${index + 1}`}</Text>
+                            <Text style={styles.servicePrice}>{getExtraPrice(extra)} MAD</Text>
+                          </View>
+                          {extra.description ? <Text style={styles.serviceDescription}>{extra.description}</Text> : null}
+                          <View style={styles.quantitySelector}>
+                            <Text style={styles.quantityLabel}>Qty:</Text>
+                            <View style={styles.quantityControls}>
+                              <TouchableOpacity
+                                style={[styles.quantityButton, quantity === 0 && styles.quantityButtonDisabled]}
+                                onPress={() => handleItemQuantityChange(extraKey, -1)}
+                                disabled={quantity === 0}
+                              >
+                                <Ionicons name="remove" size={20} color={quantity === 0 ? '#ccc' : '#6366f1'} />
+                              </TouchableOpacity>
+                              <Text style={styles.quantityText}>{quantity}</Text>
+                              <TouchableOpacity
+                                style={[
+                                  styles.quantityButton,
+                                  (extra?.maxQuantity && quantity >= Number(extra.maxQuantity)) && styles.quantityButtonDisabled,
+                                ]}
+                                onPress={() => handleItemQuantityChange(extraKey, 1, extra?.maxQuantity ?? 10)}
+                                disabled={extra?.maxQuantity ? quantity >= Number(extra.maxQuantity) : false}
+                              >
+                                <Ionicons
+                                  name="add"
+                                  size={20}
+                                  color={(extra?.maxQuantity && quantity >= Number(extra.maxQuantity)) ? '#ccc' : '#6366f1'}
+                                />
+                              </TouchableOpacity>
+                            </View>
+                            {extra?.maxQuantity && (
+                              <Text style={styles.maxQuantityText}>Max: {extra.maxQuantity}</Text>
+                            )}
+                          </View>
+                        </View>
+                      );
+                    })
+                  ) : Array.isArray(serviceData?.addOns) && serviceData.addOns.length > 0 ? (
+                    serviceData.addOns.map((extra: any, index: number) => {
+                      const extraKey = `extra_${index}`;
+                      const quantity = serviceQuantities[extraKey] || 0;
+                      return (
+                        <View key={`addon-${index}`} style={styles.extraCard}>
+                          <View style={styles.serviceHeader}>
+                            <Text style={styles.serviceName}>{extra.title || extra.name || `Extra ${index + 1}`}</Text>
+                            <Text style={styles.servicePrice}>{getExtraPrice(extra)} MAD</Text>
+                          </View>
+                          {extra.description ? <Text style={styles.serviceDescription}>{extra.description}</Text> : null}
+                          <View style={styles.quantitySelector}>
+                            <Text style={styles.quantityLabel}>Qty:</Text>
+                            <View style={styles.quantityControls}>
+                              <TouchableOpacity
+                                style={[styles.quantityButton, quantity === 0 && styles.quantityButtonDisabled]}
+                                onPress={() => handleItemQuantityChange(extraKey, -1)}
+                                disabled={quantity === 0}
+                              >
+                                <Ionicons name="remove" size={20} color={quantity === 0 ? '#ccc' : '#6366f1'} />
+                              </TouchableOpacity>
+                              <Text style={styles.quantityText}>{quantity}</Text>
+                              <TouchableOpacity
+                                style={[
+                                  styles.quantityButton,
+                                  (extra?.maxQuantity && quantity >= Number(extra.maxQuantity)) && styles.quantityButtonDisabled,
+                                ]}
+                                onPress={() => handleItemQuantityChange(extraKey, 1, extra?.maxQuantity ?? 10)}
+                                disabled={extra?.maxQuantity ? quantity >= Number(extra.maxQuantity) : false}
+                              >
+                                <Ionicons
+                                  name="add"
+                                  size={20}
+                                  color={(extra?.maxQuantity && quantity >= Number(extra.maxQuantity)) ? '#ccc' : '#6366f1'}
+                                />
+                              </TouchableOpacity>
+                            </View>
+                            {extra?.maxQuantity && (
+                              <Text style={styles.maxQuantityText}>Max: {extra.maxQuantity}</Text>
+                            )}
+                          </View>
+                        </View>
+                      );
+                    })
+                  ) : (
+                    <View style={styles.serviceCard}>
+                      <Text style={styles.serviceDescription}>No extras available for this service.</Text>
+                    </View>
+                  )}
+                </View>
 
                  {/* Coupon Section moved to negotiation modal */}
                </View>
@@ -1394,15 +1552,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   
-  thumbnail: {
-    width: 60,
-    height: 60,
-    borderRadius: 12,
-    marginRight: 12,
-    borderWidth: 2,
-    borderColor: 'transparent',
-    overflow: 'hidden',
-  },
+    thumbnail: {
+      width: 72,      // unified size
+      height: 72,
+      borderRadius: 10,
+      marginRight: 10,
+      borderWidth: 2,
+      borderColor: 'transparent',
+      overflow: 'hidden',
+    },
+    thumbnailRow: {
+      flexDirection: 'row',
+      paddingVertical: 10,
+      paddingHorizontal: 4,
+      backgroundColor: '#f8fafc',
+    },
   
   thumbnailSelected: {
     borderColor: '#6366f1',
@@ -1413,11 +1577,15 @@ const styles = StyleSheet.create({
      height: '100%',
    },
 
-   videoThumbnailContainer: {
-     position: 'relative',
-     width: '100%',
-     height: '100%',
-   },
+    videoThumbnailContainer: {
+      width: 72,      // match thumbnail size exactly
+      height: 72,
+      borderRadius: 10,
+      overflow: 'hidden',
+      backgroundColor: '#1f2937',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
 
    videoThumbnailOverlay: {
      position: 'absolute',
@@ -1429,6 +1597,28 @@ const styles = StyleSheet.create({
      justifyContent: 'center',
      alignItems: 'center',
    },
+
+  videoThumbnailPlaceholder: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#334155',
+  },
+
+  videoThumbnailLabel: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+
+  galleryHintText: {
+    marginTop: 10,
+    paddingHorizontal: 20,
+    fontSize: 14,
+    color: '#4b5563',
+  },
 
    videoMainContainer: {
      position: 'relative',
@@ -1602,6 +1792,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     marginBottom: 32,
   },
+
+  extrasSection: {
+    marginTop: 8,
+    marginBottom: 32,
+  },
+
+  extraCard: {
+    backgroundColor: '#eef2ff',
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#c7d2fe',
+  },
   
   serviceCard: {
     backgroundColor: '#f8fafc',
@@ -1670,48 +1874,35 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   
-  maxQuantityText: {
-    fontSize: 12,
-    color: '#94a3b8',
-    marginLeft: 8,
-  },
-  
-   quantityText: {
-     fontSize: 16,
-     fontWeight: '600',
-     color: '#1a1a1a',
-     marginHorizontal: 16,
-     minWidth: 24,
-     textAlign: 'center',
+   maxQuantityText: {
+     fontSize: 12,
+     color: '#94a3b8',
+     marginLeft: 8,
    },
 
-   formInputText: {
-     color: '#1a1a1a',
-   },
+    quantityText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: '#1a1a1a',
+      marginHorizontal: 16,
+      minWidth: 24,
+      textAlign: 'center',
+    },
 
-   formInputPlaceholder: {
-     color: '#9ca3af',
-   },
-  
-  subsectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 12,
-  },
-  
-  addonCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-  },
-  
+    formInputText: {
+      color: '#1a1a1a',
+    },
+
+    formInputPlaceholder: {
+      color: '#9ca3af',
+    },
+
+    subsectionTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: '#1a1a1a',
+      marginBottom: 12,
+    },
   addonCardSelected: {
     borderColor: '#6366f1',
     backgroundColor: '#f0f9ff',
