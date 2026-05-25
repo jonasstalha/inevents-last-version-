@@ -4,12 +4,15 @@ import { collection, getDocs, getFirestore, query, where } from 'firebase/firest
 import React, { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { toTimestampString } from '@/src/utils/timestampUtils';
+import { confirmOrder, rejectOrder, sendOrderUpdateNotification } from '../../firebase/orderService';
+import { createInvoiceForOrder } from '../../firebase/invoiceService';
 
 interface Order {
   id: string;
   type: 'service' | 'ticket' | 'gig';
   clientName: string;
   service?: string;
+  serviceTitle?: string;
   gigTitle?: string;
   date?: string;
   time?: string;
@@ -17,7 +20,7 @@ interface Order {
   totalPrice?: number;
   clientPrice?: number;
   message?: string;
-  status: 'pending' | 'accepted' | 'declined' | 'counter_offered';
+  status: 'pending' | 'confirmed' | 'rejected' | 'completed' | 'counter_offered' | 'accepted' | 'declined';
   timestamp?: string;
   createdAt?: string;
   eventName?: string;
@@ -38,6 +41,7 @@ interface Order {
     country?: string;
   };
   clientId?: string;
+  artistId?: string;
   gigId?: string;
   items?: any[];
 }
@@ -47,6 +51,8 @@ const CalendarPage = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [counterOffer, setCounterOffer] = useState<{ [key: string]: string }>({});
+  const [savingIds, setSavingIds] = useState<string[]>([]);
+
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -63,46 +69,28 @@ const CalendarPage = () => {
 
         console.log('📋 Fetching orders for artist:', currentUser.uid);
 
-        // Fetch from global orders collection
         const globalOrdersCol = collection(db, 'orders');
         const globalOrdersQuery = query(globalOrdersCol, where('artistId', '==', currentUser.uid));
         const globalOrdersSnapshot = await getDocs(globalOrdersQuery);
         
         console.log('📊 Found', globalOrdersSnapshot.size, 'orders in global collection');
 
-        // Fetch from customOrders collection
-        const customOrdersCol = collection(db, 'customOrders');
-        const customOrdersQuery = query(customOrdersCol, where('artistId', '==', currentUser.uid));
-        const customOrdersSnapshot = await getDocs(customOrdersQuery);
-        
-        console.log('📊 Found', customOrdersSnapshot.size, 'orders in customOrders collection');
-
-        // Fetch from artist's incoming_orders subcollection
-        const incomingOrdersCol = collection(db, 'users', currentUser.uid, 'incoming_orders');
-        const incomingOrdersSnapshot = await getDocs(incomingOrdersCol);
-        
-        console.log('📊 Found', incomingOrdersSnapshot.size, 'orders in incoming_orders subcollection');
-
-        // Combine all orders
-        const allOrdersDocs = [
-          ...globalOrdersSnapshot.docs, 
-          ...customOrdersSnapshot.docs, 
-          ...incomingOrdersSnapshot.docs
-        ];
-        
-        const ordersData: Order[] = allOrdersDocs.map(doc => {
+        const ordersData: Order[] = globalOrdersSnapshot.docs.map(doc => {
           const data = doc.data() as any;
           const isTicketOrder = !!(data.ticketQuantities?.length || data.ticketId || data.ticketName || data.ticketType);
           const resolvedClientName = data.clientInfo?.fullName || data.clientName || 'Unknown Client';
           const resolvedQuantity = data.quantity || data.totalQuantity || data.ticketQuantities?.reduce((sum: number, ticket: any) => sum + (ticket.quantity || 0), 0);
           const resolvedTicketType = data.ticketType || data.ticketName || (data.ticketQuantities?.length ? data.ticketQuantities.map((ticket: any) => `${ticket.quantity}x ${ticket.type}`).join(', ') : undefined);
           const resolvedPrice = data.price || data.totalPrice;
+          const rawStatus = data.status || 'pending';
+          const normalizedStatus = rawStatus === 'accepted' ? 'confirmed' : rawStatus === 'declined' ? 'rejected' : rawStatus;
 
           return {
             id: doc.id,
             type: data.type || (isTicketOrder ? 'ticket' : 'service'),
             clientName: resolvedClientName,
             service: data.service || data.gigTitle,
+            serviceTitle: data.serviceTitle,
             gigTitle: data.gigTitle,
             date: data.date,
             time: data.time,
@@ -110,7 +98,7 @@ const CalendarPage = () => {
             totalPrice: data.totalPrice,
             clientPrice: data.clientPrice,
             message: data.message,
-            status: data.status || 'pending',
+            status: normalizedStatus,
             timestamp: toTimestampString(data.timestamp) || toTimestampString(data.createdAt),
             createdAt: toTimestampString(data.createdAt),
             eventName: data.eventName,
@@ -120,6 +108,7 @@ const CalendarPage = () => {
             ticketQuantities: data.ticketQuantities,
             clientInfo: data.clientInfo,
             clientId: data.clientId,
+            artistId: data.artistId,
             gigId: data.gigId,
             items: data.items,
           };
@@ -142,18 +131,96 @@ const CalendarPage = () => {
     fetchOrders();
   }, []);
 
-  const handleAcceptOrder = (orderId: string) => {
-    setOrders(orders.map(order =>
-      order.id === orderId ? { ...order, status: 'accepted' } : order
-    ));
-    Alert.alert('Order Accepted', 'Order accepted successfully!');
+  const handleAcceptOrder = async (orderId: string) => {
+    const order = orders.find((order) => order.id === orderId);
+    if (!order) {
+      Alert.alert('Error', 'Order not found');
+      return;
+    }
+
+    const previousStatus = order.status;
+    let statusUpdated = false;
+    setSavingIds((prev) => [...prev, orderId]);
+    setOrders((prev) => prev.map((item) => item.id === orderId ? { ...item, status: 'confirmed' } : item));
+    try {
+      await confirmOrder(orderId);
+      statusUpdated = true;
+
+      if (order.clientId && order.artistId) {
+        try {
+          await sendOrderUpdateNotification(
+            order.clientId,
+            order.artistId,
+            order.id,
+            order.type,
+            'confirmed',
+            'Order Confirmed',
+            `Your order for ${order.serviceTitle || order.gigTitle || order.ticketName || 'the service'} is confirmed.`,
+          );
+        } catch (notificationError) {
+          console.warn('Order confirmed but notification failed:', notificationError);
+        }
+      }
+
+      try {
+        await createInvoiceForOrder(order as any);
+      } catch (invoiceError) {
+        console.warn('Order confirmed but invoice creation failed:', invoiceError);
+      }
+
+      Alert.alert('Order Confirmed', 'Order accepted successfully!');
+    } catch (error) {
+      console.error('Failed to confirm order:', error);
+      if (!statusUpdated) {
+        setOrders((prev) => prev.map((item) => item.id === orderId ? { ...item, status: previousStatus } : item));
+      }
+      Alert.alert('Error', 'Unable to confirm order.');
+    } finally {
+      setSavingIds((prev) => prev.filter((id) => id !== orderId));
+    }
   };
 
-  const handleDeclineOrder = (orderId: string) => {
-    setOrders(orders.map(order =>
-      order.id === orderId ? { ...order, status: 'declined' } : order
-    ));
-    Alert.alert('Order Declined', 'Order has been declined.');
+  const handleDeclineOrder = async (orderId: string) => {
+    const order = orders.find((order) => order.id === orderId);
+    if (!order) {
+      Alert.alert('Error', 'Order not found');
+      return;
+    }
+
+    const previousStatus = order.status;
+    let statusUpdated = false;
+    setSavingIds((prev) => [...prev, orderId]);
+    setOrders((prev) => prev.map((item) => item.id === orderId ? { ...item, status: 'rejected' } : item));
+    try {
+      await rejectOrder(orderId);
+      statusUpdated = true;
+
+      if (order.clientId && order.artistId) {
+        try {
+          await sendOrderUpdateNotification(
+            order.clientId,
+            order.artistId,
+            order.id,
+            order.type,
+            'rejected',
+            'Order Rejected',
+            `Your order for ${order.serviceTitle || order.gigTitle || order.ticketName || 'the service'} was rejected.`,
+          );
+        } catch (notificationError) {
+          console.warn('Order rejected but notification failed:', notificationError);
+        }
+      }
+
+      Alert.alert('Order Rejected', 'Order has been rejected.');
+    } catch (error) {
+      console.error('Failed to reject order:', error);
+      if (!statusUpdated) {
+        setOrders((prev) => prev.map((item) => item.id === orderId ? { ...item, status: previousStatus } : item));
+      }
+      Alert.alert('Error', 'Unable to reject order.');
+    } finally {
+      setSavingIds((prev) => prev.filter((id) => id !== orderId));
+    }
   };
 
   const handleCounterOffer = (orderId: string) => {
@@ -177,9 +244,9 @@ const CalendarPage = () => {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'pending': return '#ff9500';
-      case 'accepted': return '#34c759';
-      case 'declined': return '#ff3b30';
-      case 'counter_offered': return '#007aff';
+      case 'confirmed': return '#34c759';
+      case 'completed': return '#2563eb';
+      case 'rejected': return '#ff3b30';
       default: return '#666';
     }
   };
@@ -187,9 +254,9 @@ const CalendarPage = () => {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'pending': return 'time-outline';
-      case 'accepted': return 'checkmark-circle';
-      case 'declined': return 'close-circle';
-      case 'counter_offered': return 'swap-horizontal';
+      case 'confirmed': return 'checkmark-circle';
+      case 'completed': return 'trophy';
+      case 'rejected': return 'close-circle';
       default: return 'help-circle';
     }
   };
@@ -198,7 +265,7 @@ const CalendarPage = () => {
     <ScrollView style={styles.container}>
       {/* Filter Tabs */}
       <View style={styles.filterContainer}>
-        {['all', 'pending', 'accepted', 'declined'].map(status => (
+        {['all', 'pending', 'confirmed', 'completed', 'rejected'].map(status => (
           <TouchableOpacity
             key={status}
             style={[styles.filterTab, filter === status && styles.activeFilterTab]}
@@ -283,15 +350,17 @@ const CalendarPage = () => {
             {order.status === 'pending' && (
               <View style={styles.actionContainer}>
                 <TouchableOpacity 
-                  style={styles.acceptButton}
+                  style={[styles.acceptButton, savingIds.includes(order.id) && styles.disabledButton]}
                   onPress={() => handleAcceptOrder(order.id)}
+                  disabled={savingIds.includes(order.id)}
                 >
                   <Ionicons name="checkmark" size={20} color="white" />
                   <Text style={styles.buttonText}>Accept</Text>
                 </TouchableOpacity>
                 <TouchableOpacity 
-                  style={styles.declineButton}
+                  style={[styles.declineButton, savingIds.includes(order.id) && styles.disabledButton]}
                   onPress={() => handleDeclineOrder(order.id)}
+                  disabled={savingIds.includes(order.id)}
                 >
                   <Ionicons name="close" size={20} color="white" />
                   <Text style={styles.buttonText}>Decline</Text>
@@ -501,6 +570,9 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     marginLeft: 8,
+  },
+  disabledButton: {
+    opacity: 0.6,
   },
   buttonText: {
     color: 'white',

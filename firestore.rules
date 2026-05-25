@@ -114,8 +114,23 @@ service cloud.firestore {
       
     // User notifications
     match /notifications/{notificationId} {
-      allow read, write: if isOwnerOrAdmin(userId);
-      allow delete: if isOwnerOrAdmin(userId);
+      // Reading notifications: owner or admin
+      allow read: if isOwnerOrAdmin(userId) || isAdmin();
+
+      // Creating notifications:
+      // - The user themselves can create their own notification
+      // - An artist (or any authenticated actor) may create a notification for a user
+      //   provided they identify themselves in the notification payload as the actor.
+      allow create: if isAuthenticated() && (
+        request.auth.uid == userId || // self
+        request.auth.uid == request.resource.data.artistId || // actor is artist
+        isAdmin()
+      );
+
+      // Updating/deleting: only owner or admin
+      allow update: if isOwnerOrAdmin(userId) || isAdmin();
+      allow delete: if isOwnerOrAdmin(userId) || isAdmin();
+
       // list / queries — path-scoped; doc-level read rule still enforces per-user ownership
       allow list: if isAuthenticated();
     }
@@ -152,22 +167,62 @@ service cloud.firestore {
         (isAuthenticated() && request.auth.uid == resource.data.artistId);
     }
     
-    // Global orders collection
+    // ======= CENTRALIZED ORDERS COLLECTION (SINGLE SOURCE OF TRUTH) =======
+    
+    // Global orders collection - Only collection for all order types
+    // Contains: tickets, services, custom orders - all in one place
     match /orders/{orderId} {
+      // Both client and artist can read
       allow read: if isAuthenticated() && 
         (request.auth.uid == resource.data.clientId || 
          request.auth.uid == resource.data.artistId || 
          isAdmin());
+
+      // List: artists can see all their orders, clients can see all their orders
       allow list: if isAuthenticated();
+
+      // Create: only the client can create orders for themselves
       allow create: if isAuthenticated() && 
-        request.resource.data.clientId == request.auth.uid;
-      allow update: if isAuthenticated() && 
-        (request.auth.uid == resource.data.clientId || 
-         request.auth.uid == resource.data.artistId);
+        request.resource.data.clientId == request.auth.uid &&
+        request.resource.data.artistId != null &&
+        request.resource.data.totalPrice != null &&
+        request.resource.data.type in ['ticket', 'service'];
+
+      // Update:
+      // - Client can update their own orders
+      // - Artist can only update status/updatedAt/invoice fields
+      allow update: if isAuthenticated() && (
+        // Client can update own order
+        (request.auth.uid == resource.data.clientId)
+
+        // Artist can only update allowed fields
+        || (
+          request.auth.uid == resource.data.artistId
+          && request.resource.data
+               .diff(resource.data)
+               .changedKeys()
+               .hasOnly([
+                 'status',
+                 'updatedAt',
+                 'invoiceId',
+                 'invoiceUrl',
+                 'invoicePdfUrl',
+                 'completedAt'
+               ])
+        )
+
+        || isAdmin()
+      );
+
+      // Delete: only admin
       allow delete: if isAdmin();
     }
     
-    // Global custom orders collection
+    // DEPRECATED: These collections are no longer used
+    // All orders (tickets, services, custom) are now stored in /orders/{orderId}
+    // Keeping these rules for backward compatibility only
+    
+    // Global custom orders collection (DEPRECATED - use /orders instead)
     match /customOrders/{orderId} {
       allow read: if isAuthenticated() && 
         (request.auth.uid == resource.data.clientId || 
@@ -182,7 +237,7 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
     
-    // Global incoming custom orders collection
+    // Global incoming custom orders collection (DEPRECATED - use /orders instead)
     match /incomingCustomOrders/{orderId} {
       allow read: if isAuthenticated() && 
         (request.auth.uid == resource.data.clientId || 
@@ -410,18 +465,27 @@ service cloud.firestore {
      
      // Invoices (for completed orders)
      match /invoices/{invoiceId} {
-       allow read: if isAuthenticated() && 
-         (request.auth.uid == resource.data.userId || 
-          request.auth.uid == resource.data.artistId || 
-          isAdmin());
-       // allow list (queries) — client queries own invoices by userId, artist queries by artistId
-       allow list: if isAuthenticated() && 
-         (request.query.where('userId', '==', request.auth.uid) ||
-          request.query.where('artistId', '==', request.auth.uid));
-       allow create: if isAuthenticated() && 
-         (request.auth.uid == request.resource.data.userId || 
-          request.auth.uid == request.resource.data.artistId);
-       allow update, delete: if isAdmin();
+       allow get: if isAuthenticated() && (
+         resource == null ||
+         request.auth.uid == resource.data.userId ||
+         request.auth.uid == resource.data.artistId ||
+         isAdmin()
+       );
+
+       allow list: if isAuthenticated();
+
+       allow create: if isAuthenticated() && (
+         request.auth.uid == request.resource.data.userId ||
+         request.auth.uid == request.resource.data.artistId
+       );
+
+       allow update: if isAuthenticated() && (
+         request.auth.uid == resource.data.userId ||
+         request.auth.uid == resource.data.artistId ||
+         isAdmin()
+       );
+
+       allow delete: if isAdmin();
      }
      
     // ======= CONTENT & MEDIA =======

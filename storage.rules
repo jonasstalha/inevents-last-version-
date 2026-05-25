@@ -47,10 +47,10 @@ service firebase.storage {
     }
 
     // ── invoices ────────────────────────────────────────────
-    // File names are invoice_<firestoreDocId>; only admins may upload
-    match /invoices/{invoiceFile} {
-      allow read:  if isAuthenticated() && isAdmin();
-      allow write: if isAuthenticated() && isAdmin();
+    // Artists and clients can upload invoice PDFs to nested invoice paths.
+    match /invoices/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
       allow delete: if isAuthenticated() && isAdmin();
     }
 

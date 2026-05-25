@@ -5,6 +5,7 @@ import { fetchServiceByIdFromFirebase } from '@/src/firebase/fetchAllServices';
 import { storage } from '@/src/firebase/firebaseConfig';
 import { validatePromoCode } from '@/src/firebase/promoService';
 import { addServiceReview } from '@/src/firebase/reviewService';
+import { createOrder } from '@/src/firebase/orderService';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { ResizeMode, Video } from 'expo-av';
@@ -60,7 +61,8 @@ export default function ServiceDetailScreen() {
      city: '',
      country: '',
      eventDate: '',
-     eventLocation: ''
+     eventLocation: '',
+     additionalNotes: '',
    });
    const [showDatePicker, setShowDatePicker] = useState(false);
    const [tempEventDate, setTempEventDate] = useState(new Date());
@@ -344,57 +346,88 @@ export default function ServiceDetailScreen() {
 
   const handleFinalSubmit = async () => {
     try {
-      // Validate required personal info
       if (!personalInfo.fullName.trim() || !personalInfo.email.trim() || !personalInfo.phone.trim()) {
         Alert.alert('Missing Information', 'Please fill in all required fields (Name, Email, Phone).');
         return;
       }
 
-      // Get current user ID
       const auth = getAuth();
       const currentUser = auth.currentUser;
-      
       if (!currentUser) {
         Alert.alert('Error', 'You need to be logged in to place an order.');
         return;
       }
-      
-       // Create custom order object
-       const customOrder = {
-         id: `custom_order_${Date.now()}`,
-         clientId: currentUser.uid,
-         artistId: serviceData?.userId || serviceData?.artistId,
-         serviceId: String(gigId),
-         serviceTitle: serviceData?.title || defaultServiceData.title,
-         serviceDescription: customMessage,
-         clientBudget: Number(clientBudget),
-         estimatedPrice: calculatePrice(),
-         clientInfo: personalInfo,
-         type: 'service',
-         status: 'pending', // pending, accepted, declined, completed
-         createdAt: new Date().toISOString(),
-         updatedAt: new Date().toISOString(),
-       };
-      
-      console.log('🎯 Creating custom order:', customOrder);
-      console.log('Artist ID:', customOrder.artistId);
-      console.log('Service data userId:', serviceData?.userId);
-      
-      // Validate artistId
-      if (!customOrder.artistId) {
-        console.error('❌ ERROR: artistId is missing for custom order!');
+
+      if (!serviceData) {
+        Alert.alert('Error', 'Service data is still loading. Please wait and try again.');
+        return;
+      }
+
+      const artistId = serviceData?.userId || serviceData?.artistId;
+      if (!artistId) {
+        console.error('❌ ERROR: artistId is missing for order submission!');
         Alert.alert('Error', 'Cannot create order: Artist ID is missing. Please try again.');
         return;
       }
-      const { addDoc, collection } = await import('firebase/firestore');
-      const { getFirestore } = await import('firebase/firestore');
-      const db = getFirestore();
-      
-      console.log('🔄 Saving custom order to Firebase...');
-      const docRef = await addDoc(collection(db, 'customOrders'), customOrder);
-      console.log('✅ Custom order saved with ID:', docRef.id);
 
-      // Reset form
+      const items = Object.entries(serviceQuantities)
+        .map(([key, quantity]) => {
+          if (key.startsWith('item_')) {
+            const index = parseInt(key.replace('item_', ''), 10);
+            const item = serviceData?.items?.[index];
+            if (item && quantity > 0) {
+              return {
+                id: item.id || key,
+                title: item.title,
+                quantity,
+                price: typeof item.price === 'number' ? item.price : parseFloat(String(item.price)),
+              };
+            }
+          }
+          return null;
+        })
+        .filter(Boolean) as Array<{ id: string; title: string; quantity: number; price: number }>;
+
+      const orderInput = {
+        clientId: currentUser.uid,
+        clientName: personalInfo.fullName,
+        clientPhoto: currentUser.photoURL || undefined,
+        artistId,
+        artistName: defaultServiceData.provider.name,
+        artistPhoto: defaultServiceData.provider.avatar,
+        gigId: String(gigId),
+        serviceId: String(gigId),
+        serviceTitle: serviceData?.title || defaultServiceData.title,
+        serviceCategory: serviceData?.category || 'Service',
+        serviceImage: defaultServiceData.images[0] || undefined,
+        description: customMessage,
+        notes: personalInfo.eventLocation || '',
+        attachments: [],
+        type: 'service' as const,
+        totalPrice: calculatePrice(),
+        budget: Number(clientBudget) || undefined,
+        currency: 'MAD',
+        paymentStatus: 'unpaid' as const,
+        selectedOptions: [],
+        items,
+        personalInfo: {
+          fullName: personalInfo.fullName,
+          email: personalInfo.email,
+          phone: personalInfo.phone,
+          address: personalInfo.address,
+          city: personalInfo.city,
+          country: personalInfo.country,
+          additionalNotes: customMessage || '',
+        },
+        customization: {
+          eventDate: personalInfo.eventDate,
+          location: personalInfo.eventLocation,
+        },
+      };
+
+      const orderId = await createOrder(orderInput);
+      console.log('✅ Order created with ID:', orderId);
+
       setCustomMessage('');
       setClientBudget('');
       setPersonalInfo({
@@ -405,26 +438,27 @@ export default function ServiceDetailScreen() {
         city: '',
         country: '',
         eventDate: '',
-        eventLocation: ''
+        eventLocation: '',
+        additionalNotes: '',
       });
 
-      // Show success message
       Alert.alert(
-        '🎉 Custom Order Sent!', 
-        `Your custom order has been sent to ${defaultServiceData.provider.name}!\n\nYour Budget: ${clientBudget} MAD\n\nYou'll receive a response within ${defaultServiceData.provider.responseTime}.`,
+        '🎉 Order Sent!',
+        `Your order has been created and sent to ${defaultServiceData.provider.name}!\n\nTotal: ${calculatePrice()} MAD.`,
         [
           {
             text: 'OK',
             onPress: () => {
               setShowOfferForm(false);
-              router.push('/(client)');
-            }
-          }
-        ]
+              router.push('/(client)/(hidden)/invoices');
+            },
+          },
+        ],
       );
-    } catch (error) {
-      console.error('Error sending custom order:', error);
-      Alert.alert('Error', 'There was a problem sending your custom order. Please try again.');
+    } catch (error: any) {
+      console.error('Error creating order:', error);
+      const errorMsg = error?.message || 'There was a problem placing your order. Please try again.';
+      Alert.alert('Error', errorMsg);
     }
   };
 
@@ -507,89 +541,59 @@ export default function ServiceDetailScreen() {
         return;
       }
       
-      console.log('📋 Service data:', serviceData);
-      console.log('📋 Service data userId:', serviceData?.userId);
-      console.log('📋 Service data artistId:', serviceData?.artistId);
-      console.log('📋 Default service data:', defaultServiceData);
-      
-       const newOrder = {
-         id: `order_${Date.now()}`,
-         clientId: currentUser.uid,
-         clientName: clientInfo.fullName,
-         clientEmail: clientInfo.email,
-         clientInfo: clientInfo,
-         artistId: serviceData?.userId || serviceData?.artistId,
-         gigId: String(gigId),
-         gigTitle: serviceData?.title || defaultServiceData.title,
-         message: customMessage,
-         items: Object.entries(serviceQuantities).map(([key, quantity]) => {
-           if (key.startsWith('item_')) {
-             const index = parseInt(key.replace('item_', ''));
-             const item = serviceData?.items?.[index];
-             if (item) {
-               return {
-                 id: item.id || key,
-                 title: item.title,
-                 quantity,
-                 price: typeof item.price === 'number' ? item.price : parseFloat(String(item.price))
-               };
-             }
-           }
-           return null;
-         }).filter(Boolean),
-         totalPrice: calculatePrice(),
-         type: 'service',
-         status: 'pending',
-         createdAt: new Date().toISOString(),
-         updatedAt: new Date().toISOString(),
-       };
-       
-      console.log('=== ORDER DEBUG ===');
-      console.log('clientId:', newOrder.clientId);
-      console.log('artistId being saved:', newOrder.artistId);
-      console.log('serviceData.userId:', serviceData?.userId);
-      console.log('serviceData.artistId:', serviceData?.artistId);
-      console.log('gigTitle:', newOrder.gigTitle);
-      console.log('order object:', newOrder);
-      console.log('===================');
-      
-      // Validate required fields
-      if (!newOrder.artistId) {
+      // Get artist ID from service data
+      const artistId = serviceData?.userId || serviceData?.artistId;
+      if (!artistId) {
         console.error('❌ ERROR: artistId is missing!');
         Alert.alert('Error', 'Cannot create order: Artist ID is missing. Please try again.');
         return;
       }
       
-      if (!newOrder.clientId) {
-        console.error('❌ ERROR: clientId is missing!');
-        Alert.alert('Error', 'Cannot create order: Client ID is missing. Please try again.');
-        return;
-      }
-      
-      // Save order to Firebase
-      const { addDoc, collection } = await import('firebase/firestore');
-      
-      console.log('🔄 Attempting to save to global orders collection...');
-      // Save order to global orders collection
-      const orderRef = await addDoc(collection(db, 'orders'), newOrder);
-      console.log('✅ Order created in global collection with ID:', orderRef.id);
-      
-      // Also save to artist's incoming orders
-      if (newOrder.artistId) {
-        try {
-          console.log('🔄 Attempting to save to artist incoming orders...');
-          const artistIncomingOrdersRef = collection(db, 'users', newOrder.artistId, 'incoming_orders');
-          const incomingOrderData = {
-            ...newOrder,
-            orderId: orderRef.id
-          };
-          await addDoc(artistIncomingOrdersRef, incomingOrderData);
-          console.log('✅ Order also saved to artist incoming orders');
-        } catch (error) {
-          console.warn('⚠️ Failed to save to artist incoming orders:', error);
-          // Don't throw - the main order was saved successfully
-        }
-      }
+      // Build items array from service quantities
+      const items = Object.entries(serviceQuantities)
+        .map(([key, quantity]) => {
+          if (key.startsWith('item_')) {
+            const index = parseInt(key.replace('item_', ''));
+            const item = serviceData?.items?.[index];
+            if (item && quantity > 0) {
+              return {
+                id: item.id || key,
+                title: item.title,
+                quantity,
+                price: typeof item.price === 'number' ? item.price : parseFloat(String(item.price))
+              };
+            }
+          }
+          return null;
+        })
+        .filter(Boolean) as Array<{ id: string; title: string; quantity: number; price: number }>;
+
+      // Use centralized createOrder function from orderService
+      console.log('🔄 Creating order in centralized collection...');
+      const orderId = await createOrder({
+        clientId: currentUser.uid,
+        clientName: clientInfo.fullName,
+        clientPhoto: undefined,
+        artistId: artistId,
+        artistName: defaultServiceData.provider.name,
+        artistPhoto: defaultServiceData.provider.avatar,
+        gigId: String(gigId),
+        gigTitle: serviceData?.title || defaultServiceData.title,
+        serviceId: String(gigId),
+        serviceTitle: serviceData?.title || defaultServiceData.title,
+        serviceCategory: serviceData?.category || 'Service',
+        serviceImage: defaultServiceData.images[0] || undefined,
+        description: customMessage,
+        notes: personalInfo.additionalNotes || '',
+        type: 'service',
+        totalPrice: calculatePrice(),
+        currency: 'MAD',
+        paymentStatus: 'unpaid',
+        selectedOptions: [],
+        items: items,
+        clientInfo: clientInfo,
+      });
+      console.log('✅ Order created with ID:', orderId);
 
       // Record coupon usage if coupon was applied
       if (couponApplied && coupon.trim() && discount > 0) {
@@ -600,7 +604,7 @@ export default function ServiceDetailScreen() {
             currentUser.uid,
             clientInfo.fullName,
             String(gigId),
-            orderRef.id,
+            orderId,
             discount
           );
           console.log('✅ Coupon usage recorded');
@@ -611,20 +615,19 @@ export default function ServiceDetailScreen() {
       }
 
       // Show success message
-      Alert.alert('🎉 Offer Sent!', `Your custom offer has been sent to ${defaultServiceData.provider.name}!\n\nTotal: ${calculatePrice()} MAD\n\nYou'll receive a response within ${defaultServiceData.provider.responseTime}.`);
+      Alert.alert('🎉 Order Created!', `Your order has been sent to ${defaultServiceData.provider.name}!\n\nTotal: ${calculatePrice()} MAD\n\nYou'll receive a response within ${defaultServiceData.provider.responseTime}.`);
       setShowOfferForm(false);
       
       // Navigate back to client home
-      router.push('/(client)');
+      router.push('/(client)/(hidden)/invoices');
     } catch (error: any) {
-      console.error('❌ Error sending offer:', error);
+      console.error('❌ Error creating order:', error);
       console.error('Error code:', error.code);
       console.error('Error message:', error.message);
-      console.error('Full error:', JSON.stringify(error, null, 2));
       
-      let errorMsg = 'There was a problem sending your offer. Please try again.';
+      let errorMsg = 'There was a problem creating your order. Please try again.';
       if (error.code === 'permission-denied') {
-        errorMsg = 'Permission denied. You may not be logged in or have permission to create orders.';
+        errorMsg = 'Permission denied. You may not have permission to create orders.';
       } else if (error.message) {
         errorMsg = `Error: ${error.message}`;
       }

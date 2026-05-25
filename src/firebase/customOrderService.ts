@@ -1,14 +1,15 @@
-import { addDoc, collection, getFirestore, serverTimestamp } from 'firebase/firestore';
-import app from './firebaseConfig';
+import { getAuth } from 'firebase/auth';
+import { collection, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
+import { createOrder } from './orderService';
+import { db } from './firebaseConfig';
 import { awardCustomOrderPoints } from './rewardsService';
 
-/**
- * Create a custom service order (offer) from client to artist.
- * @param orderData { clientId, artistId, serviceId, clientPrice, realPrice, message, status, createdAt, clientInfo, customization, priceProposal, personalInfo }
- */
-export const createCustomServiceOrder = async (orderData: {
+export interface CustomServiceOrderInput {
   clientId: string;
+  clientName?: string;
+  clientPhoto?: string;
   artistId: string;
+  artistName?: string;
   serviceId: string;
   serviceName?: string;
   clientPrice: number;
@@ -45,109 +46,76 @@ export const createCustomServiceOrder = async (orderData: {
     country: string;
     additionalNotes: string;
   };
-}) => {
-  const db = getFirestore(app);
-  const data = {
-    ...orderData,
-    status: orderData.status || 'pending',
-    createdAt: serverTimestamp(),
-    // Save detailed form data
-    customization: orderData.customization || null,
-    priceProposal: orderData.priceProposal || null,
-    personalInfo: orderData.personalInfo || null,
-  };
-  
-  // Save to global custom orders collection
-  const clientOrderDoc = await addDoc(collection(db, 'customOrders'), data);
-  
-  // Save to global incoming custom orders collection for artist notifications
-  await addDoc(collection(db, 'incomingCustomOrders'), {
-    ...data,
-    orderId: clientOrderDoc.id,
+}
+
+export const createCustomServiceOrder = async (orderData: CustomServiceOrderInput) => {
+  const orderId = await createOrder({
+    clientId: orderData.clientId,
+    clientName: orderData.clientName,
+    clientPhoto: orderData.clientPhoto,
+    artistId: orderData.artistId,
+    artistName: orderData.artistName,
+    serviceId: orderData.serviceId,
+    serviceName: orderData.serviceName,
+    description: orderData.message,
+    type: 'service',
+    totalPrice: orderData.clientPrice,
+    currency: 'MAD',
+    paymentStatus: 'unpaid',
+    clientInfo: orderData.clientInfo,
+    customization: orderData.customization,
+    priceProposal: orderData.priceProposal,
+    personalInfo: orderData.personalInfo,
+    specialRequests: orderData.customization?.specificRequests,
   });
 
-  // Award points for custom order
   try {
-    await awardCustomOrderPoints(
-      orderData.clientId,
-      clientOrderDoc.id,
-      orderData.serviceName || 'Custom Service',
-      orderData.clientPrice
-    );
-    console.log(`✅ Awarded points for custom order: ${clientOrderDoc.id}`);
+    await awardCustomOrderPoints(orderData.clientId, orderId, orderData.serviceName, orderData.clientPrice);
+    console.log(`? Awarded points for custom order: ${orderId}`);
   } catch (pointsError) {
     console.error('Failed to award points for custom order:', pointsError);
-    // Don't throw this error as it's not critical to order creation
   }
 
-  return clientOrderDoc.id;
+  return orderId;
 };
 
-/**
- * Get custom service orders for the current client
- * @returns Promise with array of custom service orders
- */
 export const getClientCustomOrders = async () => {
-  try {
-    const { getAuth, getFirestore } = await import('firebase/auth');
-    const { collection, getDocs, query, where } = await import('firebase/firestore');
-    const app = (await import('./firebaseConfig')).default;
-
-    const db = getFirestore(app);
-    const auth = getAuth(app);
-
-    if (!auth.currentUser) {
-      throw new Error('User is not authenticated');
-    }
-
-    const clientId = auth.currentUser.uid;
-
-    // Query custom orders where clientId matches
-    const customOrdersRef = collection(db, 'customOrders');
-    const q = query(customOrdersRef, where('clientId', '==', clientId));
-    const customOrdersSnapshot = await getDocs(q);
-
-    return customOrdersSnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-  } catch (error) {
-    console.error('Error fetching client custom orders:', error);
-    throw error;
+  const auth = getAuth();
+  if (!auth.currentUser) {
+    throw new Error('User is not authenticated');
   }
+
+  const clientId = auth.currentUser.uid;
+  const customOrdersRef = collection(db, 'orders');
+  const q = query(customOrdersRef, where('clientId', '==', clientId), where('type', '==', 'service'));
+  const snapshot = await getDocs(q);
+
+  return snapshot.docs.map((docItem) => ({
+    id: docItem.id,
+    ...docItem.data(),
+  }));
 };
 
-/**
- * Get a specific custom order by ID
- * @param orderId The custom order ID to retrieve
- * @returns The custom order data or null if not found
- */
 export const getCustomOrderById = async (orderId: string) => {
-  try {
-    const { getAuth, getFirestore } = await import('firebase/auth');
-    const { doc, getDoc } = await import('firebase/firestore');
-    const app = (await import('./firebaseConfig')).default;
-
-    const db = getFirestore(app);
-    const auth = getAuth(app);
-
-    if (!auth.currentUser) {
-      throw new Error('User is not authenticated');
-    }
-
-    const customOrderRef = doc(db, 'customOrders', orderId);
-    const customOrderDoc = await getDoc(customOrderRef);
-
-    if (customOrderDoc.exists()) {
-      return {
-        id: customOrderDoc.id,
-        ...customOrderDoc.data()
-      };
-    } else {
-      return null;
-    }
-  } catch (error) {
-    console.error('Error fetching custom order:', error);
-    throw error;
+  const auth = getAuth();
+  if (!auth.currentUser) {
+    throw new Error('User is not authenticated');
   }
+
+  const orderRef = doc(db, 'orders', orderId);
+  const orderSnapshot = await getDoc(orderRef);
+
+  if (!orderSnapshot.exists()) {
+    return null;
+  }
+
+  const data = orderSnapshot.data();
+  if (data.type !== 'service') {
+    return null;
+  }
+
+  return {
+    id: orderSnapshot.id,
+    ...data,
+  };
 };

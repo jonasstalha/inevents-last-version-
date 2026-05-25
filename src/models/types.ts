@@ -4,7 +4,7 @@ export interface User {
   role: 'artist' | 'client' | 'admin';
   name: string;
   storeName?: string;
-  password?: string; // Added password field
+  password?: string;
   profileImage?: string;
   phoneNumber?: string;
   isPhoneVerified?: boolean;
@@ -20,8 +20,8 @@ export interface Artist extends User {
   location: string;
   featured: boolean;
   specialization?: string;
-  activeCustomers?: number; // Total active customers
-  conversionRate?: string; // Conversion rate for analytics
+  activeCustomers?: number;
+  conversionRate?: string;
 }
 
 export interface Client extends User {
@@ -41,23 +41,21 @@ export interface Gig {
   description: string;
   basePrice: number;
   images: string[];
-  video?: string; // Video URL for the service
+  video?: string;
   category: string;
   options: GigOption[];
   rating: number;
   reviewCount: number;
   createdAt: Date;
-  orders?: Order[]; // Added orders property for analytics/stat grid
-  // Enhanced UI properties
-  image?: string; // Single image path for search screen
-  providerName?: string; // Name of the service provider
-  ordersCount?: number; // Number of orders
-  sales?: number; // Total sales for the gig
-  revenue?: number; // Total revenue for the gig
-  type?: 'service' | 'ticket' | 'event'; // Type of the gig
+  orders?: Order[];
+  image?: string;
+  providerName?: string;
+  ordersCount?: number;
+  sales?: number;
+  revenue?: number;
+  type?: 'service' | 'ticket' | 'event';
 }
 
-// Input type for creating or updating a gig/service
 export interface GigInput {
   title: string;
   description: string;
@@ -77,16 +75,92 @@ export interface GigOption {
   maxQuantity?: number;
 }
 
+export type OrderStatus = 'pending' | 'confirmed' | 'rejected' | 'completed';
+export type OrderType = 'ticket' | 'service';
+export type PaymentStatus = 'unpaid' | 'paid';
+
 export interface Order {
   id: string;
   clientId: string;
-  gigId: string;
+  clientName?: string;
+  clientPhoto?: string;
   artistId: string;
-  status: 'pending' | 'confirmed' | 'rejected' | 'completed';
+  artistName?: string;
+  artistPhoto?: string;
+  gigId?: string;
+  gigTitle?: string;
+  ticketName?: string;
+  serviceId?: string;
+  serviceTitle?: string;
+  serviceName?: string;
+  serviceCategory?: string;
+  serviceImage?: string;
+  description?: string;
+  notes?: string;
+  attachments?: string[];
+  type: OrderType;
+  status: OrderStatus;
   totalPrice: number;
-  selectedOptions: string[];
+  budget?: number;
+  selectedPackage?: string;
+  currency?: string;
+  paymentStatus?: PaymentStatus;
+  invoiceId?: string;
+  invoiceUrl?: string;
+  selectedOptions?: string[];
   specialRequests?: string;
+  items?: Array<{ id: string; title: string; quantity: number; price: number }>;
+  ticketQuantities?: Array<{ type: string; price: number; quantity: number }>;
+  personalInfo?: {
+    fullName: string;
+    email: string;
+    phone: string;
+    address: string;
+    city: string;
+    country: string;
+    additionalNotes?: string;
+  };
+  clientInfo?: {
+    fullName: string;
+    email: string;
+    phone: string;
+    address: string;
+    city: string;
+    country: string;
+  };
+  customization?: {
+    eventDate?: string;
+    eventTime?: string;
+    duration?: string;
+    location?: string;
+    guestCount?: string;
+    specificRequests?: string;
+  };
+  priceProposal?: {
+    proposedPrice?: string;
+    budgetRange?: string;
+    priceJustification?: string;
+  };
+  orderReference?: string;
+  totalQuantity?: number;
   createdAt: string;
+  updatedAt?: string;
+  completedAt?: string;
+}
+
+export interface Invoice {
+  id: string;
+  orderId: string;
+  clientId: string;
+  artistId: string;
+  invoiceNumber: string;
+  subtotal: number;
+  taxes: number;
+  total: number;
+  currency: string;
+  pdfUrl: string;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface Ticket {
@@ -99,7 +173,6 @@ export interface Ticket {
   qrCode?: string;
   status?: 'available' | 'sold' | 'used';
   createdAt: Date;
-  // Added fields for compatibility with Ticket.tsx
   location?: string;
   description?: string;
   flyer?: string;

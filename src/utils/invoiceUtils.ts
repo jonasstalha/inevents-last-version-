@@ -1,17 +1,19 @@
 import { 
   collection, 
   doc, 
-  setDoc, 
+  getDoc,
   getFirestore, 
   query as firestoreQuery,
+  serverTimestamp,
+  setDoc, 
+  updateDoc,
   where,
   getDocs,
-  updateDoc
 } from 'firebase/firestore';
 import { 
   getStorage, 
-  ref, 
-  uploadString, 
+  ref as storageRef, 
+  uploadBytes, 
   getDownloadURL 
 } from 'firebase/storage';
 import * as Print from 'expo-print';
@@ -75,24 +77,67 @@ export interface ArtistForInvoice {
   taxId?: string;
 }
 
-function generateHTMLInvoice(order: OrderForInvoice, artist: ArtistForInvoice): string {
+interface ResolvedInvoiceImages {
+  logo?: string;
+  cover?: string;
+  avatar?: string;
+}
+
+async function imageToDataUri(url?: string): Promise<string> {
+  if (!url || !url.startsWith('http')) return '';
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return '';
+  }
+}
+
+function buildImageTag(src: string, alt = 'Invoice Image'): string {
+  if (!src) return '';
+  return `<img src="${src}" alt="${alt}" style="max-width: 100%; height: auto; margin-bottom: 24px; border-radius: 12px;" />`;
+}
+
+function getInvoiceTitle(order: OrderForInvoice): string {
+  return order.serviceName || order.ticketName || order.gigTitle || 'Invoice';
+}
+
+function getPotentialImageUrls(order: OrderForInvoice, artist: ArtistForInvoice) {
+  return {
+    logo: (artist as any).logoUrl || (artist as any).avatarUrl || (artist as any).image || '',
+    cover: (order as any).coverUrl || (order as any).serviceCover || (order as any).serviceImage || (order as any).imageUrl || (order as any).image || '',
+    avatar: (artist as any).avatarUrl || (artist as any).profileImage || (artist as any).image || '',
+  };
+}
+
+function generateHTMLInvoice(
+  order: OrderForInvoice,
+  artist: ArtistForInvoice,
+  images: ResolvedInvoiceImages = {},
+): string {
   const orderDate = new Date(order.createdAt).toLocaleDateString('en-US', {
     day: 'numeric',
     month: 'short',
-    year: 'numeric'
+    year: 'numeric',
   });
 
   const clientInfo = order.clientInfo || order.personalInfo;
   const items = order.items || order.ticketQuantities || [];
-  
-  const itemRows = items.map(item => {
-    // Determine if this is a ticket quantity item (has 'type') or regular item (has 'title')
-    const isTicketItem = 'type' in item;
-    const title = isTicketItem ? (item as any).type || 'Item' : (item as any).title || 'Item';
-    const qty = item.quantity || 1;
-    const price = item.price || 0;
-    const total = qty * price;
-    return `
+
+  const itemRows = items
+    .map(item => {
+      const isTicketItem = 'type' in item;
+      const title = isTicketItem ? (item as any).type || 'Item' : (item as any).title || 'Item';
+      const qty = item.quantity || 1;
+      const price = item.price || 0;
+      const total = qty * price;
+      return `
       <tr>
         <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">${title}</td>
         <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: center;">${qty}</td>
@@ -100,9 +145,11 @@ function generateHTMLInvoice(order: OrderForInvoice, artist: ArtistForInvoice): 
         <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: right; font-weight: 600;">${total.toFixed(2)} MAD</td>
       </tr>
     `;
-  }).join('');
+    })
+    .join('');
 
-  const serviceDetails = order.customization ? `
+  const serviceDetails = order.customization
+    ? `
     <div style="margin-top: 30px;">
       <h3 style="color: #6366f1; font-size: 16px; margin-bottom: 12px;">Service Details</h3>
       <div style="display: flex; flex-direction: column; gap: 8px;">
@@ -113,7 +160,12 @@ function generateHTMLInvoice(order: OrderForInvoice, artist: ArtistForInvoice): 
         ${order.customization.duration ? `<p style="margin: 0;"><strong>Duration:</strong> ${order.customization.duration}</p>` : ''}
       </div>
     </div>
-  ` : '';
+  `
+    : '';
+
+  const logoHtml = images.logo ? buildImageTag(images.logo, 'Invoice Logo') : '';
+  const coverHtml = images.cover ? `<div style="margin-bottom: 24px;">${buildImageTag(images.cover, 'Cover Image')}</div>` : '';
+  const avatarHtml = images.avatar ? `<div style="margin-top: 12px;">${buildImageTag(images.avatar, 'Artist Avatar')}</div>` : '';
 
   return `
     <!DOCTYPE html>
@@ -228,11 +280,16 @@ function generateHTMLInvoice(order: OrderForInvoice, artist: ArtistForInvoice): 
       </head>
       <body>
         <div class="container">
+          ${coverHtml}
           <div class="header">
-            <div class="logo">INVOICE</div>
+            <div>
+              <div class="logo">INVOICE</div>
+              <div style="margin-top: 8px; color: #374151; font-size: 14px;">${getInvoiceTitle(order)}</div>
+            </div>
             <div class="invoice-meta">
               <p><strong>Invoice #:</strong> ${order.id.substring(0, 8).toUpperCase()}</p>
               <p><strong>Date:</strong> ${orderDate}</p>
+              ${logoHtml}
             </div>
           </div>
 
@@ -255,6 +312,7 @@ function generateHTMLInvoice(order: OrderForInvoice, artist: ArtistForInvoice): 
               ${artist.email ? `<p>${artist.email}</p>` : ''}
               ${artist.phone ? `<p>${artist.phone}</p>` : ''}
               ${artist.taxId ? `<p>Tax ID: ${artist.taxId}</p>` : ''}
+              ${avatarHtml}
             </div>
           </div>
 
@@ -298,23 +356,48 @@ function generateHTMLInvoice(order: OrderForInvoice, artist: ArtistForInvoice): 
   `;
 }
 
+async function buildInvoiceHtml(order: OrderForInvoice, artist: ArtistForInvoice): Promise<string> {
+  const urls = getPotentialImageUrls(order, artist);
+  const [logo, cover, avatar] = await Promise.all([
+    imageToDataUri(urls.logo),
+    imageToDataUri(urls.cover),
+    imageToDataUri(urls.avatar),
+  ]);
+  return generateHTMLInvoice(order, artist, { logo, cover, avatar });
+}
+
+async function uploadPdfToStorage(pdfUri: string, destPath: string): Promise<string> {
+  const response = await fetch(pdfUri);
+  const blob = await response.blob();
+
+  const storage = getStorage();
+  const ref = storageRef(storage, destPath);
+
+  await uploadBytes(ref, blob, { contentType: 'application/pdf' });
+
+  // @ts-ignore - RN Blob has a close() method to release memory
+  if (typeof (blob as any).close === 'function') (blob as any).close();
+
+  return await getDownloadURL(ref);
+}
+
 export async function generateInvoice(
   order: OrderForInvoice,
   artist: ArtistForInvoice
 ): Promise<string> {
-  const html = generateHTMLInvoice(order, artist);
-  
-   try {
-     const result = await Print.printToFileAsync({
-       html,
-       base64: true,
-     });
-     
-     if (!result.base64) {
-       throw new Error('Failed to generate PDF base64');
-     }
-     return result.base64;
-   } catch (error) {
+  const html = await buildInvoiceHtml(order, artist);
+
+  try {
+    const result = await Print.printToFileAsync({
+      html,
+      base64: true,
+    });
+
+    if (!result.base64) {
+      throw new Error('Failed to generate PDF base64');
+    }
+    return result.base64;
+  } catch (error) {
     console.error('Error generating PDF:', error);
     throw error;
   }
@@ -323,56 +406,61 @@ export async function generateInvoice(
 export async function saveInvoiceToStorage(
   order: OrderForInvoice,
   artist: ArtistForInvoice,
-  userId: string
+  userId: string,
+  existingInvoiceId?: string,
 ): Promise<string> {
+  const invoiceId = existingInvoiceId || order.id;
+  const invoicePath = `invoices/${userId}/${invoiceId}.pdf`;
+
   try {
-    // Generate PDF as base64
-    const pdfBase64 = await generateInvoice(order, artist);
-    
-    // Upload to Firebase Storage
-    const storage = getStorage();
-    const invoicePath = `invoices/${order.id}.pdf`;
-    const invoiceRef = ref(storage, invoicePath);
-    
-    await uploadString(invoiceRef, pdfBase64, 'base64', {
-      contentType: 'application/pdf',
-      customMetadata: {
-        userId: userId,
-        artistId: order.artistId,
-        orderId: order.id,
-      },
-    });
-    
-    // Get download URL
-    const downloadURL = await getDownloadURL(invoiceRef);
-    
-    // Store metadata in Firestore
+    const html = await buildInvoiceHtml(order, artist);
+    const result = await Print.printToFileAsync({ html, base64: false });
+    const pdfUri = result.uri;
+
+    if (!pdfUri) {
+      throw new Error('Failed to generate PDF file URI');
+    }
+
+    const downloadURL = await uploadPdfToStorage(pdfUri, invoicePath);
+
     const db = getFirestore();
-    const invoiceDoc = {
-      id: order.id,
-      userId,
-      artistId: order.artistId,
+    const invoiceRef = doc(db, 'invoices', invoiceId);
+    const invoiceSnapshot = await getDoc(invoiceRef);
+    const isCreate = !invoiceSnapshot.exists();
+
+    const invoiceDoc: any = {
       orderId: order.id,
       orderType: order.type || 'service',
-      downloadURL,
-      storagePath: invoicePath,
-      createdAt: new Date().toISOString(),
+      userId,
+      artistName: artist.name,
+      title: order.serviceName || order.ticketName || order.gigTitle || '',
       amount: order.totalPrice,
       currency: 'MAD',
-      status: 'completed',
+      status: 'issued',
+      downloadURL,
+      autoGenerated: true,
+      invoiceNumber: `INV-${order.id.slice(0, 8).toUpperCase()}`,
+      updatedAt: serverTimestamp(),
     };
-    
-    await setDoc(doc(db, 'invoices', order.id), invoiceDoc);
-    
-    // Also update the order with invoice reference
-    const orderRef = doc(db, order.type === 'service' ? 'customOrders' : 'orders', order.id);
-    await updateDoc(orderRef, { 
-      invoiceGenerated: true,
-      invoiceUrl: downloadURL,
-      invoiceId: order.id,
-      updatedAt: new Date().toISOString()
-    });
-    
+
+    if (isCreate) {
+      invoiceDoc.createdAt = serverTimestamp();
+    }
+
+    await setDoc(invoiceRef, invoiceDoc, { merge: true });
+
+    try {
+      const orderRef = doc(db, 'orders', order.id);
+      await updateDoc(orderRef, {
+        invoiceGenerated: true,
+        invoiceUrl: downloadURL,
+        invoiceId,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch {
+      // Keep invoice creation errors visible, but do not fail if order update is secondary.
+    }
+
     return downloadURL;
   } catch (error) {
     console.error('Error saving invoice:', error);

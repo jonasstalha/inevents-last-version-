@@ -1,8 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { db } from '../firebase/firebaseConfig';
+import { useAuth } from './AuthContext';
 import { Artist, Gig, Order, Ticket } from '../models/types';
 
 // Mock data for development purposes
@@ -173,19 +173,29 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // ── State ────────────────────────────────────────────────────────────────────
-  const authUser = getAuth().currentUser;               // fires when auth changes
-  const clientId = authUser?.uid;
+  const { user, loading: authLoading } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [savedArtists, setSavedArtists] = useState<string[]>([]);
 
   // ── Firestore live-orders listener ──────────────────────────────────────────
   useEffect(() => {
-    if (!clientId) { setOrders([]); return; }
+    if (authLoading) {
+      return;
+    }
 
-    const ordersRef = collection(db, 'users', clientId, 'orders');
-    const q          = query(ordersRef, orderBy('createdAt', 'desc'));
+    if (!user?.uid) {
+      setOrders([]);
+      return;
+    }
 
-   const unsubscribe = onSnapshot(q, (snap) => {
+    const ordersRef = collection(db, 'orders');
+    const q = query(
+      ordersRef,
+      where('clientId', '==', user.uid),
+      orderBy('createdAt', 'desc'),
+    );
+
+    const unsubscribe = onSnapshot(q, (snap) => {
       const raw = snap.docs.map((dc) => {
         const d = dc.data() as any;
         const ts = d.createdAt as any;
@@ -199,13 +209,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }) as Order[];
       setOrders(raw);
     }, (err) => {
-      console.error('Error listening to client orders:', err);
+      console.error('Error listening to orders:', err);
       setOrders([]);
     });
 
     return () => { unsubscribe(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId]);
+  }, [user?.uid, authLoading]);
 
   // ── Saved-artists persistence ────────────────────────────────────────────────
   useEffect(() => {
