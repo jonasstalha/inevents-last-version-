@@ -330,7 +330,7 @@ const CouponManagement = () => {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Coupon Management</Text>
+        <View style={styles.headerPlaceholder} />
         <TouchableOpacity
           style={styles.addButton}
           onPress={() => setShowCreateModal(true)}
@@ -339,17 +339,7 @@ const CouponManagement = () => {
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.content}>
-        {coupons.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="ticket-outline" size={64} color="#ccc" />
-            <Text style={styles.emptyText}>No coupons created yet</Text>
-            <Text style={styles.emptySubtext}>Create your first coupon to attract more customers</Text>
-          </View>
-        ) : (
-          coupons.map(renderCouponCard)
-        )}
-      </ScrollView>
+      <View style={styles.content} />
 
       {/* Create Coupon Modal */}
       <Modal visible={showCreateModal} animationType="slide" presentationStyle="pageSheet">
@@ -578,14 +568,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 15,
-    backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
   },
   headerTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
+  },
+  headerPlaceholder: {
+    width: 24,
   },
   addButton: {
     backgroundColor: '#6a0dad',

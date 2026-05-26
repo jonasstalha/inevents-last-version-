@@ -1,11 +1,12 @@
+import { toTimestampString } from '@/src/utils/timestampUtils';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { getAuth } from 'firebase/auth';
-import { collection, getDocs, getFirestore, query, where } from 'firebase/firestore';
+import { addDoc, collection, getDocs, getFirestore, query, where } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { toTimestampString } from '@/src/utils/timestampUtils';
-import { confirmOrder, rejectOrder, sendOrderUpdateNotification } from '../../firebase/orderService';
 import { createInvoiceForOrder } from '../../firebase/invoiceService';
+import { confirmOrder, rejectOrder, sendOrderUpdateNotification, warnClientCancellation } from '../../firebase/orderService';
 
 interface Order {
   id: string;
@@ -20,7 +21,7 @@ interface Order {
   totalPrice?: number;
   clientPrice?: number;
   message?: string;
-  status: 'pending' | 'confirmed' | 'rejected' | 'completed' | 'counter_offered' | 'accepted' | 'declined';
+  status: 'pending' | 'confirmed' | 'rejected'  | 'counter_offered' | 'accepted' | 'declined';
   timestamp?: string;
   createdAt?: string;
   eventName?: string;
@@ -46,13 +47,30 @@ interface Order {
   items?: any[];
 }
 
+interface ReclamationState {
+  selectedReasons: string[];
+  details: string;
+  submitting: boolean;
+  expanded: boolean;
+  saved: boolean;
+}
+
+const reclamationReasons = [
+  'Incorrect date/time',
+  'Missing details',
+  'Price discrepancy',
+  'Client info issue',
+  'Other',
+];
+
 const CalendarPage = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [counterOffer, setCounterOffer] = useState<{ [key: string]: string }>({});
   const [savingIds, setSavingIds] = useState<string[]>([]);
-
+  const [reclamations, setReclamations] = useState<Record<string, ReclamationState>>({});
+  const router = useRouter();
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -152,7 +170,7 @@ const CalendarPage = () => {
             order.clientId,
             order.artistId,
             order.id,
-            order.type,
+            order.type === 'gig' ? 'service' : order.type,
             'confirmed',
             'Order Confirmed',
             `Your order for ${order.serviceTitle || order.gigTitle || order.ticketName || 'the service'} is confirmed.`,
@@ -195,13 +213,22 @@ const CalendarPage = () => {
       await rejectOrder(orderId);
       statusUpdated = true;
 
+      let clientDeleted = false;
+      if (order.clientId) {
+        try {
+          clientDeleted = await warnClientCancellation(order.clientId, order.id);
+        } catch (warningError) {
+          console.warn('Cancellation alert update failed:', warningError);
+        }
+      }
+
       if (order.clientId && order.artistId) {
         try {
           await sendOrderUpdateNotification(
             order.clientId,
             order.artistId,
             order.id,
-            order.type,
+            order.type === 'gig' ? 'service' : order.type,
             'rejected',
             'Order Rejected',
             `Your order for ${order.serviceTitle || order.gigTitle || order.ticketName || 'the service'} was rejected.`,
@@ -211,7 +238,11 @@ const CalendarPage = () => {
         }
       }
 
-      Alert.alert('Order Rejected', 'Order has been rejected.');
+      if (clientDeleted) {
+        Alert.alert('Client Removed', 'Client account has been removed after 3 cancellation alerts.');
+      } else {
+        Alert.alert('Order Rejected', 'Order has been rejected.');
+      }
     } catch (error) {
       console.error('Failed to reject order:', error);
       if (!statusUpdated) {
@@ -236,6 +267,97 @@ const CalendarPage = () => {
     Alert.alert('Counter Offer Sent', `New price of ${newPrice} MAD has been sent to client`);
   };
 
+  const toggleReclamationPanel = (orderId: string) => {
+    setReclamations(prev => ({
+      ...prev,
+      [orderId]: {
+        selectedReasons: prev[orderId]?.selectedReasons || [],
+        details: prev[orderId]?.details || '',
+        submitting: prev[orderId]?.submitting || false,
+        expanded: !prev[orderId]?.expanded,
+        saved: prev[orderId]?.saved || false,
+      },
+    }));
+  };
+
+  const toggleReclamationReason = (orderId: string, reason: string) => {
+    setReclamations(prev => {
+      const current = prev[orderId] || { selectedReasons: [], details: '', submitting: false, expanded: true, saved: false };
+      const isSelected = current.selectedReasons.includes(reason);
+      const selectedReasons = isSelected
+        ? current.selectedReasons.filter(item => item !== reason)
+        : [...current.selectedReasons, reason];
+      return {
+        ...prev,
+        [orderId]: { ...current, selectedReasons },
+      };
+    });
+  };
+
+  const updateReclamationDetails = (orderId: string, details: string) => {
+    setReclamations(prev => ({
+      ...prev,
+      [orderId]: {
+        ...(prev[orderId] || { selectedReasons: [], submitting: false, expanded: true, saved: false }),
+        details,
+      },
+    }));
+  };
+
+  const handleSaveReclamation = async (order: Order) => {
+    const reclamation = reclamations[order.id] || { selectedReasons: [], details: '', submitting: false, expanded: true, saved: false };
+    if (!reclamation.selectedReasons.length) {
+      Alert.alert('Select a reason', 'Please choose at least one reclamation reason.');
+      return;
+    }
+
+    const auth = getAuth();
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      Alert.alert('Not signed in', 'Please sign in to submit a reclamation.');
+      return;
+    }
+
+    setReclamations(prev => ({
+      ...prev,
+      [order.id]: { ...reclamation, submitting: true },
+    }));
+
+    try {
+      const db = getFirestore();
+      await addDoc(collection(db, 'reclamations'), {
+        orderId: order.id,
+        artistId: currentUser.uid,
+        clientId: order.clientId || null,
+        reasons: reclamation.selectedReasons,
+        details: reclamation.details.trim() || null,
+        status: 'submitted',
+        createdAt: new Date().toISOString(),
+        orderSummary: {
+          type: order.type,
+          status: order.status,
+          price: order.price,
+          date: order.date,
+          time: order.time,
+          clientName: order.clientName,
+        },
+      });
+
+      setReclamations(prev => ({
+        ...prev,
+        [order.id]: { ...reclamation, submitting: false, saved: true, expanded: false },
+      }));
+      Alert.alert('Reclamation submitted', 'Your issue has been saved in Firebase.');
+    } catch (error) {
+      console.error('Failed to save reclamation:', error);
+      setReclamations(prev => ({
+        ...prev,
+        [order.id]: { ...reclamation, submitting: false },
+      }));
+      Alert.alert('Error', 'Unable to save reclamation. Please try again later.');
+    }
+  };
+
   const filteredOrders = orders.filter(order => {
     if (filter === 'all') return true;
     return order.status === filter;
@@ -245,7 +367,6 @@ const CalendarPage = () => {
     switch (status) {
       case 'pending': return '#ff9500';
       case 'confirmed': return '#34c759';
-      case 'completed': return '#2563eb';
       case 'rejected': return '#ff3b30';
       default: return '#666';
     }
@@ -255,7 +376,6 @@ const CalendarPage = () => {
     switch (status) {
       case 'pending': return 'time-outline';
       case 'confirmed': return 'checkmark-circle';
-      case 'completed': return 'trophy';
       case 'rejected': return 'close-circle';
       default: return 'help-circle';
     }
@@ -265,7 +385,7 @@ const CalendarPage = () => {
     <ScrollView style={styles.container}>
       {/* Filter Tabs */}
       <View style={styles.filterContainer}>
-        {['all', 'pending', 'confirmed', 'completed', 'rejected'].map(status => (
+        {['all', 'pending', 'confirmed', 'rejected'].map(status => (
           <TouchableOpacity
             key={status}
             style={[styles.filterTab, filter === status && styles.activeFilterTab]}
@@ -283,6 +403,9 @@ const CalendarPage = () => {
         <Text style={styles.sectionTitle}>
           {filter === 'all' ? 'All Orders' : `${filter.charAt(0).toUpperCase() + filter.slice(1)} Orders`}
         </Text>
+        <Text style={styles.sectionSubtitle}>
+          Review bookings, respond quickly, or submit a reclamation for any issue.
+        </Text>
 
         {/* Loading State */}
         {loading && (
@@ -292,104 +415,161 @@ const CalendarPage = () => {
         )}
 
         {/* Orders */}
-        {!loading && filteredOrders.map(order => (
-          <View key={order.id} style={styles.orderCard}>
-            {/* Order Header */}
-            <View style={styles.orderHeader}>
-              <View style={styles.clientInfo}>
-                <Text style={styles.clientName}>{order.clientName}</Text>
-                <Text style={styles.orderTime}>{order.timestamp}</Text>
-              </View>
-              <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status) }]}> 
-                <Ionicons name={getStatusIcon(order.status)} size={16} color="white" />
-                <Text style={styles.statusText}>{order.status.replace('_', ' ')}</Text>
-              </View>
-            </View>
-            {/* Order Details */}
-            <View style={styles.orderDetails}>
-              <View style={styles.orderType}>
-                <Ionicons 
-                  name={order.type === 'service' ? 'musical-notes' : 'ticket'} 
-                  size={20} 
-                  color="#6a0dad" 
-                />
-                <Text style={styles.orderTypeText}>
-                  {order.type === 'service'
-                    ? (order.service || order.gigTitle || 'Service Order')
-                    : (order.ticketType || order.ticketName || `${order.quantity || 0}x Tickets`)}
-                </Text>
-              </View>
-              {order.date && (
-                <Text style={styles.orderDate}>📅 {order.date} at {order.time}</Text>
-              )}
-              {order.eventName && (
-                <Text style={styles.eventName}>🎵 {order.eventName}</Text>
-              )}
-            </View>
-            {/* Price Information */}
-            <View style={styles.priceContainer}>
-              <View style={styles.priceRow}>
-                <Text style={styles.priceLabel}>Your Price:</Text>
-                <Text style={styles.yourPrice}>${order.price}</Text>
-              </View>
-              {order.clientPrice && (
-                <View style={styles.priceRow}>
-                  <Text style={styles.priceLabel}>Client Offer:</Text>
-                  <Text style={styles.clientPrice}>${order.clientPrice}</Text>
-                </View>
-              )}
-            </View>
-            {/* Client Message */}
-            {order.message && (
-              <View style={styles.messageContainer}>
-                <Text style={styles.messageLabel}>Message:</Text>
-                <Text style={styles.messageText}>"{order.message}"</Text>
-              </View>
-            )}
-            {/* Action Buttons */}
-            {order.status === 'pending' && (
-              <View style={styles.actionContainer}>
-                <TouchableOpacity 
-                  style={[styles.acceptButton, savingIds.includes(order.id) && styles.disabledButton]}
-                  onPress={() => handleAcceptOrder(order.id)}
-                  disabled={savingIds.includes(order.id)}
+{!loading && filteredOrders.map(order => (
+  <TouchableOpacity
+    key={order.id}
+    style={styles.orderCard}
+    activeOpacity={0.7}
+    onPress={() => router.push({
+      pathname: '/(artist)/order-details',
+      params: { orderId: order.id },
+    })}
+  >
+    {/* Order Header */}
+    <View style={styles.orderHeader}>
+      <View style={styles.clientInfo}>
+        <Text style={styles.clientName}>{order.clientName}</Text>
+        <Text style={styles.orderTime}>{order.timestamp}</Text>
+      </View>
+      <View style={styles.headerRight}>
+        <TouchableOpacity
+          style={[styles.reportIconButton, reclamations[order.id]?.saved && styles.disabledButton]}
+          onPress={() => toggleReclamationPanel(order.id)}
+          disabled={reclamations[order.id]?.submitting}
+        >
+          <Ionicons
+            name="alert-circle-outline"
+            size={20}
+            color={reclamations[order.id]?.saved ? '#999' : '#ff6b6b'}
+          />
+        </TouchableOpacity>
+        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status) }]}> 
+          <Ionicons name={getStatusIcon(order.status)} size={16} color="white" />
+          <Text style={styles.statusText}>{order.status.replace('_', ' ')}</Text>
+        </View>
+      </View>
+    </View>
+    {/* Order Details */}
+    <View style={styles.orderDetails}>
+      <View style={styles.orderType}>
+        <Ionicons 
+          name={order.type === 'service' ? 'musical-notes' : 'ticket'} 
+          size={20} 
+          color="#6a0dad" 
+        />
+        <Text style={styles.orderTypeText}>
+          {order.type === 'service'
+            ? (order.service || order.gigTitle || 'Service Order')
+            : (order.ticketType || order.ticketName || `${order.quantity || 0}x Tickets`)}
+        </Text>
+      </View>
+      {order.date && (
+        <Text style={styles.orderDate}>📅 {order.date} at {order.time}</Text>
+      )}
+      {order.eventName && (
+        <Text style={styles.eventName}>🎵 {order.eventName}</Text>
+      )}
+    </View>
+    {/* Price Information */}
+    <View style={styles.priceContainer}>
+      <View style={styles.priceRow}>
+        <Text style={styles.priceLabel}>Your Price:</Text>
+        <Text style={styles.yourPrice}>${order.price}</Text>
+      </View>
+      {order.clientPrice && (
+        <View style={styles.priceRow}>
+          <Text style={styles.priceLabel}>Client Offer:</Text>
+          <Text style={styles.clientPrice}>${order.clientPrice}</Text>
+        </View>
+      )}
+    </View>
+    {/* Client Message */}
+    {order.message && (
+      <View style={styles.messageContainer}>
+        <Text style={styles.messageLabel}>Message:</Text>
+        <Text style={styles.messageText}>"{order.message}"</Text>
+      </View>
+    )}
+    {reclamations[order.id]?.expanded && (
+      <View style={styles.reclamationPanel}>
+          <Text style={styles.reclamationTitle}>Choose issue(s)</Text>
+          <View style={styles.reasonList}>
+            {reclamationReasons.map(reason => {
+              const selected = reclamations[order.id]?.selectedReasons.includes(reason);
+              return (
+                <TouchableOpacity
+                  key={reason}
+                  style={[styles.reasonButton, selected && styles.reasonButtonSelected]}
+                  onPress={() => toggleReclamationReason(order.id, reason)}
                 >
-                  <Ionicons name="checkmark" size={20} color="white" />
-                  <Text style={styles.buttonText}>Accept</Text>
+                  <Text style={[styles.reasonButtonText, selected && styles.reasonButtonTextSelected]}>{reason}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity 
-                  style={[styles.declineButton, savingIds.includes(order.id) && styles.disabledButton]}
-                  onPress={() => handleDeclineOrder(order.id)}
-                  disabled={savingIds.includes(order.id)}
-                >
-                  <Ionicons name="close" size={20} color="white" />
-                  <Text style={styles.buttonText}>Decline</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-            {/* Counter Offer Section */}
-            {order.status === 'pending' && order.clientPrice != null && (order.price ?? 0) < order.clientPrice && (
-              <View style={styles.counterOfferContainer}>
-                <Text style={styles.counterOfferLabel}>Counter Offer:</Text>
-                <View style={styles.counterOfferRow}>
-                  <TextInput
-                    style={styles.counterOfferInput}
-                    placeholder="Enter price"
-                    keyboardType="numeric"
-                    value={counterOffer[order.id] || ''}
-                    onChangeText={(text) => setCounterOffer({...counterOffer, [order.id]: text})}
-                  />
-                  <TouchableOpacity 
-                    style={styles.counterOfferButton}
-                    onPress={() => handleCounterOffer(order.id)}
-                  >
-                    <Text style={styles.counterOfferButtonText}>Send</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
+              );
+            })}
           </View>
-        ))}
+          <TextInput
+            style={styles.reclamationInput}
+            placeholder="Add optional details"
+            placeholderTextColor="#999"
+            multiline
+            value={reclamations[order.id]?.details || ''}
+            onChangeText={(text) => updateReclamationDetails(order.id, text)}
+          />
+          <TouchableOpacity
+            style={[styles.saveReclamationButton, reclamations[order.id]?.submitting && styles.disabledButton]}
+            onPress={() => handleSaveReclamation(order)}
+            disabled={reclamations[order.id]?.submitting}
+          >
+            <Text style={styles.buttonText}>
+              {reclamations[order.id]?.submitting ? 'Saving...' : 'Submit Reclamation'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    {/* Action Buttons */}
+    {order.status === 'pending' && (
+      <View style={styles.actionContainer}>
+        <TouchableOpacity 
+          style={[styles.acceptButton, savingIds.includes(order.id) && styles.disabledButton]}
+          onPress={() => handleAcceptOrder(order.id)}
+          disabled={savingIds.includes(order.id)}
+        >
+          <Ionicons name="checkmark" size={20} color="white" />
+          <Text style={styles.buttonText}>Accept</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.declineButton, savingIds.includes(order.id) && styles.disabledButton]}
+          onPress={() => handleDeclineOrder(order.id)}
+          disabled={savingIds.includes(order.id)}
+        >
+          <Ionicons name="close" size={20} color="white" />
+          <Text style={styles.buttonText}>Refuse</Text>
+        </TouchableOpacity>
+      </View>
+    )}
+    {/* Counter Offer Section */}
+    {order.status === 'pending' && order.clientPrice != null && (order.price ?? 0) < order.clientPrice && (
+      <View style={styles.counterOfferContainer}>
+        <Text style={styles.counterOfferLabel}>Counter Offer:</Text>
+        <View style={styles.counterOfferRow}>
+          <TextInput
+            style={styles.counterOfferInput}
+            placeholder="Enter price"
+            keyboardType="numeric"
+            value={counterOffer[order.id] || ''}
+            onChangeText={(text) => setCounterOffer({...counterOffer, [order.id]: text})}
+          />
+          <TouchableOpacity 
+            style={styles.counterOfferButton}
+            onPress={() => handleCounterOffer(order.id)}
+          >
+            <Text style={styles.counterOfferButtonText}>Send</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    )}
+  </TouchableOpacity>
+))}
         {!loading && filteredOrders.length === 0 && (
           <View style={styles.emptyState}>
             <Ionicons name="mail-open-outline" size={48} color="#ccc" />
@@ -437,7 +617,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#333',
+    marginBottom: 4,
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: '#666',
     marginBottom: 16,
+    lineHeight: 20,
   },
   orderCard: {
     backgroundColor: 'white',
@@ -455,6 +641,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  reportIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#f3f4f6',
   },
   clientInfo: {
     flex: 1,
@@ -590,6 +790,77 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#333',
     marginBottom: 8,
+  },
+  reclaimBox: {
+    marginTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#ececec',
+    paddingTop: 12,
+  },
+  reclaimButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ff6b6b',
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  reclamationPanel: {
+    marginTop: 12,
+    backgroundColor: '#faf7ff',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#ede7f6',
+  },
+  reclamationTitle: {
+    fontSize: 14,
+    color: '#4b2995',
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  reasonList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 12,
+  },
+  reasonButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    marginBottom: 8,
+    marginRight: 8,
+  },
+  reasonButtonSelected: {
+    backgroundColor: '#6a0dad',
+    borderColor: '#6a0dad',
+  },
+  reasonButtonText: {
+    fontSize: 12,
+    color: '#444',
+  },
+  reasonButtonTextSelected: {
+    color: 'white',
+  },
+  reclamationInput: {
+    minHeight: 64,
+    backgroundColor: 'white',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    padding: 12,
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 12,
+  },
+  saveReclamationButton: {
+    backgroundColor: '#6a0dad',
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
   },
   counterOfferRow: {
     flexDirection: 'row',

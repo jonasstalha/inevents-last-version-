@@ -169,8 +169,8 @@ function TabBarButton({ onPress, children, isFocused }) {
 }
 
 function CustomTabBar({ state, descriptors, navigation }) {
-  // Get only the non-hidden routes
-  const visibleRoutes = state.routes.filter((route) => !route.name.startsWith('(hidden)'));
+  const visibleTabNames = ['index', 'search', 'tickets', 'profile'];
+  const visibleRoutes = state.routes.filter((route) => visibleTabNames.includes(route.name));
   
   return (
     <View style={styles.tabBarContainer}>

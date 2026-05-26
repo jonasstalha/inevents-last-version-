@@ -4,7 +4,7 @@ import { Theme } from '@/src/constants/theme';
 import { useApp } from '@/src/context/AppContext';
 import { Artist } from '@/src/models/types';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
@@ -17,34 +17,72 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 
+const categories = [
+  'All', 'Photography', 'Music', 'Catering', 'Wedding', 'Entertainment'
+];
+
+const dummyArtists: Artist[] = [
+  {
+    id: '1',
+    email: 'alex@example.com',
+    role: 'artist' as const,
+    name: 'Alex Morgan',
+    bio: 'Professional wedding & event photographer with 8+ years experience',
+    storeId: 'store1',
+    rating: 4.8,
+    categories: ['Photography', 'Wedding'],
+    location: 'Casablanca',
+    featured: true,
+    profileImage: 'https://via.placeholder.com/300',
+    createdAt: new Date()
+  },
+  {
+    id: '2',
+    email: 'dj@example.com',
+    role: 'artist' as const,
+    name: 'DJ Maximus',
+    bio: 'Top-rated DJ specializing in weddings and corporate events',
+    storeId: 'store2',
+    rating: 4.9,
+    categories: ['Music', 'Entertainment'],
+    location: 'Rabat',
+    featured: true,
+    profileImage: 'https://via.placeholder.com/300',
+    createdAt: new Date()
+  },
+  {
+    id: '3',
+    email: 'catering@example.com',
+    role: 'artist' as const,
+    name: 'Creative Caterers',
+    bio: 'Award-winning catering service with gourmet cuisine',
+    storeId: 'store3',
+    rating: 4.7,
+    categories: ['Catering', 'Wedding'],
+    location: 'Marrakech',
+    featured: false,
+    profileImage: 'https://via.placeholder.com/300',
+    createdAt: new Date()
+  }
+];
+
 export default function ArtistsScreen() {
   const router = useRouter();
   const { artists: contextArtists } = useApp();
   const [artists, setArtists] = useState<Artist[]>([]);
-  const [filteredArtists, setFilteredArtists] = useState<Artist[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
-
-  const categories = [
-    'All', 'Photography', 'Music', 'Catering', 'Wedding', 'Entertainment'
-  ];
 
   useEffect(() => {
     loadArtists();
   }, []);
 
-  useEffect(() => {
-    filterArtists();
-  }, [artists, searchQuery, selectedCategory]);
-
   const loadArtists = async () => {
     setLoading(true);
     try {
-      // Try to fetch from API first, fallback to context artists
       const fetchedArtists = await fetchArtists();
       if (fetchedArtists && fetchedArtists.length > 0) {
-        // Map the fetched data to Artist interface if needed
         const mappedArtists: Artist[] = fetchedArtists.map((artist, index) => ({
           id: artist.id.toString(),
           email: `artist${artist.id}@example.com`,
@@ -61,7 +99,6 @@ export default function ArtistsScreen() {
         }));
         setArtists(mappedArtists);
       } else {
-        // Fallback to context artists or dummy data
         setArtists(contextArtists.length > 0 ? contextArtists : dummyArtists);
       }
     } catch (error) {
@@ -72,86 +109,33 @@ export default function ArtistsScreen() {
     }
   };
 
-  const filterArtists = () => {
-    let filtered = artists;
+  const filteredArtists = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return artists.filter((artist) => {
+      const matchesQuery = query
+        ? artist.name.toLowerCase().includes(query) ||
+          artist.bio.toLowerCase().includes(query) ||
+          artist.categories.some((cat) => cat.toLowerCase().includes(query))
+        : true;
 
-    // Filter by search query
-    if (searchQuery.trim()) {
-      filtered = filtered.filter(artist =>
-        artist.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        artist.bio.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        artist.categories.some(cat => 
-          cat.toLowerCase().includes(searchQuery.toLowerCase())
-        )
-      );
-    }
+      const matchesCategory = selectedCategory === 'All'
+        ? true
+        : artist.categories.some((cat) => cat.toLowerCase() === selectedCategory.toLowerCase());
 
-    // Filter by category
-    if (selectedCategory !== 'All') {
-      filtered = filtered.filter(artist =>
-        artist.categories.some(cat => 
-          cat.toLowerCase() === selectedCategory.toLowerCase()
-        )
-      );
-    }
+      return matchesQuery && matchesCategory;
+    });
+  }, [artists, searchQuery, selectedCategory]);
 
-    setFilteredArtists(filtered);
-  };
+  const handleArtistPress = useCallback((artistId: string) => {
+    router.push({
+      pathname: '/(client)/(hidden)/artist',
+      params: { artistId }
+    });
+  }, [router]);
 
-  const handleArtistPress = (artistId: string) => {
-    router.push(`/(client)/(hidden)/artist/${artistId}`);
-  };
-
-  const handleHire = (artistId: string) => {
-    // Implement hire functionality
-    console.log('Hire artist:', artistId);
-  };
-
-  // Dummy artists data as fallback
-  const dummyArtists: Artist[] = [
-    {
-      id: '1',
-      email: 'alex@example.com',
-      role: 'artist' as const,
-      name: 'Alex Morgan',
-      bio: 'Professional wedding & event photographer with 8+ years experience',
-      storeId: 'store1',
-      rating: 4.8,
-      categories: ['Photography', 'Wedding'],
-      location: 'Casablanca',
-      featured: true,
-      profileImage: 'https://via.placeholder.com/300',
-      createdAt: new Date()
-    },
-    {
-      id: '2',
-      email: 'dj@example.com',
-      role: 'artist' as const,
-      name: 'DJ Maximus',
-      bio: 'Top-rated DJ specializing in weddings and corporate events',
-      storeId: 'store2',
-      rating: 4.9,
-      categories: ['Music', 'Entertainment'],
-      location: 'Rabat',
-      featured: true,
-      profileImage: 'https://via.placeholder.com/300',
-      createdAt: new Date()
-    },
-    {
-      id: '3',
-      email: 'catering@example.com',
-      role: 'artist' as const,
-      name: 'Creative Caterers',
-      bio: 'Award-winning catering service with gourmet cuisine',
-      storeId: 'store3',
-      rating: 4.7,
-      categories: ['Catering', 'Wedding'],
-      location: 'Marrakech',
-      featured: false,
-      profileImage: 'https://via.placeholder.com/300',
-      createdAt: new Date()
-    }
-  ];
+  const handleSave = useCallback((artistId: string) => {
+    console.log('Save artist:', artistId);
+  }, []);
 
   if (loading) {
     return (
@@ -234,7 +218,7 @@ export default function ArtistsScreen() {
           <ArtistCard 
             artist={item} 
             onPress={handleArtistPress}
-            onHire={handleHire}
+            onSave={handleSave}
           />
         )}
         contentContainerStyle={styles.listContent}

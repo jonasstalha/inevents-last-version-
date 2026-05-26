@@ -1,6 +1,6 @@
-import React from 'react';
-import CouponManagement from '../../src/components/artist/CouponManagement';
+﻿import React from 'react';
+import AnalyticsPage from '../../src/components/artist/AnalyticsPage';
 
-export default function PromoCodesPage() {
-  return <CouponManagement />;
+export default function ArtistAnalyticsPage() {
+  return <AnalyticsPage gigs={[]} />;
 }

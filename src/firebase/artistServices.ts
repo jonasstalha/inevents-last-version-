@@ -22,6 +22,7 @@ export const fetchServicesByArtistId = async (artistId: string): Promise<Gig[]> 
       video: data.video,
       category: data.category || '',
       options: data.options || [],
+      extras: data.extras || data.addOns || [],
       rating: data.rating || 0,
       reviewCount: data.reviewCount || 0,
       createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
@@ -81,8 +82,12 @@ export const createServiceWithImages = async (
       console.log('[ArtistServices] Video upload completed, URL:', videoUrl);
     }
     
-    // Update the service with the image and video URLs
+    // Update the service with the image and video URLs and extras alias when present
     const updateData: any = { images: imageUrls };
+    if (serviceData.extras !== undefined) {
+      updateData.extras = serviceData.extras;
+      updateData.addOns = serviceData.extras;
+    }
     if (videoUrl) {
       updateData.video = videoUrl;
     }
@@ -103,6 +108,7 @@ export const createServiceWithImages = async (
       video: updatedServiceData?.video || videoUrl,
       category: updatedServiceData?.category || serviceData.category,
       options: updatedServiceData?.options || serviceData.options,
+      extras: updatedServiceData?.extras || serviceData.extras || [],
       rating: 0,
       reviewCount: 0,
       createdAt: new Date(),
@@ -198,6 +204,9 @@ export const updateServiceWithImages = async (
       ...serviceData,
       images: updatedImages,
     };
+    if (serviceData.extras !== undefined) {
+      updateData.addOns = serviceData.extras;
+    }
     if (updatedVideo) {
       updateData.video = updatedVideo;
     } else if (deleteVideo) {
@@ -220,6 +229,7 @@ export const updateServiceWithImages = async (
       video: updatedServiceData?.video || updatedVideo,
       category: updatedServiceData?.category || currentService.category,
       options: updatedServiceData?.options || currentService.options,
+      extras: updatedServiceData?.extras || serviceData.extras || currentService.extras || [],
       rating: updatedServiceData?.rating || currentService.rating,
       reviewCount: updatedServiceData?.reviewCount || currentService.reviewCount,
       createdAt: updatedServiceData?.createdAt?.toDate ? updatedServiceData.createdAt.toDate() : currentService.createdAt,

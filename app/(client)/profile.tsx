@@ -2,7 +2,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Linking from 'expo-linking';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { ChevronRight, Clock, RefreshCw, Zap } from 'lucide-react-native';
+import { ChevronRight, RefreshCw } from 'lucide-react-native';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -18,39 +18,22 @@ import {
 import { Card } from '@/src/components/common/Card';
 import { ProfileEditModal } from '@/src/components/profile/ProfileEditModal';
 import { Theme } from '@/src/constants/theme';
-import { useApp } from '@/src/context/AppContext';
 import { useAuth } from '@/src/context/AuthContext';
 import { updateProfileWithImage } from '@/src/firebase/profileService';
 import {
-  collection,
   doc,
   onSnapshot,
-  orderBy,
-  query,
-  where,
   db,
 } from '@/src/firebase/firebaseConfig';
-import { fetchUserStatistics, loadStatsRules, getStatsRules, recalculateUserStatistics, UserStats } from '@/src/firebase/userStatsService';
-import { loadRewardRules } from '@/src/firebase/rewardsService';
-
-interface RecentActivityItem {
-  id: string;
-  description: string;
-  points: number;
-  type: string;
-  timestamp: Date;
-}
+import { recalculateUserStatistics, UserStats } from '@/src/firebase/userStatsService';
 
 export default function ProfileScreen() {
   const { user, logout, loading: authLoading, refreshUser } = useAuth();
-  const { getOrdersByClientId } = useApp();
   const router = useRouter();
 
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [statsLoading, setStatsLoading] = useState(true);
-  const [recentActivity, setRecentActivity] = useState<RecentActivityItem[]>([]);
-  const [activityLoading, setActivityLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
   const [stats, setStats] = useState<UserStats>({
@@ -59,19 +42,6 @@ export default function ProfileScreen() {
     points: 0,
     totalSpent: 0,
   });
-
-  // ── points-config rules (loaded from Firestore) ──────────────────────────────
-  const [pointRules, setPointRules] = useState<ReturnType<typeof getStatsRules> | null>(null);
-
-  const refreshPointRules = useCallback(async () => {
-    try {
-      await loadStatsRules();
-      await loadRewardRules();
-      setPointRules(getStatsRules());
-    } catch (e) {
-      console.error('Error refreshing point rules:', e);
-    }
-  }, []);
 
   // ── helpers ──────────────────────────────────────────────────────────────
   const refreshUserStats = useCallback(async () => {
@@ -106,24 +76,9 @@ export default function ProfileScreen() {
       },
       (err: any) => console.log('userStatistics listener not accessible:', err.message),
     );
-    // Watch userRewards/{uid}
-    const rewardsUnsub = onSnapshot(
-      doc(db, 'userRewards', user.uid),
-      (snap: any) => {
-        if (snap.exists()) {
-          const d = snap.data();
-          setStats((prev) => ({
-            ...prev,
-            points: d.totalPoints ?? prev.points,
-          }));
-        }
-      },
-      (err: any) => console.log('userRewards listener not accessible:', err.message),
-    );
 
     return () => {
       statsUnsub();
-      rewardsUnsub();
     };
   };
 
@@ -145,52 +100,14 @@ export default function ProfileScreen() {
     // refresh AuthContext user from Firestore so name/image stay current
     refreshUser().finally(() => setSyncing(false));
 
-    // load dynamic points rules from Firestore
-    refreshPointRules();
-
     // Load initial statistics
     refreshUserStats().finally(() => {
       // Set up live listeners after initial load
       if (user.uid) {
 
-        setActivityLoading(true);
-        const q = query(
-          collection(db, 'rewardTransactions'),
-          where('userId', '==', user.uid),
-          orderBy('timestamp', 'desc'),
-        );
-
-        const unsubActivity = onSnapshot(
-          q,
-          (snap: any) => {
-            const items: RecentActivityItem[] = snap.docs.map((docSnap: any) => {
-              const d = docSnap.data();
-              return {
-                id: docSnap.id,
-                description: d.description || '',
-                points: d.points || 0,
-                type: d.type || '',
-                timestamp: d.timestamp?.toDate?.() || new Date(),
-              };
-            });
-            setRecentActivity(items.slice(0, 8));
-            setActivityLoading(false);
-          },
-          (err: any) => {
-            if (err.message?.includes('index')) {
-              console.warn('[recent-activity] Index building, showing empty state.');
-            } else {
-              console.error('Activity listener error:', err);
-            }
-            setRecentActivity([]);
-            setActivityLoading(false);
-          },
-        );
-
         const unsubStats = syncLiveStats();
 
         return () => {
-          unsubActivity();
           if (typeof unsubStats === 'function') unsubStats();
         };
       }
@@ -205,9 +122,7 @@ export default function ProfileScreen() {
       // Quick refetch — live listeners will already show the latest values,
       // this is a safety net to force a full recalculation
       refreshUser().catch(console.error);
-      // Refresh points rules so the config card stays in sync with Firestore changes
-      refreshPointRules();
-    }, [user?.uid, refreshUser, refreshPointRules]),
+    }, [user?.uid, refreshUser]),
   );
 
   // ── logout ───────────────────────────────────────────────────────────────
@@ -291,39 +206,6 @@ export default function ProfileScreen() {
   };
 
   // ── activity点点点 helpers ────────────────────────────────────────────────
-  const formatTimestamp = (date: Date): string => {
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffSec = Math.floor(diffMs / 1000);
-    const diffMin = Math.floor(diffSec / 60);
-    const diffHr = Math.floor(diffMin / 60);
-    if (diffSec < 60) return `Just now`;
-    if (diffMin < 60) return `${diffMin}m ago`;
-    if (diffHr < 24) return `${diffHr}h ago`;
-    return date.toLocaleDateString();
-  };
-
-  const getActivityIcon = (type: string): string => {
-    switch (type) {
-      case 'order':
-        return 'shopping-bag';
-      case 'service_order':
-        return 'briefcase';
-      case 'ticket':
-        return 'ticket-alt';
-      case 'custom_order':
-        return 'edit';
-      case 'review':
-        return 'star';
-      case 'referral':
-        return 'user-plus';
-      case 'redemption':
-        return 'gift';
-      default:
-        return 'circle';
-    }
-  };
-
   const displayName = user?.name || (user as any)?.displayName || user?.email || 'User';
   const displayEmail = user?.email || 'user@example.com';
   const displayImage = profileImage || (user as any)?.profileImage || (user as any)?.photoURL || null;
@@ -437,124 +319,6 @@ export default function ProfileScreen() {
         )}
       </Card>
 
-      {/* ── Points Config (live rules from Firestore) ── */}
-      <Card variant="elevated" style={styles.pointsConfigCard}>
-        <View style={styles.pointsConfigHeader}>
-          <Ionicons name="flash" size={18} color={Theme.colors.primary} />
-          <Text style={styles.pointsConfigTitle}>Points Config</Text>
-          <TouchableOpacity
-            onPress={refreshPointRules}
-            style={styles.pointsRefreshBtn}
-            disabled={statsLoading}
-          >
-            <Ionicons
-              name="refresh"
-              size={14}
-              color={statsLoading ? Theme.colors.textLight : Theme.colors.primary}
-            />
-          </TouchableOpacity>
-        </View>
-
-        {pointRules && (
-          <View style={styles.pointsConfigGrid}>
-            {[
-              ['Ticket Purchase',   pointRules.ticketPoints,       '🎫'],
-              ['Service Order',     pointRules.serviceOrderPoints,  '📦'],
-              ['Custom Order',      pointRules.customOrderPoints,   '🎯'],
-              ['Spending per MAD',  pointRules.spendingRatePerMad,  '💰'],
-              ['Review',            pointRules.reviewPoints,        '⭐'],
-              ['Referral',          pointRules.referralPoints,      '🤝'],
-            ].map(([label, value, icon]: [string, number, string], i: number) => (
-              <View
-                key={label}
-                style={[
-                  styles.pointsConfigItem,
-                  i < 5 && styles.pointsConfigDivider,
-                ]}
-              >
-                <Text style={styles.pointsConfigIcon}>{icon}</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.pointsConfigLabel}>{label}</Text>
-                  <Text style={styles.pointsConfigValue}>{value} pts</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-      </Card>
-
-      {/* ── Recent Activity ── */}
-      <Card variant="elevated" style={styles.activityCard}>
-        <View style={styles.activityHeader}>
-          <Zap size={18} color={Theme.colors.primary} />
-          <Text style={styles.activityTitle}>Recent Activity</Text>
-        </View>
-
-        {activityLoading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="small" color={Theme.colors.primary} />
-            <Text style={styles.loadingText}>Loading activity…</Text>
-          </View>
-        ) : recentActivity.length === 0 ? (
-          <View style={styles.emptyActivity}>
-            <FontAwesome5 name="history" size={32} color={Theme.colors.textLight} />
-            <Text style={styles.emptyActivityText}>No recent activity yet</Text>
-            <Text style={styles.emptyActivitySubtext}>
-              Start earning points by placing orders!
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.activityList}>
-            {recentActivity.map((item, idx) => (
-              <View
-                key={item.id + idx}
-                style={[
-                  styles.activityItem,
-                  idx < recentActivity.length - 1 && styles.activityDivider,
-                ]}
-              >
-                <View style={styles.activityIconWrap}>
-                  <FontAwesome5
-                    name={getActivityIcon(item.type) as any}
-                    size={16}
-                    color={Theme.colors.primary}
-                  />
-                </View>
-                <View style={styles.activityBody}>
-                  <Text style={styles.activityDescription} numberOfLines={2}>
-                    {item.description}
-                  </Text>
-                  <View style={styles.activityMeta}>
-                    <Clock size={12} color={Theme.colors.textLight} />
-                    <Text style={styles.activityTime}>{formatTimestamp(item.timestamp)}</Text>
-                  </View>
-                </View>
-                <View
-                  style={[
-                    styles.activityPointsBadge,
-                    item.points > 0
-                      ? styles.activityPointsPositive
-                      : styles.activityPointsNegative,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.activityPointsText,
-                      item.points > 0
-                        ? styles.activityPointsTextPositive
-                        : styles.activityPointsTextNegative,
-                    ]}
-                  >
-                    {item.points > 0 ? '+' : ''}
-                    {item.points} pts
-                  </Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-      </Card>
-
 
 
       {/* ── Menu Items ── */}
@@ -574,12 +338,6 @@ export default function ProfileScreen() {
               [{ text: 'OK', style: 'cancel' }],
             )
           }
-        />
-        <MenuItem
-          icon="coins"
-          title="Points System"
-          badge={`${stats.points} pts`}
-          onPress={() => router.push('/(hidden)/rewards' as any)}
         />
         <MenuItem
           icon="question-circle"

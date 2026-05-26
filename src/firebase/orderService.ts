@@ -1,4 +1,4 @@
-import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { Order, OrderStatus, OrderType } from '../models/types';
 import { db } from './firebaseConfig';
 
@@ -188,6 +188,35 @@ export async function confirmOrder(orderId: string): Promise<void> {
 
 export async function rejectOrder(orderId: string): Promise<void> {
   return updateOrderStatus(orderId, 'rejected');
+}
+
+export async function warnClientCancellation(clientId: string, orderId?: string): Promise<boolean> {
+  const userRef = doc(db, 'users', clientId);
+
+  try {
+    await setDoc(
+      userRef,
+      {
+        cancellationAlerts: increment(1),
+        lastCancellationWarningAt: serverTimestamp(),
+        ...(orderId ? { lastRejectedOrderId: orderId } : {}),
+      },
+      { merge: true },
+    );
+
+    const snapshot = await getDoc(userRef);
+    const alertCount = snapshot.exists() ? ((snapshot.data() as any).cancellationAlerts || 0) : 0;
+
+    if (alertCount >= 3) {
+      await deleteDoc(userRef);
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    console.error('Failed to warn client cancellation:', error);
+    throw error;
+  }
 }
 
 export async function completeOrder(orderId: string): Promise<void> {

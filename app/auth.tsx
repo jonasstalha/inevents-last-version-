@@ -3,6 +3,9 @@ import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import * as AuthSession from 'expo-auth-session';
 import * as Google from 'expo-auth-session/providers/google';
 import { useRouter } from 'expo-router';
+import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+import { auth, db } from '@/src/firebase/firebaseConfig';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -184,12 +187,20 @@ export default function AuthScreen() {
   const [showPhoneVerification, setShowPhoneVerification] = useState(false);
   const [pendingRegistrationData, setPendingRegistrationData] = useState<any>(null);
   
-  // Google Sign-In hook - UPDATED CONFIGURATION
+  // Google Sign-In hook - CORRECTED for Native Android
+  // NOTE: androidClientId MUST match the OAuth 2.0 credential registered in Firebase Console
+  // for package: com.jonass7896.InEvent with SHA-1: 5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25
   const [request, response, promptAsync] = Google.useAuthRequest({
-    clientId: '780609459655-6vkkubgk18ogad8ni12mod76c82bt1pu.apps.googleusercontent.com',
-    iosClientId: '780609459655-6vkkubgk18ogad8ni12mod76c82bt1pu.apps.googleusercontent.com',
-    androidClientId: '780609459655-6vkkubgk18ogad8ni12mod76c82bt1pu.apps.googleusercontent.com',
-    webClientId: '780609459655-6vkkubgk18ogad8ni12mod76c82bt1pu.apps.googleusercontent.com',
+    // After regenerating google-services.json, androidClientId will be auto-populated
+    // from your Firebase Android OAuth client. For now, use the Web Client ID as fallback.
+    androidClientId: 'WILL_BE_REPLACED_AFTER_STEP_1_BELOW',
+    iosClientId: '780609459655-33kqf1801palf7v922atpse13ictumgr.apps.googleusercontent.com',
+    webClientId: '780609459655-33kqf1801palf7v922atpse13ictumgr.apps.googleusercontent.com',
+    scopes: ['profile', 'email', 'openid'],
+    redirectUrl: AuthSession.makeRedirectUri({
+      useProxy: true,
+      scheme: 'com.jonass7896.InEvent',
+    }),
   });
 
   // Error states
@@ -337,7 +348,7 @@ export default function AuthScreen() {
     }
   }, [response]);
 
-  // Google Sign-In Handler
+  // Google Sign-In Handler - authenticates with Firebase
   const handleGoogleSignIn = async (authentication: any) => {
     try {
       setGoogleLoading(true);
@@ -352,24 +363,106 @@ export default function AuthScreen() {
       
       const googleUser = await userInfoResponse.json();
       
-      console.log('Google user info:', googleUser);
+      console.log('✅ Google user info:', googleUser);
       
-      // Store Google user data and show role selection
-      setGoogleUserData({
-        email: googleUser.email,
-        name: googleUser.name,
-        photoURL: googleUser.picture,
-        googleId: googleUser.id,
-      });
+      // Create Firebase credential from Google ID token or access token
+      try {
+        const credential = GoogleAuthProvider.credential(authentication.idToken, authentication.accessToken);
+        
+        // Sign in with Firebase using the credential
+        const firebaseResult = await signInWithCredential(auth, credential);
+        const firebaseUser = firebaseResult.user;
+        
+        console.log('✅ Firebase user created/authenticated:', firebaseUser.uid);
+        
+        // Check if user already exists in Firestore
+        const userDocRef = doc(db, 'users', firebaseUser.uid);
+        const userDocSnap = await getDoc(userDocRef);
+        
+        if (userDocSnap.exists()) {
+          // User exists - this is a login
+          console.log('✅ Existing user logged in with Google');
+          const userData = userDocSnap.data();
+          if (userData?.role === 'artist') {
+            router.replace('/(artist)');
+          } else {
+            router.replace('/(client)');
+          }
+          setGoogleLoading(false);
+          return;
+        }
+        
+        // User doesn't exist - this is a sign up, show role selection
+        console.log('📝 New user - showing role selection');
+        setGoogleUserData({
+          email: googleUser.email,
+          name: googleUser.name,
+          photoURL: googleUser.picture,
+          googleId: googleUser.id,
+          isNewUser: true,
+          firebaseUid: firebaseUser.uid,
+        });
+        setShowRoleSelection(true);
+        
+      } catch (firebaseError: any) {
+        console.error('Firebase authentication error:', firebaseError);
+        
+        // If credential is invalid, fall back to showing role selection for new signup
+        setGoogleUserData({
+          email: googleUser.email,
+          name: googleUser.name,
+          photoURL: googleUser.picture,
+          googleId: googleUser.id,
+          isNewUser: true,
+        });
+        setShowRoleSelection(true);
+      }
       
-      // Show role selection modal
-      setShowRoleSelection(true);
       setGoogleLoading(false);
       
     } catch (error) {
       console.error('Google Sign-In error:', error);
       setGoogleLoading(false);
       Alert.alert('Error', 'Failed to sign in with Google. Please try again.');
+    }
+  };
+
+  // Helper function to create Google user in Firestore
+  const createGoogleUserInFirestore = async (
+    uid: string,
+    email: string,
+    name: string,
+    role: 'client' | 'artist',
+    artistDetails?: {
+      storeName?: string;
+      city?: string;
+      categories?: string[];
+    }
+  ) => {
+    try {
+      const userDocRef = doc(db, 'users', uid);
+      
+      const userData = {
+        uid,
+        email,
+        name,
+        phoneNumber: '',
+        isPhoneVerified: false,
+        role,
+        createdAt: new Date().toISOString(),
+        authProvider: 'google',
+        ...(role === 'artist' && artistDetails ? {
+          storeName: artistDetails.storeName,
+          city: artistDetails.city,
+          categories: artistDetails.categories,
+        } : {}),
+      };
+      
+      await setDoc(userDocRef, userData);
+      console.log('✅ User created in Firestore:', uid);
+    } catch (error) {
+      console.error('Error creating user in Firestore:', error);
+      throw error;
     }
   };
 
@@ -387,19 +480,17 @@ export default function AuthScreen() {
       // For client role, register immediately
       setLoading(true);
       
-      // Register user with Google data and selected role
-      await register(
+      // Create user in Firestore with Google data
+      await createGoogleUserInFirestore(
+        googleUserData.firebaseUid || googleUserData.email,
         googleUserData.email,
-        'google-auth-' + googleUserData.googleId, // Use Google ID as password
         googleUserData.name,
-        '', // No phone number from Google
-        false, // Not phone verified
         userRole,
         undefined
       );
       
       setLoading(false);
-      console.log(`✅ Google registration successful! User role: ${userRole}`);
+      console.log(`✅ Google account created in Firestore! User role: ${userRole}`);
       
       // Navigate based on role
       router.replace('/(client)');
@@ -431,13 +522,11 @@ export default function AuthScreen() {
       setLoading(true);
       setShowGoogleArtistForm(false);
       
-      // Register artist with Google data and artist details
-      await register(
+      // Create artist user in Firestore with Google data
+      await createGoogleUserInFirestore(
+        googleUserData.firebaseUid || googleUserData.email,
         googleUserData.email,
-        'google-auth-' + googleUserData.googleId, // Use Google ID as password
         googleUserData.name,
-        '', // No phone number from Google
-        false, // Not phone verified
         'artist',
         {
           storeName: storeName.trim(),
@@ -447,7 +536,12 @@ export default function AuthScreen() {
       );
       
       setLoading(false);
-      console.log(`✅ Google registration successful! User role: artist`);
+      console.log(`✅ Google artist account created in Firestore!`);
+      
+      // Reset artist form
+      setStoreName('');
+      setCity('');
+      setCategories([]);
       
       // Navigate to artist dashboard
       router.replace('/(artist)');

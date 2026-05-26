@@ -46,7 +46,31 @@ export const fetchAllServices = async (): Promise<any[]> => {
     const servicesRef = collection(db, 'users', userDoc.id, 'services');
     const servicesSnap = await getDocs(query(servicesRef, orderBy('createdAt', 'desc')));
     servicesSnap.forEach(serviceDoc => {
-      allServices.push({ id: serviceDoc.id, ...serviceDoc.data(), artistId: userDoc.id });
+      const data = serviceDoc.data() as any;
+      const normalizeExtrasValue = (value: any): any[] => {
+        if (Array.isArray(value)) return value.filter(Boolean);
+        if (value && typeof value === 'object') return Object.values(value).filter(Boolean);
+        return [];
+      };
+      const resolveServiceExtras = (serviceData: any): any[] => {
+        const candidates = [serviceData?.extras, serviceData?.addOns, serviceData?.extraServices, serviceData?.extraServicesList];
+        for (const candidate of candidates) {
+          const normalized = normalizeExtrasValue(candidate);
+          if (normalized.length > 0) return normalized;
+        }
+        return normalizeExtrasValue(serviceData?.extras ?? serviceData?.addOns ?? serviceData?.extraServices ?? serviceData?.extraServicesList);
+      };
+
+      const extras = resolveServiceExtras(data);
+
+      allServices.push({
+        id: serviceDoc.id,
+        ...data,
+        extras,
+        addOns: Array.isArray(data.addOns) ? data.addOns : extras,
+        extraServices: Array.isArray(data.extraServices) ? data.extraServices : extras,
+        artistId: userDoc.id,
+      });
     });
   }
   return allServices;

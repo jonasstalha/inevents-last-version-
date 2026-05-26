@@ -494,7 +494,7 @@ export const ServiceForm: React.FC<ServiceFormProps> = ({
   const renderOptions = () => {
     return (
       <View style={styles.optionsContainer}>
-        <Text style={styles.sectionTitle}>Service Options</Text>
+        <Text style={styles.sectionTitle}>Service Items</Text>
         {options.length > 0 ? (
           options.map((option) => (
             <View key={option.id} style={styles.optionItem}>
@@ -515,18 +515,18 @@ export const ServiceForm: React.FC<ServiceFormProps> = ({
             </View>
           ))
         ) : (
-          <Text style={styles.noOptionsText}>No options added yet</Text>
+          <Text style={styles.noOptionsText}>No service items added yet</Text>
         )}
         <View style={styles.addOptionForm}>
           <TextInput
             style={styles.input}
-            placeholder="Option Title"
+            placeholder="Item Title"
             value={optionTitle}
             onChangeText={setOptionTitle}
           />
           <TextInput
             style={styles.input}
-            placeholder="Option Description"
+            placeholder="Item Description"
             value={optionDescription}
             onChangeText={setOptionDescription}
           />
@@ -545,7 +545,7 @@ export const ServiceForm: React.FC<ServiceFormProps> = ({
             onChangeText={setOptionMaxQuantity}
           />
           <TouchableOpacity style={styles.addOptionButton} onPress={addOption}>
-            <Text style={styles.buttonText}>Add Option</Text>
+            <Text style={styles.buttonText}>Add Item</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -698,7 +698,7 @@ export const ServiceForm: React.FC<ServiceFormProps> = ({
 
         {/* Extras Section (optional) - editable list like service items */}
         <View style={styles.extrasContainer}>
-          <Text style={styles.sectionTitle}>Extras (optional)</Text>
+          <Text style={styles.sectionTitle}>Extra Services (optional)</Text>
           {extras.length > 0 ? (
             extras.map((extra, idx) => (
               <View key={extra.id} style={[styles.extraItem, { flexDirection: 'column' }]}>
@@ -772,6 +772,9 @@ export const ServiceForm: React.FC<ServiceFormProps> = ({
             </TouchableOpacity>
           </View>
         </View>
+
+
+        
         
         {/* Buttons */}
         <View style={styles.buttonContainer}>

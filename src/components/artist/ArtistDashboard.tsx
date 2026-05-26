@@ -958,8 +958,7 @@ const OrderManagementPage = () => {
         </Text>
         
         {filteredOrders.map(order => (
-          <View key={order.id} style={styles.orderCard}>
-            {/* Order Header */}
+          <TouchableOpacity key={order.id} style={styles.orderCard} onPress={() => router.push(`/(artist)/order-details?orderId=${order.id}&orderType=${order.type}`)} activeOpacity={0.7}>
             <View style={styles.orderHeader}>
               <View style={styles.clientInfo}>
                 <Text style={styles.clientName}>{order.clientName}</Text>
@@ -1059,7 +1058,7 @@ const OrderManagementPage = () => {
                 </View>
               </View>
             )}
-          </View>
+          </TouchableOpacity>
         ))}
 
         {filteredOrders.length === 0 && (

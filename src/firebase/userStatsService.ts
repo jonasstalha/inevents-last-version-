@@ -1,6 +1,6 @@
 import { collection, doc, getDoc, getDocs, getFirestore, query, setDoc, where } from 'firebase/firestore';
 import app from './firebaseConfig';
-import { getUserRewards, getRewardRules, REWARDS_CONFIG } from './rewardsService';
+import { REWARDS_CONFIG } from './rewardsService';
 import { getPointsConfig, PointsConfigResult } from './pointsConfigService';
 
 const db = getFirestore(app);
@@ -80,9 +80,10 @@ export interface UserStats {
  */
 export const fetchUserStatistics = async (userId: string): Promise<UserStats> => {
   try {
-    // Fetch orders from user's orders subcollection (not global collection)
+    // Fetch orders from the global orders collection by clientId
     const ordersQuery = query(
-      collection(db, 'users', userId, 'orders')
+      collection(db, 'orders'),
+      where('clientId', '==', userId),
     );
     const ordersSnapshot = await getDocs(ordersQuery);
     const orders = ordersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -95,8 +96,8 @@ export const fetchUserStatistics = async (userId: string): Promise<UserStats> =>
     const tickets = ticketsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     
     // Calculate statistics
-    const confirmedOrders = orders.filter((order: any) => 
-      order.status === 'confirmed' || order.status === 'completed'
+    const confirmedOrders = orders.filter((order: any) =>
+      order.status === 'accepted' || order.status === 'confirmed' || order.status === 'completed'
     );
     
     const totalSpent = confirmedOrders.reduce((sum: number, order: any) => {
@@ -106,17 +107,16 @@ export const fetchUserStatistics = async (userId: string): Promise<UserStats> =>
       return sum + amount;
     }, 0);
     
-    // Get rewards data from the new rewards system
-    const rewardsData = await getUserRewards(userId);
+    const points = confirmedOrders.length * 100;
     
     return {
       orders: confirmedOrders.length,
       tickets: tickets.length,
-      points: rewardsData?.totalPoints || 0,
+      points,
       totalSpent: totalSpent,
-      level: rewardsData?.level || 1,
-      levelName: rewardsData?.levelName || 'Bronze Explorer',
-      nextLevelPoints: rewardsData?.nextLevelPoints || 500,
+      level: 1,
+      levelName: 'Bronze Explorer',
+      nextLevelPoints: 500,
     };
     
   } catch (error) {

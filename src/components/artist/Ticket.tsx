@@ -122,6 +122,7 @@ export default function Ticket() {
     basePrice: string;
     serviceRadius: number;
     items: { title: string; price: string; maxQuantity: string }[];
+    extraServices: { title: string; price: string; maxQuantity: string }[];
   };
   const [serviceForm, setServiceForm] = useState<ServiceFormType>({
     title: '',
@@ -134,6 +135,7 @@ export default function Ticket() {
     basePrice: '',
     serviceRadius: 5,
     items: [{ title: '', price: '', maxQuantity: '' }],
+    extraServices: [{ title: '', price: '', maxQuantity: '' }],
   });
   const [serviceImages, setServiceImages] = useState<string[]>([]);
   const [serviceVideos, setServiceVideos] = useState<string[]>([]);
@@ -454,7 +456,7 @@ export default function Ticket() {
     setServiceForm({ ...serviceForm, [field]: value });
     setServiceError('');
   };
-  const handleServiceItemChange = (idx: number, key: 'title' | 'price' | 'maxQuantity', value: string) => {
+  const updateServiceItem = (idx: number, key: 'title' | 'price' | 'maxQuantity', value: string) => {
     const items = [...serviceForm.items];
     items[idx][key] = value;
     setServiceForm({ ...serviceForm, items });
@@ -465,6 +467,18 @@ export default function Ticket() {
   const removeServiceItem = (idx: number) => {
     const items = serviceForm.items.filter((_, i) => i !== idx);
     setServiceForm({ ...serviceForm, items });
+  };
+  const addExtraServiceItem = () => {
+    setServiceForm({ ...serviceForm, extraServices: [...serviceForm.extraServices, { title: '', price: '', maxQuantity: '' }] });
+  };
+  const removeExtraServiceItem = (idx: number) => {
+    const extraServices = serviceForm.extraServices.filter((_, i) => i !== idx);
+    setServiceForm({ ...serviceForm, extraServices });
+  };
+  const updateExtraServiceItem = (idx: number, key: 'title' | 'price' | 'maxQuantity', value: string) => {
+    const extraServices = [...serviceForm.extraServices];
+    extraServices[idx][key] = value;
+    setServiceForm({ ...serviceForm, extraServices });
   };
   
   const handleTicketTypeChange = (idx: number, key: 'price' | 'quantity', value: string) => {
@@ -609,6 +623,7 @@ export default function Ticket() {
         basePrice: '',
         serviceRadius: 5,
         items: [{ title: '', price: '', maxQuantity: '' }],
+        extraServices: [{ title: '', price: '', maxQuantity: '' }],
       });
       setServiceVideos([]);
       setServiceError('');
@@ -932,7 +947,7 @@ export default function Ticket() {
                 placeholder="Item title"
                 placeholderTextColor="#a1a1aa"
                 value={item.title}
-                onChangeText={v => handleServiceItemChange(idx, 'title', v)}
+                onChangeText={v => updateServiceItem(idx, 'title', v)}
                 maxLength={30}
               />
               <TextInput
@@ -940,7 +955,7 @@ export default function Ticket() {
                 placeholder="Price"
                 placeholderTextColor="#a1a1aa"
                 value={item.price}
-                onChangeText={v => handleServiceItemChange(idx, 'price', v.replace(/[^0-9]/g, ''))}
+                onChangeText={v => updateServiceItem(idx, 'price', v.replace(/[^0-9]/g, ''))}
                 keyboardType="numeric"
                 maxLength={6}
               />
@@ -949,7 +964,7 @@ export default function Ticket() {
                 placeholder="Max"
                 placeholderTextColor="#a1a1aa"
                 value={item.maxQuantity}
-                onChangeText={v => handleServiceItemChange(idx, 'maxQuantity', v.replace(/[^0-9]/g, ''))}
+                onChangeText={v => updateServiceItem(idx, 'maxQuantity', v.replace(/[^0-9]/g, ''))}
                 keyboardType="numeric"
                 maxLength={4}
               />
@@ -961,6 +976,48 @@ export default function Ticket() {
           <TouchableOpacity onPress={addServiceItem} style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center' }}>
             <Ionicons name="add-circle" size={20} color="#667eea" />
             <Text style={{ color: '#667eea', marginLeft: 4 }}>Add Item</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Extra Services */}
+        <View style={[styles.inputGroup, { marginTop: 16 }]}> 
+          <Text style={styles.inputLabel}>Extra Services</Text>
+          {serviceForm.extraServices.map((extra, idx) => (
+            <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+              <TextInput
+                style={[styles.textInput, { flex: 2, marginRight: 8 }]}
+                placeholder="Extra service title"
+                placeholderTextColor="#a1a1aa"
+                value={extra.title}
+                onChangeText={v => updateExtraServiceItem(idx, 'title', v)}
+                maxLength={30}
+              />
+              <TextInput
+                style={[styles.textInput, { flex: 1, marginRight: 8 }]}
+                placeholder="Price"
+                placeholderTextColor="#a1a1aa"
+                value={extra.price}
+                onChangeText={v => updateExtraServiceItem(idx, 'price', v.replace(/[^0-9]/g, ''))}
+                keyboardType="numeric"
+                maxLength={6}
+              />
+              <TextInput
+                style={[styles.textInput, { flex: 1, marginRight: 8 }]}
+                placeholder="Max"
+                placeholderTextColor="#a1a1aa"
+                value={extra.maxQuantity}
+                onChangeText={v => updateExtraServiceItem(idx, 'maxQuantity', v.replace(/[^0-9]/g, ''))}
+                keyboardType="numeric"
+                maxLength={4}
+              />
+              <TouchableOpacity onPress={() => removeExtraServiceItem(idx)}>
+                <Ionicons name="remove-circle" size={22} color="#ff3b30" />
+              </TouchableOpacity>
+            </View>
+          ))}
+          <TouchableOpacity onPress={addExtraServiceItem} style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center' }}>
+            <Ionicons name="add-circle" size={20} color="#667eea" />
+            <Text style={{ color: '#667eea', marginLeft: 4 }}>Add Extra Service</Text>
           </TouchableOpacity>
         </View>
         

@@ -1,11 +1,58 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getAuth } from 'firebase/auth';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, FlatList, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchServicesByArtistId } from '../src/firebase/artistServices';
 import { fetchArtistById } from '../src/firebase/artistsService';
+
+type ServiceCardProps = {
+  service: any;
+  onPress: (serviceId: string) => void;
+};
+
+const ServiceCard = React.memo(({ service, onPress }: ServiceCardProps) => {
+  const imageUri = service.cover || (Array.isArray(service.images) && service.images.length > 0 ? service.images[0] : null);
+
+  return (
+    <TouchableOpacity style={styles.serviceCard} onPress={() => onPress(service.id)} activeOpacity={0.9}>
+      <View style={styles.serviceInfoRow}>
+        <View style={styles.serviceTextGroup}>
+          <Text style={styles.serviceTitle} numberOfLines={1}>{service.title || 'Untitled service'}</Text>
+          <Text style={styles.serviceCategory}>{service.category || 'Uncategorized'}</Text>
+        </View>
+        {service.basePrice != null && (
+          <Text style={styles.servicePrice}>From ${service.basePrice}</Text>
+        )}
+      </View>
+
+      {service.description ? (
+        <Text style={styles.serviceDescription} numberOfLines={2}>{service.description}</Text>
+      ) : null}
+
+      {imageUri ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.serviceImageRow}>
+          <Image source={{ uri: imageUri }} style={styles.serviceImage} />
+          {Array.isArray(service.images) && service.images.length > 1 ? (
+            <View style={styles.moreImagesBadge}>
+              <Text style={styles.moreImagesText}>+{service.images.length - 1}</Text>
+            </View>
+          ) : null}
+        </ScrollView>
+      ) : null}
+
+      <View style={styles.serviceMetaRow}>
+        <View style={styles.serviceMetaLeft}>
+          <Ionicons name="star" size={14} color="#ffc107" />
+          <Text style={styles.serviceMetaText}>{service.rating || 'New'}</Text>
+          <Text style={styles.serviceMetaSub}>• {service.reviewCount || 0} orders</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={16} color="#6a0dad" />
+      </View>
+    </TouchableOpacity>
+  );
+});
 
 const ArtistProfileScreen = () => {
   const insets = useSafeAreaInsets();
@@ -76,9 +123,73 @@ const ArtistProfileScreen = () => {
     router.push(`/(client)/(hidden)/gig/${serviceId}`);
   };
 
-  const handleEditProfile = () => {
+  const handleEditProfile = useCallback(() => {
     router.push('/(artist)/settings');
-  };
+  }, [router]);
+
+  const renderServiceItem = useCallback(({ item }: { item: any }) => (
+    <ServiceCard service={item} onPress={handleServicePress} />
+  ), [handleServicePress]);
+
+  const renderEmptyServices = useCallback(() => (
+    <View style={styles.emptyState}>
+      <Ionicons name="briefcase-outline" size={48} color="#ccc" />
+      <Text style={styles.emptyStateText}>
+        {isOwnProfile ? 'No services published yet' : 'No services available'}
+      </Text>
+    </View>
+  ), [isOwnProfile]);
+
+  const renderHeader = useCallback(() => (
+    <>
+      <View style={styles.profileHeader}>
+        <View style={styles.avatarContainer}>
+          <Image source={{ uri: artistProfile?.avatar }} style={styles.avatar} />
+        </View>
+        <Text style={styles.name}>{artistProfile?.name}</Text>
+        {artistProfile?.specialization ? (
+          <View style={styles.specializationBadge}>
+            <Ionicons name="briefcase" size={14} color="#6a0dad" />
+            <Text style={styles.specializationText}>{artistProfile.specialization}</Text>
+          </View>
+        ) : null}
+        {artistProfile?.description ? (
+          <Text style={styles.description}>{artistProfile.description}</Text>
+        ) : null}
+        <View style={styles.ratingContainer}>
+          <View style={styles.ratingStars}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Text key={i} style={styles.star}>
+                {artistProfile?.rating >= i + 1 ? '★' : artistProfile?.rating >= i + 0.5 ? '⯨' : '☆'}
+              </Text>
+            ))}
+            <Text style={styles.ratingText}>
+              {artistProfile?.rating?.toFixed(1)} ({services.length} services)
+            </Text>
+          </View>
+        </View>
+        {artistProfile?.categories && artistProfile.categories.length > 0 && (
+          <View style={styles.categoriesContainer}>
+            {artistProfile.categories.map((category: string, index: number) => (
+              <View key={index} style={styles.categoryTag}>
+                <Text style={styles.categoryText}>{category}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+        {artistProfile?.location && (
+          <View style={styles.locationContainer}>
+            <Ionicons name="location-outline" size={16} color="#666" />
+            <Text style={styles.locationText}>{artistProfile.location}</Text>
+          </View>
+        )}
+      </View>
+
+      <View style={styles.servicesSection}>
+        <Text style={styles.sectionTitle}>{isOwnProfile ? 'My Services' : 'Services'}</Text>
+      </View>
+    </>
+  ), [artistProfile, isOwnProfile, services.length]);
 
   const isOwnProfile = currentUserRole === 'artist';
 
@@ -128,162 +239,35 @@ const ArtistProfileScreen = () => {
         )}
       </View>
 
-      <ScrollView 
-        contentContainerStyle={{ 
-          paddingTop: insets.top + 60, 
-          paddingBottom: insets.bottom + 24 
-        }} 
-        showsVerticalScrollIndicator={false}
-      >
-        {loading ? (
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 100 }}>
-            <ActivityIndicator size="large" color="#6a0dad" />
-            <Text style={{ marginTop: 16, color: '#666' }}>Loading artist profile...</Text>
-          </View>
-        ) : artistProfile ? (
-          <>
-            {/* Profile Header */}
-            <View style={styles.profileHeader}>
-              <View style={styles.avatarContainer}>
-                <Image source={{ uri: artistProfile.avatar }} style={styles.avatar} />
-              </View>
-              <Text style={styles.name}>{artistProfile.name}</Text>
-              
-              {/* Specialization Badge */}
-              {artistProfile.specialization ? (
-                <View style={styles.specializationBadge}>
-                  <Ionicons name="briefcase" size={14} color="#6a0dad" />
-                  <Text style={styles.specializationText}>{artistProfile.specialization}</Text>
-                </View>
-              ) : null}
-              
-              {artistProfile.description ? (
-                <Text style={styles.description}>{artistProfile.description}</Text>
-              ) : null}
-              
-              {/* Rating */}
-              <View style={styles.ratingContainer}>
-                <View style={styles.ratingStars}>
-                  {Array.from({ length: 5 }).map((_, i) => (
-                    <Text key={i} style={styles.star}>
-                      {artistProfile.rating >= i + 1
-                        ? '★'
-                        : artistProfile.rating >= i + 0.5
-                        ? '⯨'
-                        : '☆'}
-                    </Text>
-                  ))}
-                  <Text style={styles.ratingText}>
-                    {artistProfile.rating?.toFixed(1)} ({services.length} services)
-                  </Text>
-                </View>
-              </View>
-
-              {/* Categories */}
-              {artistProfile.categories && artistProfile.categories.length > 0 && (
-                <View style={styles.categoriesContainer}>
-                  {artistProfile.categories.map((category: string, index: number) => (
-                    <View key={index} style={styles.categoryTag}>
-                      <Text style={styles.categoryText}>{category}</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-
-              {/* Location */}
-              {artistProfile.location && (
-                <View style={styles.locationContainer}>
-                  <Ionicons name="location-outline" size={16} color="#666" />
-                  <Text style={styles.locationText}>{artistProfile.location}</Text>
-                </View>
-              )}
-            </View>
-
-            {/* Services Section */}
-            <View style={styles.servicesSection}>
-              <Text style={styles.sectionTitle}>
-                {isOwnProfile ? 'My Services' : 'Services'}
-              </Text>
-              
-              {services.length === 0 ? (
-                <View style={styles.emptyState}>
-                  <Ionicons name="briefcase-outline" size={48} color="#ccc" />
-                  <Text style={styles.emptyStateText}>
-                    {isOwnProfile ? 'No services published yet' : 'No services available'}
-                  </Text>
-                </View>
-              ) : (
-                services.map((service, idx) => (
-                  <TouchableOpacity 
-                    key={service.id || idx} 
-                    style={styles.serviceCard}
-                    onPress={() => handleServicePress(service.id)}
-                  >
-                    <View style={styles.serviceHeader}>
-                      <View style={styles.serviceInfo}>
-                        <Text style={styles.serviceTitle}>{service.title}</Text>
-                        <Text style={styles.serviceCategory}>{service.category}</Text>
-                      </View>
-                      {service.basePrice && (
-                        <Text style={styles.servicePrice}>
-                          From ${service.basePrice}
-                        </Text>
-                      )}
-                    </View>
-                    
-                    {service.description && (
-                      <Text style={styles.serviceDescription} numberOfLines={2}>
-                        {service.description}
-                      </Text>
-                    )}
-                    
-                    {(service.cover || (service.images && service.images.length > 0)) && (
-                      <ScrollView 
-                        horizontal 
-                        showsHorizontalScrollIndicator={false} 
-                        style={styles.serviceImages}
-                      >
-                        {service.cover ? (
-                          <Image 
-                            source={{ uri: service.cover }} 
-                            style={styles.serviceImage} 
-                          />
-                        ) : (
-                          service.images.map((img: string, i: number) => (
-                            <Image 
-                              key={i} 
-                              source={{ uri: img }} 
-                              style={styles.serviceImage} 
-                            />
-                          ))
-                        )}
-                      </ScrollView>
-                    )}
-
-                    <View style={styles.serviceFooter}>
-                      <View style={styles.serviceStats}>
-                        <Ionicons name="star" size={14} color="#ffc107" />
-                        <Text style={styles.serviceRating}>
-                          {service.rating || 'New'}
-                        </Text>
-                        <Text style={styles.serviceOrders}>
-                          • {service.reviewCount || 0} orders
-                        </Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={16} color="#6a0dad" />
-                    </View>
-                  </TouchableOpacity>
-                ))
-              )}
-            </View>
-          </>
-        ) : (
-          <View style={styles.errorState}>
-            <Ionicons name="person-outline" size={64} color="#ccc" />
-            <Text style={styles.errorText}>Artist profile not found</Text>
-          </View>
-        )}
-      </ScrollView>
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 100 }}>
+          <ActivityIndicator size="large" color="#6a0dad" />
+          <Text style={{ marginTop: 16, color: '#666' }}>Loading artist profile...</Text>
+        </View>
+      ) : artistProfile ? (
+        <FlatList
+          data={services}
+          keyExtractor={(item, index) => item.id || index.toString()}
+          renderItem={renderServiceItem}
+          ListHeaderComponent={renderHeader}
+          ListEmptyComponent={renderEmptyServices}
+          contentContainerStyle={{
+            paddingTop: insets.top + 60,
+            paddingBottom: insets.bottom + 24,
+            paddingHorizontal: 16,
+          }}
+          showsVerticalScrollIndicator={false}
+          initialNumToRender={4}
+          maxToRenderPerBatch={6}
+          windowSize={5}
+          removeClippedSubviews
+        />
+      ) : (
+        <View style={styles.errorState}>
+          <Ionicons name="person-outline" size={64} color="#ccc" />
+          <Text style={styles.errorText}>Artist profile not found</Text>
+        </View>
+      )}
       
 
     </View>

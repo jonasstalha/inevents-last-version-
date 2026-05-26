@@ -1,18 +1,17 @@
-import { Theme } from '@/src/constants/theme';
 import { fetchArtistById } from '@/src/firebase/artistsService';
 import { recordCouponUsage } from '@/src/firebase/couponService';
 import { fetchServiceByIdFromFirebase } from '@/src/firebase/fetchAllServices';
 import { storage } from '@/src/firebase/firebaseConfig';
+import { createOrder } from '@/src/firebase/orderService';
 import { validatePromoCode } from '@/src/firebase/promoService';
 import { addServiceReview } from '@/src/firebase/reviewService';
-import { createOrder } from '@/src/firebase/orderService';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { ResizeMode, Video } from 'expo-av';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getAuth } from 'firebase/auth';
 import { getDownloadURL, ref as storageRef } from 'firebase/storage';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -34,6 +33,59 @@ import MapView, { Marker } from 'react-native-maps';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const isSmallScreen = screenWidth < 375;
+
+// ─────────────────────────────────────────────────────────────
+// Tab bar dimensions
+// ─────────────────────────────────────────────────────────────
+const TAB_BAR_HEIGHT = 64;
+const TAB_BAR_BOTTOM_INSET = Platform.OS === 'ios' ? 20 : 8;
+const TOTAL_TAB_BAR_HEIGHT = TAB_BAR_HEIGHT + TAB_BAR_BOTTOM_INSET;
+
+// ─────────────────────────────────────────────────────────────
+// Design tokens — single source of truth for the look & feel
+// ─────────────────────────────────────────────────────────────
+const COLORS = {
+  // Backgrounds
+  bg: '#F7F8FB',
+  surface: '#FFFFFF',
+  surfaceMuted: '#F4F5F9',
+  surfaceSubtle: '#FAFBFD',
+
+  // Text
+  text: '#0F172A',
+  textMuted: '#64748B',
+  textSubtle: '#94A3B8',
+
+  // Primary
+  primary: '#6366F1',
+  primaryDark: '#4F46E5',
+  primarySoft: '#EEF0FF',
+
+  // Accents
+  success: '#10B981',
+  successSoft: '#ECFDF5',
+  warning: '#F59E0B',
+  danger: '#EF4444',
+  dangerSoft: '#FEF2F2',
+  gold: '#F5B301',
+
+  // Borders / dividers
+  border: '#E5E7EB',
+  borderSoft: '#EEF0F4',
+  divider: '#F1F2F6',
+
+  // Misc
+  overlay: 'rgba(15, 23, 42, 0.55)',
+  shadow: '#0F172A',
+};
+
+const RADIUS = {
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  pill: 999,
+};
 
 // Default image to show when no images are available
 const DEFAULT_SERVICE_IMAGE = 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
@@ -204,7 +256,7 @@ export default function ServiceDetailScreen() {
         // Start fade-in animation
         Animated.timing(fadeAnim, {
           toValue: 1,
-          duration: 800,
+          duration: 600,
           useNativeDriver: true,
         }).start();
       } catch (error) {
@@ -313,6 +365,23 @@ export default function ServiceDetailScreen() {
     return typeof extra.price === 'number' ? extra.price : parseFloat(String(extra.price || 0));
   };
 
+  const normalizeExtrasValue = (value: any): any[] => {
+    if (Array.isArray(value)) return value.filter(Boolean);
+    if (value && typeof value === 'object') return Object.values(value).filter(Boolean);
+    return [];
+  };
+
+  const getExtrasCandidates = (serviceData: any): any[] => {
+    const candidates = [serviceData?.extras, serviceData?.addOns, serviceData?.extraServices, serviceData?.extraServicesList];
+    for (const candidate of candidates) {
+      const normalized = normalizeExtrasValue(candidate);
+      if (normalized.length > 0) return normalized;
+    }
+    return [];
+  };
+
+  const extrasList = useMemo(() => getExtrasCandidates(serviceData), [serviceData]);
+
   const calculatePrice = () => {
     // Calculate base price for all selected items and extras
     let total = 0;
@@ -328,8 +397,7 @@ export default function ServiceDetailScreen() {
       });
     }
 
-    const extrasList = serviceData?.extras || serviceData?.addOns || [];
-    if (Array.isArray(extrasList)) {
+    if (extrasList.length > 0) {
       extrasList.forEach((extra: any, index: number) => {
         const extraId = `extra_${index}`;
         const quantity = serviceQuantities[extraId] || 0;
@@ -660,7 +728,7 @@ export default function ServiceDetailScreen() {
     }
   };
 
-  const renderStars = (rating: number, size = 16) => {
+  const renderStars = (rating: number, size = 14) => {
     const stars = [];
     for (let i = 1; i <= 5; i++) {
       stars.push(
@@ -668,17 +736,23 @@ export default function ServiceDetailScreen() {
           key={i}
           name={i <= rating ? 'star' : i <= rating + 0.5 ? 'star-half' : 'star-outline'}
           size={size}
-          color="#FFD700"
-          style={{ marginRight: 1 }}
+          color={COLORS.gold}
+          style={{ marginRight: 2 }}
         />
       );
     }
     return stars;
   };
 
-  const headerOpacity = scrollY.interpolate({
+  // Header transitions from transparent (over hero image) to solid white as user scrolls
+  const headerBgOpacity = scrollY.interpolate({
+    inputRange: [0, 140, 200],
+    outputRange: [0, 0.6, 1],
+    extrapolate: 'clamp',
+  });
+  const headerBorderOpacity = scrollY.interpolate({
     inputRange: [0, 200],
-    outputRange: [1, 1],
+    outputRange: [0, 1],
     extrapolate: 'clamp',
   });
 
@@ -686,8 +760,10 @@ export default function ServiceDetailScreen() {
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={Theme.colors.primary} />
-        <Text style={styles.loadingText}>Loading service details...</Text>
+        <View style={styles.loadingCard}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.loadingText}>Loading service details…</Text>
+        </View>
       </View>
     );
   }
@@ -696,9 +772,17 @@ export default function ServiceDetailScreen() {
   if (error) {
     return (
       <View style={styles.errorContainer}>
-        <Ionicons name="alert-circle-outline" size={60} color="#f43f5e" />
+        <View style={styles.errorIconWrap}>
+          <Ionicons name="alert-circle-outline" size={48} color={COLORS.danger} />
+        </View>
+        <Text style={styles.errorTitle}>Something went wrong</Text>
         <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.errorButton} onPress={() => router.push('/(client)/search')}>
+        <TouchableOpacity
+          activeOpacity={0.85}
+          style={styles.errorButton}
+          onPress={() => router.push('/(client)/search')}
+        >
+          <Ionicons name="arrow-back" size={18} color="#fff" style={{ marginRight: 8 }} />
           <Text style={styles.errorButtonText}>Go Back</Text>
         </TouchableOpacity>
       </View>
@@ -707,27 +791,46 @@ export default function ServiceDetailScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
       
-      {/* Animated Header */}
-      <Animated.View style={[styles.header, { opacity: headerOpacity }]}>
-        <TouchableOpacity style={styles.headerButton} onPress={() => {
-          if (router.canGoBack()) {
-            router.back();
-          } else {
-            router.push('/marketplace');
-          }
-        }}>
-          <Ionicons name="arrow-back" size={24} color="#302d2d" />
+      {/* Animated Header — fades in solid background on scroll */}
+      <View style={styles.header} pointerEvents="box-none">
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFillObject,
+            {
+              backgroundColor: '#fff',
+              opacity: headerBgOpacity,
+            },
+          ]}
+        />
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.headerBorder,
+            { opacity: headerBorderOpacity },
+          ]}
+        />
+        <TouchableOpacity
+          activeOpacity={0.85}
+          style={styles.headerButton}
+          onPress={() => {
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.push('/marketplace');
+            }
+          }}
+        >
+          <Ionicons name="arrow-back" size={22} color={COLORS.text} />
         </TouchableOpacity>
-
-
-      </Animated.View>
+      </View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <Animated.ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={{ paddingBottom: 200 }} // Increased padding to allow more scrolling
+          contentContainerStyle={{ paddingBottom: TOTAL_TAB_BAR_HEIGHT + 90 }}
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
             { useNativeDriver: false }
@@ -737,10 +840,9 @@ export default function ServiceDetailScreen() {
         >
           <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
             
-              {/* Hero Media Gallery - Images + Video */}
+              {/* Hero Media Gallery */}
               <View style={styles.imageSection}>
                 {mediaItems?.[selectedImage]?.type === 'video' ? (
-                  // Video: no TouchableOpacity wrapper, no overlay
                   <Video
                     ref={videoRef}
                     source={{ uri: mediaItems?.[selectedImage]?.uri }}
@@ -751,309 +853,340 @@ export default function ServiceDetailScreen() {
                     onError={(e) => console.error('Video error:', e)}
                   />
                 ) : (
-                  // Image: keep TouchableOpacity for fullscreen
-                  <TouchableOpacity onPress={() => {
-                    const media = mediaItems?.[selectedImage];
-                    if (media && media.uri) {
-                      setPreviewMedia({ type: 'image', uri: media.uri, index: selectedImage });
-                      setShowFullScreenPreview(true);
-                    }
-                  }}>
+                  <TouchableOpacity
+                    activeOpacity={0.95}
+                    onPress={() => {
+                      const media = mediaItems?.[selectedImage];
+                      if (media && media.uri) {
+                        setPreviewMedia({ type: 'image', uri: media.uri, index: selectedImage });
+                        setShowFullScreenPreview(true);
+                      }
+                    }}
+                  >
                     {mediaItems?.[selectedImage] && mediaItems?.[selectedImage]?.uri ? (
                       <Image source={{ uri: mediaItems?.[selectedImage]?.uri }} style={styles.mainImage} />
                     ) : null}
                   </TouchableOpacity>
                 )}
-                
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}
-                  style={styles.thumbnailRow}  
-                  contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 10 }}
-                >
-                  {mediaItems.map((media: any, index: number) => {
-                    // Safety check for media item
-                    if (!media) {
-                      return null;
-                    }
-                    
-                    const isVideo = media?.type === 'video';
-                    const isSelected = selectedImage === index;
-                    
-                    return (
-                      <TouchableOpacity
-                        key={index}
-                        onPress={() => setSelectedImage(index)}
-                        style={[styles.thumbnail, isSelected && styles.thumbnailSelected]}
-                      >
-{isVideo ? (
-                           <View style={styles.videoThumbnailContainer}>
-                             <View style={styles.videoThumbnailPlaceholder}>
-                               <Ionicons name="play" size={20} color="#fff" />
-                               <Text style={styles.videoThumbnailLabel}>Video</Text>
-                             </View>
-                           </View>
-                         ) : (
-                           <>
-                             {/* Safety check for uri */}
-                             {media?.uri ? (
-                               <Image source={{ uri: media.uri }} style={styles.thumbnailImage} />
-                             ) : null}
-                           </>
-                         )}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-                {serviceData?.video ? (
-                  <Text style={styles.galleryHintText}>Tap thumbnails to preview images and the service video.</Text>
-                ) : null}
-              </View>
 
-             {/* Main Content */}
-            <View style={styles.mainContent}>
-              
-              {/* Title and Tags */}
-              <View style={styles.titleSection}>
-                <Text style={styles.title}>{defaultServiceData.title}</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tagsContainer}>
-                  {defaultServiceData.tags.map((tag: string, index: number) => (
-                    <View key={index} style={styles.tag}>
-                      <Text style={styles.tagText}>{tag}</Text>
-                    </View>
-                  ))}
-                </ScrollView>
-              </View>
-
-              {/* Provider Info */}
-
-              {/* Provider Info & Stats Row - Enhanced Placement */}
-              <View style={[styles.providerSection, { flexDirection: 'column', alignItems: 'flex-start', gap: 12 }]}> 
-                <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%' }}>
-                  <Image source={{ uri: defaultServiceData.provider.avatar }} style={styles.providerAvatar} />
-                  <View style={styles.providerInfo}>
-                    <View style={styles.providerNameRow}>
-                      <Text style={styles.providerName}>{defaultServiceData.provider.name}</Text>
-                      <View style={styles.levelBadge}>
-                        <Text style={styles.levelText}>{defaultServiceData.provider.level}</Text>
-                      </View>
-                    </View>
-                    <View style={styles.ratingRow}>
-                      {renderStars(defaultServiceData.rating)}
-                      <Text style={styles.ratingText}>{defaultServiceData.rating} ({defaultServiceData.reviewCount} reviews)</Text>
-                    </View>
-                  </View>
-                </View>
-              </View>
-
-              {/* Description */}
-              <View style={styles.descriptionSection}>
-                <Text style={styles.sectionTitle}>About This Service</Text>
-                <Text style={styles.description}>{defaultServiceData.description}</Text>
-              </View>
-              
-              {/* Service Items section removed */}
-
-              {/* Pricing Section */}
-              <View style={styles.pricingSection}>
-                <Text style={styles.sectionTitle}>Customize Your Order</Text>
-                
-                {/* List of service items from Firebase that can be added/removed */}
-                <Text style={styles.subsectionTitle}>Service Items:</Text>
-                
-                {serviceData?.items && serviceData.items.map((item: any, index: number) => {
-                  const itemId = `item_${index}`;
-                  const quantity = serviceQuantities[itemId] || 0;
-                  const itemPrice = typeof item.price === 'number' ? item.price : parseFloat(String(item.price));
-                  
-                  return (
-                    <View key={index} style={styles.serviceCard}>
-                      <View style={styles.serviceHeader}>
-                        <Text style={styles.serviceName}>{item.title}</Text>
-                        <Text style={styles.servicePrice}>
-                          {quantity > 0 ? `${quantity} × ` : ''}{itemPrice} MAD
-                        </Text>
-                      </View>
-                      {item.description && (
-                        <Text style={styles.serviceDescription}>{item.description}</Text>
-                      )}
-                      <View style={styles.quantitySelector}>
-                        <Text style={styles.quantityLabel}>Qty:</Text>
-                        <View style={styles.quantityControls}>
-                          <TouchableOpacity
-                            style={[styles.quantityButton, quantity === 0 && styles.quantityButtonDisabled]}
-                            onPress={() => handleItemQuantityChange(itemId, -1)}
-                            disabled={quantity === 0}
-                          >
-                            <Ionicons name="remove" size={20} color={quantity === 0 ? '#ccc' : '#6366f1'} />
-                          </TouchableOpacity>
-                          <Text style={styles.quantityText}>{quantity}</Text>
-                          <TouchableOpacity
-                            style={[
-                              styles.quantityButton, 
-                              (item?.maxQuantity && quantity >= Number(item.maxQuantity)) && styles.quantityButtonDisabled
-                            ]}
-                            onPress={() => handleItemQuantityChange(itemId, 1, item?.maxQuantity)}
-                            disabled={item?.maxQuantity && quantity >= Number(item.maxQuantity)}
-                          >
-                            <Ionicons 
-                              name="add" 
-                              size={20} 
-                              color={(item?.maxQuantity && quantity >= Number(item.maxQuantity)) ? '#ccc' : '#6366f1'} 
-                            />
-                          </TouchableOpacity>
-                        </View>
-                        {item?.maxQuantity && (
-                          <Text style={styles.maxQuantityText}>Max: {item.maxQuantity}</Text>
-                        )}
-                      </View>
-                    </View>
-                  );
-                })}
-                
-                {(!serviceData?.items || serviceData.items.length === 0) && (
-                  <View style={styles.serviceCard}>
-                    <Text style={styles.serviceDescription}>No service items available.</Text>
+                {/* Media counter chip */}
+                {mediaItems.length > 1 && (
+                  <View style={styles.mediaCounterChip}>
+                    <Ionicons name="images-outline" size={12} color="#fff" />
+                    <Text style={styles.mediaCounterChipText}>
+                      {selectedImage + 1} / {mediaItems.length}
+                    </Text>
                   </View>
                 )}
+              </View>
 
-                {/* Extras Section */}
-                <View style={styles.extrasSection}>
-                  <Text style={styles.sectionTitle}>Extras</Text>
-                  {Array.isArray(serviceData?.extras) && serviceData.extras.length > 0 ? (
-                    serviceData.extras.map((extra: any, index: number) => {
-                      const extraKey = `extra_${index}`;
-                      const quantity = serviceQuantities[extraKey] || 0;
+              {/* Main Content card — sits on top of the hero */}
+              <View style={styles.mainContent}>
+                {/* Thumbnail strip (moved into main card, sits right under hero) */}
+                {mediaItems.length > 1 && (
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.thumbnailRow}
+                    contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 4 }}
+                  >
+                    {mediaItems.map((media: any, index: number) => {
+                      if (!media) return null;
+                      const isVideo = media?.type === 'video';
+                      const isSelected = selectedImage === index;
+
                       return (
-                        <View key={`extra-${index}`} style={styles.extraCard}>
-                          <View style={styles.serviceHeader}>
-                            <Text style={styles.serviceName}>{extra.title || extra.name || `Extra ${index + 1}`}</Text>
-                            <Text style={styles.servicePrice}>{getExtraPrice(extra)} MAD</Text>
-                          </View>
-                          {extra.description ? <Text style={styles.serviceDescription}>{extra.description}</Text> : null}
-                          <View style={styles.quantitySelector}>
-                            <Text style={styles.quantityLabel}>Qty:</Text>
-                            <View style={styles.quantityControls}>
-                              <TouchableOpacity
-                                style={[styles.quantityButton, quantity === 0 && styles.quantityButtonDisabled]}
-                                onPress={() => handleItemQuantityChange(extraKey, -1)}
-                                disabled={quantity === 0}
-                              >
-                                <Ionicons name="remove" size={20} color={quantity === 0 ? '#ccc' : '#6366f1'} />
-                              </TouchableOpacity>
-                              <Text style={styles.quantityText}>{quantity}</Text>
-                              <TouchableOpacity
-                                style={[
-                                  styles.quantityButton,
-                                  (extra?.maxQuantity && quantity >= Number(extra.maxQuantity)) && styles.quantityButtonDisabled,
-                                ]}
-                                onPress={() => handleItemQuantityChange(extraKey, 1, extra?.maxQuantity ?? 10)}
-                                disabled={extra?.maxQuantity ? quantity >= Number(extra.maxQuantity) : false}
-                              >
-                                <Ionicons
-                                  name="add"
-                                  size={20}
-                                  color={(extra?.maxQuantity && quantity >= Number(extra.maxQuantity)) ? '#ccc' : '#6366f1'}
-                                />
-                              </TouchableOpacity>
+                        <TouchableOpacity
+                          key={index}
+                          activeOpacity={0.85}
+                          onPress={() => setSelectedImage(index)}
+                          style={[styles.thumbnail, isSelected && styles.thumbnailSelected]}
+                        >
+                          {isVideo ? (
+                            <View style={styles.videoThumbnailContainer}>
+                              <Ionicons name="play" size={18} color="#fff" />
                             </View>
-                            {extra?.maxQuantity && (
-                              <Text style={styles.maxQuantityText}>Max: {extra.maxQuantity}</Text>
-                            )}
-                          </View>
-                        </View>
+                          ) : (
+                            media?.uri ? (
+                              <Image source={{ uri: media.uri }} style={styles.thumbnailImage} />
+                            ) : null
+                          )}
+                        </TouchableOpacity>
                       );
-                    })
-                  ) : Array.isArray(serviceData?.addOns) && serviceData.addOns.length > 0 ? (
-                    serviceData.addOns.map((extra: any, index: number) => {
-                      const extraKey = `extra_${index}`;
-                      const quantity = serviceQuantities[extraKey] || 0;
-                      return (
-                        <View key={`addon-${index}`} style={styles.extraCard}>
-                          <View style={styles.serviceHeader}>
-                            <Text style={styles.serviceName}>{extra.title || extra.name || `Extra ${index + 1}`}</Text>
-                            <Text style={styles.servicePrice}>{getExtraPrice(extra)} MAD</Text>
-                          </View>
-                          {extra.description ? <Text style={styles.serviceDescription}>{extra.description}</Text> : null}
-                          <View style={styles.quantitySelector}>
-                            <Text style={styles.quantityLabel}>Qty:</Text>
-                            <View style={styles.quantityControls}>
-                              <TouchableOpacity
-                                style={[styles.quantityButton, quantity === 0 && styles.quantityButtonDisabled]}
-                                onPress={() => handleItemQuantityChange(extraKey, -1)}
-                                disabled={quantity === 0}
-                              >
-                                <Ionicons name="remove" size={20} color={quantity === 0 ? '#ccc' : '#6366f1'} />
-                              </TouchableOpacity>
-                              <Text style={styles.quantityText}>{quantity}</Text>
-                              <TouchableOpacity
-                                style={[
-                                  styles.quantityButton,
-                                  (extra?.maxQuantity && quantity >= Number(extra.maxQuantity)) && styles.quantityButtonDisabled,
-                                ]}
-                                onPress={() => handleItemQuantityChange(extraKey, 1, extra?.maxQuantity ?? 10)}
-                                disabled={extra?.maxQuantity ? quantity >= Number(extra.maxQuantity) : false}
-                              >
-                                <Ionicons
-                                  name="add"
-                                  size={20}
-                                  color={(extra?.maxQuantity && quantity >= Number(extra.maxQuantity)) ? '#ccc' : '#6366f1'}
-                                />
-                              </TouchableOpacity>
-                            </View>
-                            {extra?.maxQuantity && (
-                              <Text style={styles.maxQuantityText}>Max: {extra.maxQuantity}</Text>
-                            )}
-                          </View>
-                        </View>
-                      );
-                    })
-                  ) : (
-                    <View style={styles.serviceCard}>
-                      <Text style={styles.serviceDescription}>No extras available for this service.</Text>
+                    })}
+                  </ScrollView>
+                )}
+
+                {/* Title + Tags */}
+                <View style={styles.titleSection}>
+                  <Text style={styles.title}>{defaultServiceData.title}</Text>
+
+                  {/* Inline rating row beneath title */}
+                  <View style={styles.titleRatingRow}>
+                    <View style={styles.starInline}>
+                      <Ionicons name="star" size={14} color={COLORS.gold} />
+                      <Text style={styles.ratingNumber}>{defaultServiceData.rating}</Text>
                     </View>
+                    <Text style={styles.ratingDot}>·</Text>
+                    <Text style={styles.ratingMeta}>{defaultServiceData.reviewCount} reviews</Text>
+                    {defaultServiceData.deliveryTime ? (
+                      <>
+                        <Text style={styles.ratingDot}>·</Text>
+                        <View style={styles.deliveryInline}>
+                          <Ionicons name="time-outline" size={13} color={COLORS.textMuted} />
+                          <Text style={styles.ratingMeta}>{defaultServiceData.deliveryTime}</Text>
+                        </View>
+                      </>
+                    ) : null}
+                  </View>
+
+                  {defaultServiceData.tags?.length > 0 && (
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={styles.tagsContainer}
+                      contentContainerStyle={{ paddingRight: 20 }}
+                    >
+                      {defaultServiceData.tags.map((tag: string, index: number) => (
+                        <View key={index} style={styles.tag}>
+                          <Text style={styles.tagText}>{tag}</Text>
+                        </View>
+                      ))}
+                    </ScrollView>
                   )}
                 </View>
 
-                 {/* Coupon Section moved to negotiation modal */}
-               </View>
+                <View style={styles.sectionDivider} />
 
-              {/* Reviews Section */}
-              <View style={styles.reviewsSection}>
-                <View style={styles.reviewsHeader}>
-                  <Text style={styles.sectionTitle}>Reviews ({defaultServiceData.reviewCount})</Text>
-                  <TouchableOpacity
-                    style={styles.addReviewButton}
-                    onPress={() => setShowReviewForm(true)}
-                  >
-                    <Ionicons name="add" size={16} color="#6366f1" />
-                    <Text style={styles.addReviewText}>Add Review</Text>
-                  </TouchableOpacity>
+                {/* Provider Card */}
+                <View style={styles.providerSection}>
+                  <View style={styles.providerCard}>
+                    <Image source={{ uri: defaultServiceData.provider.avatar }} style={styles.providerAvatar} />
+                    <View style={styles.providerInfo}>
+                      <View style={styles.providerNameRow}>
+                        <Text style={styles.providerName} numberOfLines={1}>
+                          {defaultServiceData.provider.name}
+                        </Text>
+                        <View style={styles.levelBadge}>
+                          <Ionicons name="shield-checkmark" size={10} color="#fff" />
+                          <Text style={styles.levelText}>{defaultServiceData.provider.level}</Text>
+                        </View>
+                      </View>
+                      <View style={styles.providerMetaRow}>
+                        <Ionicons name="time-outline" size={13} color={COLORS.textMuted} />
+                        <Text style={styles.providerMetaText}>
+                          Replies in {defaultServiceData.provider.responseTime}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
                 </View>
 
-                {reviews.slice(0, showAllReviews ? reviews.length : 2).map((review, index) => (
-                  <View key={index} style={styles.reviewCard}>
-                    <View style={styles.reviewHeader}>
-                      <Text style={styles.reviewUser}>{review.user}</Text>
-                      <Text style={styles.reviewDate}>{review.date}</Text>
-                    </View>
-                    <View style={styles.reviewRating}>
-                      {renderStars(review.rating, 14)}
-                    </View>
-                    <Text style={styles.reviewText}>{review.text}</Text>
-                  </View>
-                ))}
+                {/* Description */}
+                <View style={styles.descriptionSection}>
+                  <Text style={styles.sectionTitle}>About this service</Text>
+                  <Text style={styles.description}>{defaultServiceData.description}</Text>
+                </View>
 
-                {reviews.length > 2 && (
-                  <TouchableOpacity
-                    style={styles.showMoreButton}
-                    onPress={() => setShowAllReviews(!showAllReviews)}
-                  >
-                    <Text style={styles.showMoreText}>
-                      {showAllReviews ? 'Show Less' : `Show ${reviews.length - 2} More Reviews`}
-                    </Text>
-                    <Ionicons name={showAllReviews ? 'chevron-up' : 'chevron-down'} size={16} color="#6366f1" />
-                  </TouchableOpacity>
-                )}
-              </View>
+                <View style={styles.sectionDivider} />
+
+                {/* Pricing / Customize */}
+                <View style={styles.pricingSection}>
+                  <Text style={styles.sectionTitle}>Customize your order</Text>
+
+                  <Text style={styles.subsectionTitle}>Service items</Text>
+
+                  {serviceData?.items && serviceData.items.map((item: any, index: number) => {
+                    const itemId = `item_${index}`;
+                    const quantity = serviceQuantities[itemId] || 0;
+                    const itemPrice = typeof item.price === 'number' ? item.price : parseFloat(String(item.price));
+                    const isActive = quantity > 0;
+
+                    return (
+                      <View
+                        key={index}
+                        style={[styles.serviceCard, isActive && styles.serviceCardActive]}
+                      >
+                        <View style={styles.serviceHeader}>
+                          <Text style={styles.serviceName} numberOfLines={2}>{item.title}</Text>
+                          <Text style={styles.servicePrice}>
+                            {quantity > 0 ? `${quantity} × ` : ''}{itemPrice} MAD
+                          </Text>
+                        </View>
+                        {item.description && (
+                          <Text style={styles.serviceDescription}>{item.description}</Text>
+                        )}
+                        <View style={styles.quantitySelector}>
+                          <Text style={styles.quantityLabel}>Qty</Text>
+                          <View style={styles.quantityControls}>
+                            <TouchableOpacity
+                              activeOpacity={0.7}
+                              style={[styles.quantityButton, quantity === 0 && styles.quantityButtonDisabled]}
+                              onPress={() => handleItemQuantityChange(itemId, -1)}
+                              disabled={quantity === 0}
+                            >
+                              <Ionicons name="remove" size={18} color={quantity === 0 ? COLORS.textSubtle : COLORS.primary} />
+                            </TouchableOpacity>
+                            <Text style={styles.quantityText}>{quantity}</Text>
+                            <TouchableOpacity
+                              activeOpacity={0.7}
+                              style={[
+                                styles.quantityButton,
+                                (item?.maxQuantity && quantity >= Number(item.maxQuantity)) && styles.quantityButtonDisabled
+                              ]}
+                              onPress={() => handleItemQuantityChange(itemId, 1, item?.maxQuantity)}
+                              disabled={item?.maxQuantity && quantity >= Number(item.maxQuantity)}
+                            >
+                              <Ionicons
+                                name="add"
+                                size={18}
+                                color={(item?.maxQuantity && quantity >= Number(item.maxQuantity)) ? COLORS.textSubtle : COLORS.primary}
+                              />
+                            </TouchableOpacity>
+                          </View>
+                          {item?.maxQuantity && (
+                            <Text style={styles.maxQuantityText}>Max {item.maxQuantity}</Text>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  })}
+
+                  {(!serviceData?.items || serviceData.items.length === 0) && (
+                    <View style={styles.emptyCard}>
+                      <Ionicons name="cube-outline" size={20} color={COLORS.textSubtle} />
+                      <Text style={styles.emptyCardText}>No service items available.</Text>
+                    </View>
+                  )}
+
+                  {/* Extras */}
+                  <View style={styles.extrasSection}>
+                    <Text style={styles.subsectionTitle}>Extras</Text>
+                    {extrasList.length > 0 ? (
+                      extrasList.map((extra: any, index: number) => {
+                        const extraKey = `extra_${index}`;
+                        const quantity = serviceQuantities[extraKey] || 0;
+                        const isActive = quantity > 0;
+                        return (
+                          <View
+                            key={`extra-${index}`}
+                            style={[styles.extraCard, isActive && styles.extraCardActive]}
+                          >
+                            <View style={styles.serviceHeader}>
+                              <Text style={styles.serviceName} numberOfLines={2}>
+                                {extra.title || extra.name || `Extra ${index + 1}`}
+                              </Text>
+                              <Text style={styles.servicePrice}>{getExtraPrice(extra)} MAD</Text>
+                            </View>
+                            {extra.description ? <Text style={styles.serviceDescription}>{extra.description}</Text> : null}
+                            <View style={styles.quantitySelector}>
+                              <Text style={styles.quantityLabel}>Qty</Text>
+                              <View style={styles.quantityControls}>
+                                <TouchableOpacity
+                                  activeOpacity={0.7}
+                                  style={[styles.quantityButton, quantity === 0 && styles.quantityButtonDisabled]}
+                                  onPress={() => handleItemQuantityChange(extraKey, -1)}
+                                  disabled={quantity === 0}
+                                >
+                                  <Ionicons name="remove" size={18} color={quantity === 0 ? COLORS.textSubtle : COLORS.primary} />
+                                </TouchableOpacity>
+                                <Text style={styles.quantityText}>{quantity}</Text>
+                                <TouchableOpacity
+                                  activeOpacity={0.7}
+                                  style={[
+                                    styles.quantityButton,
+                                    (extra?.maxQuantity && quantity >= Number(extra.maxQuantity)) && styles.quantityButtonDisabled,
+                                  ]}
+                                  onPress={() => handleItemQuantityChange(extraKey, 1, extra?.maxQuantity ?? 10)}
+                                  disabled={extra?.maxQuantity ? quantity >= Number(extra.maxQuantity) : false}
+                                >
+                                  <Ionicons
+                                    name="add"
+                                    size={18}
+                                    color={(extra?.maxQuantity && quantity >= Number(extra.maxQuantity)) ? COLORS.textSubtle : COLORS.primary}
+                                  />
+                                </TouchableOpacity>
+                              </View>
+                              {extra?.maxQuantity && (
+                                <Text style={styles.maxQuantityText}>Max {extra.maxQuantity}</Text>
+                              )}
+                            </View>
+                          </View>
+                        );
+                      })
+                    ) : (
+                      <View style={styles.emptyCard}>
+                        <Ionicons name="add-circle-outline" size={20} color={COLORS.textSubtle} />
+                        <Text style={styles.emptyCardText}>No extras available for this service.</Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+
+                <View style={styles.sectionDivider} />
+
+                {/* Reviews */}
+                <View style={styles.reviewsSection}>
+                  <View style={styles.reviewsHeader}>
+                    <View>
+                      <Text style={styles.sectionTitle}>Reviews</Text>
+                      <View style={styles.reviewsSummary}>
+                        <Ionicons name="star" size={14} color={COLORS.gold} />
+                        <Text style={styles.reviewsSummaryText}>
+                          {defaultServiceData.rating} · {defaultServiceData.reviewCount} reviews
+                        </Text>
+                      </View>
+                    </View>
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      style={styles.addReviewButton}
+                      onPress={() => setShowReviewForm(true)}
+                    >
+                      <Ionicons name="add" size={16} color={COLORS.primary} />
+                      <Text style={styles.addReviewText}>Add</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {reviews.length === 0 && (
+                    <View style={styles.emptyCard}>
+                      <Ionicons name="chatbubble-ellipses-outline" size={20} color={COLORS.textSubtle} />
+                      <Text style={styles.emptyCardText}>No reviews yet. Be the first to leave one.</Text>
+                    </View>
+                  )}
+
+                  {reviews.slice(0, showAllReviews ? reviews.length : 2).map((review, index) => (
+                    <View key={index} style={styles.reviewCard}>
+                      <View style={styles.reviewHeader}>
+                        <View style={styles.reviewAvatar}>
+                          <Text style={styles.reviewAvatarText}>
+                            {(review.user || 'U').charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.reviewUser}>{review.user}</Text>
+                          <View style={styles.reviewRating}>
+                            {renderStars(review.rating, 12)}
+                            <Text style={styles.reviewDate}>· {review.date}</Text>
+                          </View>
+                        </View>
+                      </View>
+                      <Text style={styles.reviewText}>{review.text}</Text>
+                    </View>
+                  ))}
+
+                  {reviews.length > 2 && (
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      style={styles.showMoreButton}
+                      onPress={() => setShowAllReviews(!showAllReviews)}
+                    >
+                      <Text style={styles.showMoreText}>
+                        {showAllReviews ? 'Show less' : `Show ${reviews.length - 2} more`}
+                      </Text>
+                      <Ionicons name={showAllReviews ? 'chevron-up' : 'chevron-down'} size={16} color={COLORS.primary} />
+                    </TouchableOpacity>
+                  )}
+                </View>
 
             </View>
           </Animated.View>
@@ -1063,11 +1196,18 @@ export default function ServiceDetailScreen() {
         <View style={styles.actionBar}>
           <View style={styles.priceSection}>
             <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalPrice}>{calculatePrice()} MAD</Text>
+            <View style={styles.totalRow}>
+              <Text style={styles.totalPrice}>{calculatePrice()}</Text>
+              <Text style={styles.totalCurrency}>MAD</Text>
+            </View>
           </View>
-          <TouchableOpacity style={styles.continueButton} onPress={handleContinuePress}>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            style={styles.continueButton}
+            onPress={handleContinuePress}
+          >
             <Text style={styles.continueButtonText}>Continue</Text>
-            <Ionicons name="arrow-forward" size={20} color="#fff" />
+            <Ionicons name="arrow-forward" size={18} color="#fff" />
           </TouchableOpacity>
         </View>
 
@@ -1075,32 +1215,47 @@ export default function ServiceDetailScreen() {
         <Modal visible={showOfferForm} animationType="slide" transparent>
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
+              <View style={styles.modalHandle} />
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Custom Order</Text>
-                <TouchableOpacity onPress={() => setShowOfferForm(false)}>
-                  <Ionicons name="close" size={24} color="#6b7280" />
+                <View>
+                  <Text style={styles.modalTitle}>Custom Order</Text>
+                  <Text style={styles.modalSubtitle}>
+                    Tell {defaultServiceData.provider.name} about your event
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  style={styles.modalCloseButton}
+                  onPress={() => setShowOfferForm(false)}
+                >
+                  <Ionicons name="close" size={22} color={COLORS.textMuted} />
                 </TouchableOpacity>
               </View>
 
-              <ScrollView style={styles.modalScrollContent} showsVerticalScrollIndicator={false}>
-                <Text style={styles.modalSubtitle}>
-                  Tell {defaultServiceData.provider.name} about your service requirements
-                </Text>
-                
-                <TextInput
-                  multiline
-                  numberOfLines={4}
-                  placeholder="Describe your event in detail..."
-                  value={customMessage}
-                  onChangeText={setCustomMessage}
-                  style={styles.textArea}
-                />
-                
+              <ScrollView
+                style={styles.modalScrollContent}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+              >
                 <View style={styles.formGroup}>
-                  <Text style={styles.formLabel}>Your Budget *</Text>
+                  <Text style={styles.formLabel}>Describe your event</Text>
+                  <TextInput
+                    multiline
+                    numberOfLines={4}
+                    placeholder="Tell the provider what you need…"
+                    placeholderTextColor={COLORS.textSubtle}
+                    value={customMessage}
+                    onChangeText={setCustomMessage}
+                    style={styles.textArea}
+                  />
+                </View>
+
+                <View style={styles.formGroup}>
+                  <Text style={styles.formLabel}>Your budget *</Text>
                   <View style={styles.budgetInputContainer}>
                     <TextInput
                       placeholder="0"
+                      placeholderTextColor={COLORS.textSubtle}
                       value={clientBudget}
                       onChangeText={setClientBudget}
                       keyboardType="numeric"
@@ -1111,11 +1266,12 @@ export default function ServiceDetailScreen() {
                 </View>
 
                 <View style={styles.formGroup}>
-                  <Text style={styles.formLabel}>Full Name *</Text>
+                  <Text style={styles.formLabel}>Full name *</Text>
                   <TextInput
                     value={personalInfo.fullName}
                     onChangeText={(text) => setPersonalInfo(prev => ({...prev, fullName: text}))}
                     placeholder="Enter your full name"
+                    placeholderTextColor={COLORS.textSubtle}
                     style={styles.formInput}
                   />
                 </View>
@@ -1126,113 +1282,146 @@ export default function ServiceDetailScreen() {
                     value={personalInfo.email}
                     onChangeText={(text) => setPersonalInfo(prev => ({...prev, email: text}))}
                     placeholder="your.email@example.com"
+                    placeholderTextColor={COLORS.textSubtle}
                     keyboardType="email-address"
+                    autoCapitalize="none"
                     style={styles.formInput}
                   />
                 </View>
 
                 <View style={styles.formGroup}>
-                  <Text style={styles.formLabel}>Phone Number *</Text>
+                  <Text style={styles.formLabel}>Phone number *</Text>
                   <TextInput
                     value={personalInfo.phone}
                     onChangeText={(text) => setPersonalInfo(prev => ({...prev, phone: text}))}
                     placeholder="+212 xxx xxx xxx"
+                    placeholderTextColor={COLORS.textSubtle}
                     keyboardType="phone-pad"
                     style={styles.formInput}
                   />
                 </View>
 
-                 <View style={styles.formGroup}>
-                   <Text style={styles.formLabel}>Event Date</Text>
-                   <TouchableOpacity
-                     style={styles.formInput}
-                     onPress={() => {
-                       setTempEventDate(personalInfo.eventDate ? new Date(personalInfo.eventDate) : new Date());
-                       setShowDatePicker(true);
-                     }}
-                   >
-                     <Text style={personalInfo.eventDate ? styles.formInputText : styles.formInputPlaceholder}>
-                       {personalInfo.eventDate || 'Select event date'}
-                     </Text>
-                   </TouchableOpacity>
-                   {showDatePicker && (
-                     <DateTimePicker
-                       value={tempEventDate}
-                       mode="date"
-                       display="default"
-                       onChange={(event, selectedDate) => {
-                         setShowDatePicker(false);
-                         if (selectedDate) {
-                           const dateStr = selectedDate.toISOString().split('T')[0];
-                           setPersonalInfo(prev => ({...prev, eventDate: dateStr}));
-                         }
-                       }}
-                     />
-                   )}
-                 </View>
+                <View style={styles.formGroup}>
+                  <Text style={styles.formLabel}>Event date</Text>
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    style={styles.formInputPressable}
+                    onPress={() => {
+                      setTempEventDate(personalInfo.eventDate ? new Date(personalInfo.eventDate) : new Date());
+                      setShowDatePicker(true);
+                    }}
+                  >
+                    <Ionicons name="calendar-outline" size={18} color={COLORS.textMuted} />
+                    <Text style={personalInfo.eventDate ? styles.formInputText : styles.formInputPlaceholder}>
+                      {personalInfo.eventDate || 'Select event date'}
+                    </Text>
+                  </TouchableOpacity>
+                  {showDatePicker && (
+                    <DateTimePicker
+                      value={tempEventDate}
+                      mode="date"
+                      display="default"
+                      onChange={(event, selectedDate) => {
+                        setShowDatePicker(false);
+                        if (selectedDate) {
+                          const dateStr = selectedDate.toISOString().split('T')[0];
+                          setPersonalInfo(prev => ({...prev, eventDate: dateStr}));
+                        }
+                      }}
+                    />
+                  )}
+                </View>
 
-                 <View style={styles.formGroup}>
-                   <Text style={styles.formLabel}>Event Location</Text>
-                   <TouchableOpacity
-                     style={styles.formInput}
-                     onPress={() => setShowLocationPicker(true)}
-                   >
-                     <Text style={selectedLocation ? styles.formInputText : styles.formInputPlaceholder}>
-                       {selectedLocation?.address || 'Tap to select location on map'}
-                     </Text>
-                   </TouchableOpacity>
-                 </View>
+                <View style={styles.formGroup}>
+                  <Text style={styles.formLabel}>Event location</Text>
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    style={styles.formInputPressable}
+                    onPress={() => setShowLocationPicker(true)}
+                  >
+                    <Ionicons name="location-outline" size={18} color={COLORS.textMuted} />
+                    <Text style={selectedLocation ? styles.formInputText : styles.formInputPlaceholder} numberOfLines={1}>
+                      {selectedLocation?.address || 'Tap to select location on map'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
 
-                 {/* Promo Code Section - Inside Negotiation Modal */}
-                 <View style={styles.couponSection}>
-                   <Text style={styles.subsectionTitle}>Promo Code</Text>
-                   <View style={styles.couponRow}>
-                     <TextInput
-                       style={[styles.couponInput, couponApplied && styles.couponInputDisabled]}
-                       placeholder="Enter promo code"
-                       value={coupon}
-                       onChangeText={setCoupon}
-                       editable={!couponApplied}
-                     />
-                     <TouchableOpacity
-                       style={[styles.couponButton, couponApplied && styles.couponButtonApplied]}
-                       onPress={handleApplyCoupon}
-                       disabled={couponApplied}
-                     >
-                       <Text style={[styles.couponButtonText, couponApplied && styles.couponButtonTextApplied]}>
-                         {couponApplied ? 'Applied' : 'Apply'}
-                       </Text>
-                     </TouchableOpacity>
-                   </View>
-                   {promoError && (
-                     <View style={styles.discountRow}>
-                       <Ionicons name="alert-circle" size={16} color="#ef4444" />
-                       <Text style={[styles.discountText, { color: '#ef4444' }]}>{promoError}</Text>
-                     </View>
-                   )}
-                   {couponApplied && !promoError && (
-                     <View style={styles.discountRow}>
-                       <Ionicons name="checkmark-circle" size={16} color="#10b981" />
-                       <Text style={styles.discountText}>Discount applied: -{discount} MAD</Text>
-                     </View>
-                   )}
-                 </View>
-               </ScrollView>
-              
+                {/* Promo Code */}
+                <View style={styles.couponSection}>
+                  <Text style={styles.formLabel}>Promo code</Text>
+                  <View style={styles.couponRow}>
+                    <TextInput
+                      style={[styles.couponInput, couponApplied && styles.couponInputDisabled]}
+                      placeholder="Enter promo code"
+                      placeholderTextColor={COLORS.textSubtle}
+                      value={coupon}
+                      onChangeText={setCoupon}
+                      editable={!couponApplied}
+                      autoCapitalize="characters"
+                    />
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      style={[styles.couponButton, couponApplied && styles.couponButtonApplied]}
+                      onPress={handleApplyCoupon}
+                      disabled={couponApplied}
+                    >
+                      <Text style={[styles.couponButtonText, couponApplied && styles.couponButtonTextApplied]}>
+                        {couponApplied ? 'Applied' : 'Apply'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                  {promoError && (
+                    <View style={styles.discountRow}>
+                      <Ionicons name="alert-circle" size={14} color={COLORS.danger} />
+                      <Text style={[styles.discountText, { color: COLORS.danger }]}>{promoError}</Text>
+                    </View>
+                  )}
+                  {couponApplied && !promoError && (
+                    <View style={styles.discountRow}>
+                      <Ionicons name="checkmark-circle" size={14} color={COLORS.success} />
+                      <Text style={styles.discountText}>Discount applied: -{discount} MAD</Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Inline order summary */}
+                <View style={styles.orderSummary}>
+                  <Text style={styles.summaryTitle}>Order summary</Text>
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>Subtotal</Text>
+                    <Text style={styles.summaryValue}>{calculatePrice() + (couponApplied ? discount : 0)} MAD</Text>
+                  </View>
+                  {couponApplied && (
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>Discount</Text>
+                      <Text style={[styles.summaryValue, { color: COLORS.success }]}>-{discount} MAD</Text>
+                    </View>
+                  )}
+                  <View style={[styles.summaryRow, { marginTop: 8 }]}>
+                    <Text style={[styles.summaryLabel, { color: COLORS.text, fontWeight: '700' }]}>Total</Text>
+                    <Text style={[styles.summaryValue, { color: COLORS.text, fontSize: 18 }]}>{calculatePrice()} MAD</Text>
+                  </View>
+                </View>
+
+                <View style={{ height: 8 }} />
+              </ScrollView>
+
               <View style={styles.modalActions}>
-                <TouchableOpacity 
+                <TouchableOpacity
+                  activeOpacity={0.85}
                   onPress={() => setShowOfferForm(false)}
                   style={styles.modalCancel}
                 >
                   <Text style={styles.modalCancelText}>Cancel</Text>
                 </TouchableOpacity>
-                
-                <TouchableOpacity 
+
+                <TouchableOpacity
+                  activeOpacity={0.9}
                   onPress={handleFinalSubmit}
                   style={styles.modalSend}
                 >
-                  <Text style={styles.modalSendText}>Send Order</Text>
-                  <Ionicons name="send" size={16} color="#fff" />
+                  <Text style={styles.modalSendText}>Send order</Text>
+                  <Ionicons name="send" size={15} color="#fff" />
                 </TouchableOpacity>
               </View>
             </View>
@@ -1242,46 +1431,68 @@ export default function ServiceDetailScreen() {
         {/* Review Modal */}
         <Modal visible={showReviewForm} animationType="fade" transparent>
           <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
+            <View style={[styles.modalContent, styles.modalContentCompact]}>
+              <View style={styles.modalHandle} />
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Write a Review</Text>
-                <TouchableOpacity onPress={() => setShowReviewForm(false)}>
-                  <Ionicons name="close" size={24} color="#6b7280" />
+                <View>
+                  <Text style={styles.modalTitle}>Write a review</Text>
+                  <Text style={styles.modalSubtitle}>Rate your experience</Text>
+                </View>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  style={styles.modalCloseButton}
+                  onPress={() => setShowReviewForm(false)}
+                >
+                  <Ionicons name="close" size={22} color={COLORS.textMuted} />
                 </TouchableOpacity>
               </View>
-              
-              <Text style={styles.modalSubtitle}>Rate your experience</Text>
-              
-              <View style={styles.ratingSelector}>
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <TouchableOpacity
-                    key={star}
-                    onPress={() => setReviewRating(star)}
-                    style={styles.starButton}
-                  >
-                    <Ionicons
-                      name={star <= reviewRating ? 'star' : 'star-outline'}
-                      size={32}
-                      color={star <= reviewRating ? '#FFD700' : '#e5e7eb'}
-                    />
-                  </TouchableOpacity>
-                ))}
+
+              <View style={{ paddingHorizontal: 20 }}>
+                <View style={styles.ratingSelector}>
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <TouchableOpacity
+                      key={star}
+                      activeOpacity={0.7}
+                      onPress={() => setReviewRating(star)}
+                      style={styles.starButton}
+                    >
+                      <Ionicons
+                        name={star <= reviewRating ? 'star' : 'star-outline'}
+                        size={36}
+                        color={star <= reviewRating ? COLORS.gold : COLORS.border}
+                      />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <TextInput
+                  multiline
+                  numberOfLines={4}
+                  placeholder="Share your experience…"
+                  placeholderTextColor={COLORS.textSubtle}
+                  value={reviewText}
+                  onChangeText={setReviewText}
+                  style={styles.textArea}
+                />
+
+                {reviewError && (
+                  <View style={styles.discountRow}>
+                    <Ionicons name="alert-circle" size={14} color={COLORS.danger} />
+                    <Text style={[styles.discountText, { color: COLORS.danger }]}>{reviewError}</Text>
+                  </View>
+                )}
               </View>
-              
-              <TextInput
-                multiline
-                numberOfLines={4}
-                placeholder="Share your experience..."
-                value={reviewText}
-                onChangeText={setReviewText}
-                style={styles.textArea}
-              />
-              
+
               <View style={styles.modalActions}>
-                <TouchableOpacity onPress={() => setShowReviewForm(false)} style={styles.modalCancel}>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => setShowReviewForm(false)}
+                  style={styles.modalCancel}
+                >
                   <Text style={styles.modalCancelText}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
+                  activeOpacity={0.9}
                   onPress={async () => {
                     setReviewSubmitting(true);
                     setReviewError(null);
@@ -1327,151 +1538,158 @@ export default function ServiceDetailScreen() {
                   style={[styles.modalSend, (!reviewText.trim() || reviewSubmitting) && styles.modalSendDisabled]}
                   disabled={!reviewText.trim() || reviewSubmitting}
                 >
-                  <Text style={styles.modalSendText}>{reviewSubmitting ? 'Submitting...' : 'Submit Review'}</Text>
-                  <Ionicons name="checkmark" size={16} color="#fff" />
+                  {reviewSubmitting ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <>
+                      <Text style={styles.modalSendText}>Submit</Text>
+                      <Ionicons name="checkmark" size={16} color="#fff" />
+                    </>
+                  )}
                 </TouchableOpacity>
-                {reviewError && (
-                  <Text style={{ color: '#ef4444', marginTop: 8 }}>{reviewError}</Text>
-                )}
               </View>
             </View>
           </View>
-         </Modal>
+        </Modal>
 
-         {/* Location Picker Modal */}
-         <Modal visible={showLocationPicker} animationType="slide">
-           <View style={styles.locationPickerContainer}>
-             <View style={styles.locationPickerHeader}>
-               <TouchableOpacity onPress={() => setShowLocationPicker(false)}>
-                 <Text style={styles.locationCancelText}>Cancel</Text>
-               </TouchableOpacity>
-               <Text style={styles.locationPickerTitle}>Select Event Location</Text>
-               <TouchableOpacity
-                 onPress={async () => {
-                   if (selectedLocation) {
-                     setPersonalInfo(prev => ({
-                       ...prev,
-                       eventLocation: selectedLocation.address
-                     }));
-                     setShowLocationPicker(false);
-                   }
-                 }}
-                 disabled={!selectedLocation}
-               >
-                 <Text style={[styles.locationDoneText, !selectedLocation && styles.locationDoneTextDisabled]}>
-                   Done
-                 </Text>
-               </TouchableOpacity>
-             </View>
+        {/* Location Picker Modal */}
+        <Modal visible={showLocationPicker} animationType="slide">
+          <View style={styles.locationPickerContainer}>
+            <View style={styles.locationPickerHeader}>
+              <TouchableOpacity activeOpacity={0.7} onPress={() => setShowLocationPicker(false)}>
+                <Text style={styles.locationCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <Text style={styles.locationPickerTitle}>Select location</Text>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={async () => {
+                  if (selectedLocation) {
+                    setPersonalInfo(prev => ({
+                      ...prev,
+                      eventLocation: selectedLocation.address
+                    }));
+                    setShowLocationPicker(false);
+                  }
+                }}
+                disabled={!selectedLocation}
+              >
+                <Text style={[styles.locationDoneText, !selectedLocation && styles.locationDoneTextDisabled]}>
+                  Done
+                </Text>
+              </TouchableOpacity>
+            </View>
 
-             <MapView
-               style={styles.map}
-               initialRegion={{
-                 latitude: 33.5731, // Morocco default
-                 longitude: -7.5898,
-                 latitudeDelta: 0.0922,
-                 longitudeDelta: 0.0421,
-               }}
-               onPress={(event) => {
-                 const { latitude, longitude } = event.nativeEvent.coordinate;
-                 setSelectedLocation({
-                   latitude,
-                   longitude,
-                   address: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
-                 });
-               }}
-             >
-               {selectedLocation && (
-                 <Marker
-                   coordinate={{
-                     latitude: selectedLocation.latitude,
-                     longitude: selectedLocation.longitude,
-                   }}
-                   title="Selected Location"
-                 />
-               )}
-             </MapView>
+            <MapView
+              style={styles.map}
+              initialRegion={{
+                latitude: 33.5731,
+                longitude: -7.5898,
+                latitudeDelta: 0.0922,
+                longitudeDelta: 0.0421,
+              }}
+              onPress={(event) => {
+                const { latitude, longitude } = event.nativeEvent.coordinate;
+                setSelectedLocation({
+                  latitude,
+                  longitude,
+                  address: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
+                });
+              }}
+            >
+              {selectedLocation && (
+                <Marker
+                  coordinate={{
+                    latitude: selectedLocation.latitude,
+                    longitude: selectedLocation.longitude,
+                  }}
+                  title="Selected Location"
+                />
+              )}
+            </MapView>
 
-             <View style={styles.locationInfo}>
-               <Ionicons name="location" size={20} color="#6366f1" />
-               <Text style={styles.locationCoordinates}>
-                 {selectedLocation
-                   ? `${selectedLocation.latitude.toFixed(6)}, ${selectedLocation.longitude.toFixed(6)}`
-                   : 'Tap on map to select location'}
-               </Text>
-             </View>
-           </View>
-         </Modal>
+            <View style={styles.locationInfo}>
+              <View style={styles.locationInfoIcon}>
+                <Ionicons name="location" size={16} color={COLORS.primary} />
+              </View>
+              <Text style={styles.locationCoordinates}>
+                {selectedLocation
+                  ? `${selectedLocation.latitude.toFixed(6)}, ${selectedLocation.longitude.toFixed(6)}`
+                  : 'Tap on map to drop a pin'}
+              </Text>
+            </View>
+          </View>
+        </Modal>
 
-         {/* Full Screen Media Preview Modal */}
+        {/* Full Screen Media Preview Modal */}
         <Modal visible={showFullScreenPreview} animationType="fade" transparent>
           <View style={styles.fullScreenModal}>
             <View style={styles.fullScreenHeader}>
-              <TouchableOpacity onPress={handleClosePreview} style={styles.closeButton}>
-                <Ionicons name="close" size={28} color="#fff" />
+              <TouchableOpacity activeOpacity={0.7} onPress={handleClosePreview} style={styles.closeButton}>
+                <Ionicons name="close" size={26} color="#fff" />
               </TouchableOpacity>
-               {previewMedia?.type === 'image' && (
-                 <Text style={styles.mediaCounter}>
-                   {previewMedia.index + 1} / {mediaItems.length}
-                 </Text>
-               )}
+              {previewMedia?.type === 'image' && (
+                <Text style={styles.mediaCounter}>
+                  {previewMedia.index + 1} / {mediaItems.length}
+                </Text>
+              )}
             </View>
-            
+
             <View style={styles.fullScreenContent}>
               {previewMedia?.type === 'image' && (
                 <Image source={{ uri: previewMedia.uri }} style={styles.fullScreenImage} resizeMode="contain" />
               )}
-              
-                {previewMedia?.type === 'video' && (
-                  <Video
-                    source={{ uri: previewMedia.uri }}
-                    style={styles.fullScreenVideo}
-                    useNativeControls
-                    shouldPlay={true}
-                    isLooping={false}
-                    onError={(e) => {
-                      console.error('Video error:', e);
-                      Alert.alert('Video Error', 'Failed to load video. Please try again.');
-                    }}
-                    progressUpdateIntervalMillis={500}
-                  />
-                )}
+
+              {previewMedia?.type === 'video' && (
+                <Video
+                  source={{ uri: previewMedia.uri }}
+                  style={styles.fullScreenVideo}
+                  useNativeControls
+                  shouldPlay={true}
+                  isLooping={false}
+                  onError={(e) => {
+                    console.error('Video error:', e);
+                    Alert.alert('Video Error', 'Failed to load video. Please try again.');
+                  }}
+                  progressUpdateIntervalMillis={500}
+                />
+              )}
             </View>
-            
-             {/* Image Navigation - only for images */}
-             {previewMedia?.type === 'image' && defaultServiceData.images.length > 1 && (
-               <View style={styles.imageNavigation}>
-                 <TouchableOpacity 
-                   onPress={() => {
-                     const newIndex = Math.max(0, (previewMedia.index || 0) - 1);
-                     setPreviewMedia({
-                       type: 'image',
-                       uri: defaultServiceData.images[newIndex],
-                       index: newIndex
-                     });
-                   }}
-                   style={[styles.navButton, (previewMedia.index || 0) === 0 && styles.navButtonDisabled]}
-                   disabled={(previewMedia.index || 0) === 0}
-                 >
-                   <Ionicons name="chevron-back" size={24} color={(previewMedia.index || 0) === 0 ? "#ccc" : "#fff"} />
-                 </TouchableOpacity>
-                 
-                 <TouchableOpacity 
-                   onPress={() => {
-                     const newIndex = Math.min(defaultServiceData.images.length - 1, (previewMedia.index || 0) + 1);
-                     setPreviewMedia({
-                       type: 'image',
-                       uri: defaultServiceData.images[newIndex],
-                       index: newIndex
-                     });
-                   }}
-                   style={[styles.navButton, (previewMedia.index || 0) === defaultServiceData.images.length - 1 && styles.navButtonDisabled]}
-                   disabled={(previewMedia.index || 0) === defaultServiceData.images.length - 1}
-                 >
-                   <Ionicons name="chevron-forward" size={24} color={(previewMedia.index || 0) === defaultServiceData.images.length - 1 ? "#ccc" : "#fff"} />
-                 </TouchableOpacity>
-               </View>
-             )}
+
+            {previewMedia?.type === 'image' && defaultServiceData.images.length > 1 && (
+              <View style={styles.imageNavigation}>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    const newIndex = Math.max(0, (previewMedia.index || 0) - 1);
+                    setPreviewMedia({
+                      type: 'image',
+                      uri: defaultServiceData.images[newIndex],
+                      index: newIndex
+                    });
+                  }}
+                  style={[styles.navButton, (previewMedia.index || 0) === 0 && styles.navButtonDisabled]}
+                  disabled={(previewMedia.index || 0) === 0}
+                >
+                  <Ionicons name="chevron-back" size={22} color={(previewMedia.index || 0) === 0 ? "#666" : "#fff"} />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    const newIndex = Math.min(defaultServiceData.images.length - 1, (previewMedia.index || 0) + 1);
+                    setPreviewMedia({
+                      type: 'image',
+                      uri: defaultServiceData.images[newIndex],
+                      index: newIndex
+                    });
+                  }}
+                  style={[styles.navButton, (previewMedia.index || 0) === defaultServiceData.images.length - 1 && styles.navButtonDisabled]}
+                  disabled={(previewMedia.index || 0) === defaultServiceData.images.length - 1}
+                >
+                  <Ionicons name="chevron-forward" size={22} color={(previewMedia.index || 0) === defaultServiceData.images.length - 1 ? "#666" : "#fff"} />
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </Modal>
 
@@ -1483,124 +1701,118 @@ export default function ServiceDetailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#e4eaf0',
+    backgroundColor: COLORS.bg,
   },
-  
+
+  // ─── Header ──────────────────────────────────────────────
   header: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    height: 100,
+    height: Platform.OS === 'ios' ? 100 : 80,
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingBottom: 30,
-    paddingHorizontal: 20,
+    paddingBottom: 14,
+    paddingHorizontal: 16,
     zIndex: 1000,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
   },
-  
+  headerBorder: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: COLORS.border,
+  },
   headerButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#70a1d3',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.92)',
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
   },
-  
   headerTitle: {
     flex: 1,
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#1a1a1a',
-    marginHorizontal: 16,
+    color: COLORS.text,
+    marginHorizontal: 14,
   },
-  
+
   content: {
     flex: 1,
   },
-  
+
+  // ─── Hero / media ────────────────────────────────────────
   imageSection: {
     position: 'relative',
+    backgroundColor: '#0F172A',
   },
-  
   mainImage: {
     width: screenWidth,
-    height: screenWidth * 0.75,
-    backgroundColor: '#f1f5f9',
+    height: screenWidth * 0.78,
+    backgroundColor: COLORS.surfaceMuted,
   },
-  
-  saveButton: {
+  mediaCounterChip: {
     position: 'absolute',
-    top: 60,
-    right: 20,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    bottom: 38,
+    right: 16,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.72)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: RADIUS.pill,
   },
-  
-  thumbnailContainer: {
-    position: 'absolute',
-    bottom: 16,
-    left: 0,
-    right: 0,
-    paddingHorizontal: 20,
+  mediaCounterChipText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 5,
   },
-  
-    thumbnail: {
-      width: 72,      // unified size
-      height: 72,
-      borderRadius: 10,
-      marginRight: 10,
-      borderWidth: 2,
-      borderColor: 'transparent',
-      overflow: 'hidden',
-    },
-    thumbnailRow: {
-      flexDirection: 'row',
-      paddingVertical: 10,
-      paddingHorizontal: 4,
-      backgroundColor: '#f8fafc',
-    },
-  
+
+  // ─── Thumbnails ──────────────────────────────────────────
+  thumbnailRow: {
+    flexGrow: 0,
+    paddingTop: 14,
+    paddingBottom: 4,
+  },
+  thumbnail: {
+    width: 60,
+    height: 60,
+    borderRadius: RADIUS.md,
+    marginRight: 10,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    overflow: 'hidden',
+    backgroundColor: COLORS.surfaceMuted,
+  },
   thumbnailSelected: {
-    borderColor: '#6366f1',
+    borderColor: COLORS.primary,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
   },
-  
-   thumbnailImage: {
-     width: '100%',
-     height: '100%',
-   },
-
-    videoThumbnailContainer: {
-      width: 72,      // match thumbnail size exactly
-      height: 72,
-      borderRadius: 10,
-      overflow: 'hidden',
-      backgroundColor: '#1f2937',
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-
-   videoThumbnailOverlay: {
-     position: 'absolute',
-     top: 0,
-     left: 0,
-     right: 0,
-     bottom: 0,
-     backgroundColor: 'rgba(0,0,0,0.3)',
-     justifyContent: 'center',
-     alignItems: 'center',
-   },
-
+  thumbnailImage: {
+    width: '100%',
+    height: '100%',
+  },
+  videoThumbnailContainer: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#1f2937',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   videoThumbnailPlaceholder: {
     width: '100%',
     height: '100%',
@@ -1608,789 +1820,790 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#334155',
   },
-
   videoThumbnailLabel: {
     color: '#fff',
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '600',
-    marginTop: 4,
+    marginTop: 2,
+  },
+  videoThumbnailOverlay: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 
-  galleryHintText: {
-    marginTop: 10,
-    paddingHorizontal: 20,
-    fontSize: 14,
-    color: '#4b5563',
-  },
-
-   videoMainContainer: {
-     position: 'relative',
-   },
-
-   videoPlayButtonOverlay: {
-     position: 'absolute',
-     top: 0,
-     left: 0,
-     right: 0,
-     bottom: 0,
-     backgroundColor: 'rgba(0,0,0,0.2)',
-     justifyContent: 'center',
-     alignItems: 'center',
-   },
-
-   fullScreenVideo: {
-     width: screenWidth,
-     height: screenHeight * 0.8,
-   },
-  
+  // ─── Main content card ───────────────────────────────────
   mainContent: {
     flex: 1,
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    backgroundColor: COLORS.surface,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     marginTop: -24,
-    paddingTop: 24,
+    paddingTop: 8,
   },
-  
+
+  sectionDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: COLORS.divider,
+    marginHorizontal: 20,
+    marginVertical: 4,
+  },
+
+  // ─── Title ───────────────────────────────────────────────
   titleSection: {
     paddingHorizontal: 20,
-    marginBottom: 20,
+    paddingTop: 16,
+    paddingBottom: 18,
   },
-  
   title: {
-    fontSize: isSmallScreen ? 22 : 26,
+    fontSize: isSmallScreen ? 22 : 25,
     fontWeight: '700',
-    color: '#1a1a1a',
-    lineHeight: isSmallScreen ? 28 : 32,
-    marginBottom: 16,
+    color: COLORS.text,
+    lineHeight: isSmallScreen ? 28 : 31,
+    letterSpacing: -0.3,
+    marginBottom: 10,
   },
-  
-  tagsContainer: {
-    flexDirection: 'row',
-  },
-  
-  tag: {
-    backgroundColor: '#e0e7ff',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    marginRight: 8,
-  },
-  
-  tagText: {
-    color: '#6366f1',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  
-  providerSection: {
+  titleRatingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    marginBottom: 20,
+    marginBottom: 14,
   },
-  
+  starInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  ratingNumber: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginLeft: 4,
+  },
+  ratingDot: {
+    color: COLORS.textSubtle,
+    marginHorizontal: 6,
+    fontSize: 13,
+  },
+  ratingMeta: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    fontWeight: '500',
+  },
+  deliveryInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  tagsContainer: {
+    flexDirection: 'row',
+    marginHorizontal: -4,
+  },
+  tag: {
+    backgroundColor: COLORS.primarySoft,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: RADIUS.pill,
+    marginHorizontal: 4,
+  },
+  tagText: {
+    color: COLORS.primaryDark,
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.1,
+  },
+
+  // ─── Provider ────────────────────────────────────────────
+  providerSection: {
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+  },
+  providerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surfaceSubtle,
+    borderRadius: RADIUS.lg,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: COLORS.borderSoft,
+  },
   providerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
   },
-  
   providerAvatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     marginRight: 12,
+    backgroundColor: COLORS.surfaceMuted,
   },
-  
   providerInfo: {
     flex: 1,
   },
-  
   providerNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 4,
   },
-  
   providerName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1a1a1a',
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.text,
     marginRight: 8,
+    flexShrink: 1,
   },
-  
+  providerMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  providerMetaText: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    fontWeight: '500',
+  },
   levelBadge: {
-    backgroundColor: '#10b981',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: COLORS.success,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: RADIUS.pill,
   },
-  
   levelText: {
     color: '#fff',
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
-  
   ratingRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  
   ratingText: {
-    fontSize: 14,
-    color: '#6b7280',
-    marginLeft: 8,
+    fontSize: 13,
+    color: COLORS.textMuted,
+    marginLeft: 6,
+    fontWeight: '500',
   },
-  
-  contactButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#e0e7ff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    marginBottom: 24,
-  },
-  
-  statItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  
-  statText: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginLeft: 4,
-  },
-  
+
+  // ─── Description ─────────────────────────────────────────
   descriptionSection: {
     paddingHorizontal: 20,
-    marginBottom: 32,
+    paddingTop: 18,
+    paddingBottom: 22,
   },
-  
   sectionTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
-    color: '#1a1a1a',
-    marginBottom: 16,
+    color: COLORS.text,
+    marginBottom: 12,
+    letterSpacing: -0.2,
   },
-  
   description: {
-    fontSize: 16,
+    fontSize: 15,
     lineHeight: 24,
-    color: '#4b5563',
+    color: COLORS.textMuted,
   },
-  
+
+  // ─── Pricing / cards ─────────────────────────────────────
   pricingSection: {
     paddingHorizontal: 20,
-    marginBottom: 32,
+    paddingTop: 18,
+    paddingBottom: 8,
   },
-
   extrasSection: {
-    marginTop: 8,
-    marginBottom: 32,
+    marginTop: 18,
   },
-
-  extraCard: {
-    backgroundColor: '#eef2ff',
-    borderRadius: 16,
-    padding: 18,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#c7d2fe',
+  subsectionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
   },
-  
   serviceCard: {
-    backgroundColor: '#f8fafc',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
+    backgroundColor: COLORS.surfaceSubtle,
+    borderRadius: RADIUS.lg,
+    padding: 16,
+    marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: COLORS.borderSoft,
   },
-  
+  serviceCardActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primarySoft,
+  },
+  extraCard: {
+    backgroundColor: COLORS.surfaceSubtle,
+    borderRadius: RADIUS.lg,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: COLORS.borderSoft,
+  },
+  extraCardActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primarySoft,
+  },
   serviceHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
+    alignItems: 'flex-start',
+    marginBottom: 10,
+    gap: 12,
   },
-  
   serviceName: {
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: '600',
-    color: '#1a1a1a',
+    color: COLORS.text,
+    flex: 1,
+    lineHeight: 21,
   },
-  
   servicePrice: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#6366f1',
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.primaryDark,
   },
-  
-   quantitySelector: {
-     flexDirection: 'row',
-     alignItems: 'center',
-     justifyContent: 'space-between',
-   },
-   
-   quantityControls: {
+  serviceDescription: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    marginBottom: 12,
+    lineHeight: 19,
+  },
+
+  // ─── Quantity selector ───────────────────────────────────
+  quantitySelector: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#e2e8f0',
-    borderRadius: 12,
-    padding: 4,
+    justifyContent: 'space-between',
+    marginTop: 4,
   },
-  
+  quantityControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.md,
+    padding: 3,
+    borderWidth: 1,
+    borderColor: COLORS.borderSoft,
+  },
   quantityButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    backgroundColor: '#fff',
+    width: 32,
+    height: 32,
+    borderRadius: RADIUS.sm,
+    backgroundColor: COLORS.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
   },
-  
   quantityButtonDisabled: {
-    backgroundColor: '#f1f5f9',
+    backgroundColor: COLORS.surfaceMuted,
   },
-  
   quantityLabel: {
-    fontSize: 14,
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  maxQuantityText: {
+    fontSize: 11,
+    color: COLORS.textSubtle,
+    marginLeft: 8,
     fontWeight: '500',
-    color: '#6366f1',
-    marginRight: 8,
   },
-  
-   maxQuantityText: {
-     fontSize: 12,
-     color: '#94a3b8',
-     marginLeft: 8,
-   },
-
-    quantityText: {
-      fontSize: 16,
-      fontWeight: '600',
-      color: '#1a1a1a',
-      marginHorizontal: 16,
-      minWidth: 24,
-      textAlign: 'center',
-    },
-
-    formInputText: {
-      color: '#1a1a1a',
-    },
-
-    formInputPlaceholder: {
-      color: '#9ca3af',
-    },
-
-    subsectionTitle: {
-      fontSize: 16,
-      fontWeight: '600',
-      color: '#1a1a1a',
-      marginBottom: 12,
-    },
-  addonCardSelected: {
-    borderColor: '#6366f1',
-    backgroundColor: '#f0f9ff',
+  quantityText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginHorizontal: 14,
+    minWidth: 18,
+    textAlign: 'center',
   },
-  
-  addonLeft: {
+
+  // ─── Empty card ──────────────────────────────────────────
+  emptyCard: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
+    padding: 16,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.surfaceMuted,
+    borderWidth: 1,
+    borderColor: COLORS.borderSoft,
+    borderStyle: 'dashed',
+  },
+  emptyCardText: {
+    fontSize: 13,
+    color: COLORS.textMuted,
     flex: 1,
   },
-  
-  addonInfo: {
-    marginLeft: 12,
+
+  // ─── Form inputs ─────────────────────────────────────────
+  formInputText: {
+    color: COLORS.text,
+    fontSize: 15,
     flex: 1,
   },
-  
-  addonName: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#1a1a1a',
-    marginBottom: 2,
+  formInputPlaceholder: {
+    color: COLORS.textSubtle,
+    fontSize: 15,
+    flex: 1,
   },
-  
-  addonPrice: {
-    fontSize: 14,
-    color: '#6366f1',
-    fontWeight: '600',
-  },
-  
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: '#d1d5db',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  
-  checkboxSelected: {
-    backgroundColor: '#6366f1',
-    borderColor: '#6366f1',
-  },
-  
+
+  // ─── Coupon ──────────────────────────────────────────────
   couponSection: {
-    marginTop: 20,
+    marginTop: 4,
+    marginBottom: 18,
   },
-  
   couponRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    gap: 10,
   },
-  
   couponInput: {
     flex: 1,
     height: 48,
     borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    backgroundColor: '#fff',
-    fontSize: 16,
-    marginRight: 12,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 14,
+    backgroundColor: COLORS.surface,
+    fontSize: 15,
+    color: COLORS.text,
   },
-  
   couponInputDisabled: {
-    backgroundColor: '#f9fafb',
-    color: '#9ca3af',
+    backgroundColor: COLORS.surfaceMuted,
+    color: COLORS.textSubtle,
   },
-  
   couponButton: {
-    backgroundColor: '#6366f1',
+    backgroundColor: COLORS.primary,
     paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 12,
-    minWidth: 80,
+    height: 48,
+    borderRadius: RADIUS.md,
+    minWidth: 84,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  
   couponButtonApplied: {
-    backgroundColor: '#10b981',
+    backgroundColor: COLORS.success,
   },
-  
   couponButtonText: {
     color: '#fff',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
   },
-  
   couponButtonTextApplied: {
     color: '#fff',
   },
-  
   discountRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
     marginTop: 8,
   },
-  
   discountText: {
-    color: '#10b981',
-    fontSize: 14,
-    fontWeight: '500',
-    marginLeft: 6,
+    color: COLORS.success,
+    fontSize: 13,
+    fontWeight: '600',
   },
-  
+
+  // ─── Reviews ─────────────────────────────────────────────
   reviewsSection: {
     paddingHorizontal: 20,
-    marginBottom: 32,
+    paddingTop: 18,
+    paddingBottom: 20,
   },
-  
   reviewsHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
+    alignItems: 'flex-start',
+    marginBottom: 14,
   },
-  
+  reviewsSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  reviewsSummaryText: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    fontWeight: '500',
+  },
   addReviewButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#e0e7ff',
+    gap: 4,
+    backgroundColor: COLORS.primarySoft,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 8,
+    borderRadius: RADIUS.md,
   },
-  
   addReviewText: {
-    color: '#6366f1',
-    fontSize: 14,
-    fontWeight: '500',
-    marginLeft: 4,
+    color: COLORS.primaryDark,
+    fontSize: 13,
+    fontWeight: '700',
   },
-  
   reviewCard: {
-    backgroundColor: '#f8fafc',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: COLORS.surfaceSubtle,
+    borderRadius: RADIUS.lg,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: COLORS.borderSoft,
   },
-  
   reviewHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 10,
+    gap: 10,
   },
-  
+  reviewAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: COLORS.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reviewAvatarText: {
+    color: COLORS.primaryDark,
+    fontSize: 13,
+    fontWeight: '700',
+  },
   reviewUser: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#1a1a1a',
+    color: COLORS.text,
+    marginBottom: 2,
   },
-  
   reviewDate: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: COLORS.textSubtle,
+    marginLeft: 4,
   },
-  
   reviewRating: {
     flexDirection: 'row',
-    marginBottom: 8,
+    alignItems: 'center',
   },
-  
   reviewText: {
     fontSize: 14,
     lineHeight: 20,
-    color: '#4b5563',
+    color: COLORS.textMuted,
   },
-  
   showMoreButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 12,
-    marginTop: 8,
+    marginTop: 4,
+    gap: 4,
   },
-  
   showMoreText: {
-    color: '#6366f1',
+    color: COLORS.primaryDark,
     fontSize: 14,
-    fontWeight: '500',
-    marginRight: 4,
+    fontWeight: '600',
   },
-  
+
+  // ─── Action bar ──────────────────────────────────────────
   actionBar: {
     position: 'absolute',
-    bottom: 0,
+    bottom: TOTAL_TAB_BAR_HEIGHT,
     left: 0,
     right: 0,
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.surface,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 16,
-    paddingBottom: Platform.OS === 'ios' ? 30 : 120,
-    borderTopWidth: 1,
-    borderTopColor: '#e2e8f0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 10,
+    paddingTop: 12,
+    paddingBottom: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.border,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 12,
+    zIndex: 20,
   },
-  
   priceSection: {
     flex: 1,
-    marginRight: 16,
+    marginRight: 14,
   },
-  
   totalLabel: {
-    fontSize: 14,
-    color: '#6b7280',
+    fontSize: 12,
+    color: COLORS.textMuted,
     marginBottom: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    fontWeight: '600',
   },
-  
+  totalRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 5,
+  },
   totalPrice: {
     fontSize: 24,
-    fontWeight: '700',
-    color: '#1a1a1a',
+    fontWeight: '800',
+    color: COLORS.text,
+    letterSpacing: -0.5,
   },
-  
+  totalCurrency: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    fontWeight: '600',
+  },
   continueButton: {
-    backgroundColor: '#6366f1',
+    backgroundColor: COLORS.primary,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 24,
+    gap: 8,
+    paddingHorizontal: 22,
     paddingVertical: 14,
-    borderRadius: 16,
-    shadowColor: '#6366f1',
+    borderRadius: RADIUS.md,
+    shadowColor: COLORS.primary,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    shadowOpacity: 0.32,
+    shadowRadius: 10,
     elevation: 6,
   },
-  
   continueButtonText: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    marginRight: 8,
+    fontSize: 15,
+    fontWeight: '700',
   },
-  
+
+  // ─── Modal ───────────────────────────────────────────────
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end', // Changed back to flex-end for bottom slide-up
+    backgroundColor: COLORS.overlay,
+    justifyContent: 'flex-end',
   },
-  
   modalContent: {
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     width: '100%',
-    height: screenHeight * 0.90, // Increased to 90% of screen height
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 10,
+    maxHeight: screenHeight * 0.96,
+    paddingBottom: Platform.OS === 'ios' ? 10 : 0,
   },
-  
+  modalContentCompact: {
+    paddingBottom: Platform.OS === 'ios' ? 20 : 12,
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: COLORS.border,
+    alignSelf: 'center',
+    marginTop: 10,
+    marginBottom: 4,
+  },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-    paddingTop: 24,
+    alignItems: 'flex-start',
+    paddingTop: 14,
     paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
     paddingBottom: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.divider,
   },
-  
+  modalCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: COLORS.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   modalTitle: {
-    fontSize: 20,
+    fontSize: 19,
     fontWeight: '700',
-    color: '#1a1a1a',
+    color: COLORS.text,
+    letterSpacing: -0.3,
   },
-  
   modalSubtitle: {
-    fontSize: 14,
-    color: '#6b7280',
-    marginBottom: 20,
+    fontSize: 13,
+    color: COLORS.textMuted,
+    marginTop: 3,
+    maxWidth: screenWidth - 100,
   },
-  
+  modalScrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+  },
   textArea: {
     borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    backgroundColor: '#f8fafc',
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.md,
+    padding: 14,
+    fontSize: 15,
+    color: COLORS.text,
+    backgroundColor: COLORS.surface,
     textAlignVertical: 'top',
-    minHeight: 120,
-    marginBottom: 20,
+    minHeight: 110,
   },
-  
   modalPriceRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#f8fafc',
+    backgroundColor: COLORS.surfaceSubtle,
     padding: 16,
-    borderRadius: 12,
+    borderRadius: RADIUS.md,
     marginBottom: 20,
   },
-  
   modalPriceLabel: {
-    fontSize: 16,
-    color: '#4b5563',
+    fontSize: 15,
+    color: COLORS.textMuted,
   },
-  
   modalPriceValue: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
-    color: '#1a1a1a',
+    color: COLORS.text,
   },
-  
   modalActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: 12,
+    gap: 10,
     paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#f1f5f9',
-    backgroundColor: '#fff',
+    paddingVertical: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.divider,
+    backgroundColor: COLORS.surface,
   },
-  
   modalCancel: {
     flex: 1,
-    backgroundColor: '#f1f5f9',
-    paddingVertical: 16,
-    borderRadius: 12,
+    backgroundColor: COLORS.surfaceMuted,
+    paddingVertical: 15,
+    borderRadius: RADIUS.md,
     alignItems: 'center',
   },
-  
   modalCancelText: {
-    color: '#6b7280',
-    fontSize: 16,
-    fontWeight: '600',
+    color: COLORS.textMuted,
+    fontSize: 15,
+    fontWeight: '700',
   },
-  
   modalSend: {
     flex: 2,
-    backgroundColor: '#6366f1',
-    paddingVertical: 16,
-    borderRadius: 12,
+    backgroundColor: COLORS.primary,
+    paddingVertical: 15,
+    borderRadius: RADIUS.md,
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'center',
+    gap: 6,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.28,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  
   modalSendDisabled: {
-    backgroundColor: '#9ca3af',
+    backgroundColor: COLORS.textSubtle,
+    shadowOpacity: 0,
+    elevation: 0,
   },
-  
   modalSendText: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    marginRight: 8,
+    fontSize: 15,
+    fontWeight: '700',
   },
-  
+
+  // ─── Review modal star selector ─────────────────────────
   ratingSelector: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 20,
-    gap: 8,
+    marginBottom: 18,
+    marginTop: 8,
+    gap: 6,
   },
-  
   starButton: {
     padding: 4,
   },
-  
-  // Loading state styles
+
+  // ─── Loading & error ─────────────────────────────────────
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f9fafb',
+    backgroundColor: COLORS.bg,
+    padding: 20,
+  },
+  loadingCard: {
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: 32,
+    paddingVertical: 28,
+    borderRadius: RADIUS.lg,
+    alignItems: 'center',
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
   },
   loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#6366f1',
+    marginTop: 14,
+    fontSize: 14,
+    color: COLORS.textMuted,
     fontWeight: '500',
   },
-  
-  // Error state styles
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f9fafb',
-    padding: 20,
+    backgroundColor: COLORS.bg,
+    padding: 24,
+  },
+  errorIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: COLORS.dangerSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 6,
   },
   errorText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#f43f5e',
+    fontSize: 14,
+    color: COLORS.textMuted,
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 24,
+    lineHeight: 21,
+    maxWidth: 320,
   },
   errorButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    backgroundColor: '#6366f1',
-    borderRadius: 8,
+    paddingVertical: 13,
+    paddingHorizontal: 22,
+    backgroundColor: COLORS.primary,
+    borderRadius: RADIUS.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   errorButtonText: {
-    color: '#ffffff',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  
-  // Service Item Selection Styles
-  serviceItemsSelection: {
-    marginBottom: 20,
-  },
-  
-  serviceItemCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-  },
-  
-  serviceItemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  
-  serviceItemInfo: {
-    flex: 1,
-  },
-  
-  serviceItemDescription: {
-    fontSize: 14,
-    color: '#6b7280',
-    marginTop: 8,
-    lineHeight: 20,
-  },
-  
-  serviceItemToggleButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f0f9ff',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#6366f1',
-  },
-  
-  serviceItemToggleButtonSelected: {
-    backgroundColor: '#ecfdf5',
-    borderColor: '#10b981',
-  },
-  
-  serviceItemToggleText: {
-    marginLeft: 4,
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#6366f1',
-  },
-  
-  serviceItemToggleTextSelected: {
-    color: '#10b981',
-  },
-  
-  serviceDescription: {
-    fontSize: 14,
-    color: '#6b7280',
-    marginTop: 2,
-    marginBottom: 12,
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 15,
   },
 
-  // Multi-step form styles
+  // ─── Multi-step form (kept; unused but preserved) ────────
   stepIndicator: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -2398,397 +2611,517 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     paddingHorizontal: 20,
   },
-
   stepIndicatorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
   },
-
   stepCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
   },
-
   stepCircleActive: {
-    backgroundColor: '#6366f1',
-    borderColor: '#6366f1',
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
   },
-
   stepCircleInactive: {
-    backgroundColor: '#f3f4f6',
-    borderColor: '#d1d5db',
+    backgroundColor: COLORS.surfaceMuted,
+    borderColor: COLORS.border,
   },
-
   stepText: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '700',
   },
-
   stepTextActive: {
-    color: '#ffffff',
+    color: '#fff',
   },
-
   stepTextInactive: {
-    color: '#9ca3af',
+    color: COLORS.textSubtle,
   },
-
   stepLine: {
     flex: 1,
     height: 2,
     marginHorizontal: 8,
   },
-
   stepLineActive: {
-    backgroundColor: '#6366f1',
+    backgroundColor: COLORS.primary,
   },
-
   stepLineInactive: {
-    backgroundColor: '#d1d5db',
-  },
-
-  modalScrollContent: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    // Removed maxHeight restriction to allow full form visibility
+    backgroundColor: COLORS.border,
   },
 
   budgetHint: {
-    fontSize: 14,
-    color: '#6b7280',
-    marginBottom: 16,
+    fontSize: 13,
+    color: COLORS.textMuted,
+    marginBottom: 14,
     textAlign: 'center',
   },
-
   budgetInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 20,
+    backgroundColor: COLORS.surfaceSubtle,
+    borderRadius: RADIUS.md,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: COLORS.borderSoft,
   },
-
   budgetInput: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#1f2937',
+    fontSize: 30,
+    fontWeight: '800',
+    color: COLORS.text,
     textAlign: 'center',
-    minWidth: 120,
-    borderBottomWidth: 2,
-    borderBottomColor: '#6366f1',
-    paddingBottom: 8,
-    marginRight: 8,
+    minWidth: 100,
+    paddingHorizontal: 8,
+    letterSpacing: -0.5,
   },
-
   currencyLabel: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#6b7280',
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+    marginLeft: 4,
   },
-
   budgetComparison: {
-    backgroundColor: '#f8fafc',
-    borderRadius: 12,
+    backgroundColor: COLORS.surfaceSubtle,
+    borderRadius: RADIUS.md,
     padding: 16,
   },
-
   budgetComparisonRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
   },
-
   budgetComparisonLabel: {
     fontSize: 14,
-    color: '#6b7280',
+    color: COLORS.textMuted,
   },
-
   budgetComparisonValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1f2937',
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.text,
   },
-
   budgetLower: {
-    color: '#dc2626',
+    color: COLORS.danger,
   },
-
   budgetHigher: {
-    color: '#059669',
+    color: COLORS.success,
   },
 
   formGroup: {
     marginBottom: 16,
   },
-
   formLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    color: '#374151',
+    color: COLORS.text,
     marginBottom: 8,
   },
-
   formInput: {
     borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    backgroundColor: '#ffffff',
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 14,
+    paddingVertical: Platform.OS === 'ios' ? 13 : 11,
+    fontSize: 15,
+    backgroundColor: COLORS.surface,
+    color: COLORS.text,
   },
-
+  formInputPressable: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    backgroundColor: COLORS.surface,
+  },
   formRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
-
   formGroupHalf: {
     flex: 1,
     marginRight: 8,
   },
 
   orderSummary: {
-    backgroundColor: '#f8fafc',
-    borderRadius: 12,
+    backgroundColor: COLORS.surfaceSubtle,
+    borderRadius: RADIUS.lg,
     padding: 16,
-    marginTop: 20,
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: COLORS.borderSoft,
   },
-
   summaryTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1f2937',
-    marginBottom: 12,
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
   },
-
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
   },
-
   summaryLabel: {
     fontSize: 14,
-    color: '#6b7280',
+    color: COLORS.textMuted,
   },
-
   summaryValue: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#1f2937',
+    fontWeight: '600',
+    color: COLORS.text,
   },
-  
-  // Video Section Styles
+
+  // ─── Video sections ─────────────────────────────────────
   videoSection: {
     paddingHorizontal: 20,
     marginBottom: 32,
   },
-  
   videoContainer: {
-    backgroundColor: '#f8fafc',
-    borderRadius: 16,
+    backgroundColor: COLORS.surfaceSubtle,
+    borderRadius: RADIUS.lg,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: COLORS.borderSoft,
   },
-  
   videoPlaceholder: {
     height: 200,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f1f5f9',
+    backgroundColor: COLORS.surfaceMuted,
   },
-  
   videoPlaceholderText: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#6366f1',
-    marginTop: 12,
+    color: COLORS.primary,
+    marginTop: 10,
   },
-  
   videoPlaceholderSubtext: {
-    fontSize: 14,
-    color: '#6b7280',
+    fontSize: 13,
+    color: COLORS.textMuted,
     marginTop: 4,
   },
-  
-  // Full Screen Preview Styles
+  videoMainContainer: {
+    position: 'relative',
+  },
+  videoPlayButtonOverlay: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  videoPlayerPlaceholder: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#0F172A',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  videoPlayerText: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#fff',
+    marginTop: 14,
+  },
+  videoPlayerSubtext: {
+    fontSize: 14,
+    color: '#ccc',
+    marginTop: 6,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
+  galleryHintText: {
+    marginTop: 10,
+    paddingHorizontal: 20,
+    fontSize: 13,
+    color: COLORS.textMuted,
+  },
+
+  // ─── Full screen preview ─────────────────────────────────
   fullScreenModal: {
     flex: 1,
     backgroundColor: '#000',
   },
-  
   fullScreenHeader: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 80,
+    top: 0, left: 0, right: 0,
+    height: 90,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-end',
     paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingBottom: 18,
     zIndex: 10,
   },
-  
   closeButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  
   mediaCounter: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    fontSize: 14,
+    fontWeight: '700',
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: RADIUS.pill,
   },
-  
   fullScreenContent: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  
   fullScreenImage: {
+    width: screenWidth,
+    height: screenHeight * 0.85,
+  },
+  fullScreenVideo: {
     width: screenWidth,
     height: screenHeight * 0.8,
   },
-  
   fullScreenVideoContainer: {
     width: screenWidth,
     height: screenHeight * 0.8,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  
-  videoPlayerPlaceholder: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#1a1a1a',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  
-  videoPlayerText: {
-    fontSize: 24,
-    fontWeight: '600',
-    color: '#fff',
-    marginTop: 16,
-  },
-  
-  videoPlayerSubtext: {
-    fontSize: 16,
-    color: '#ccc',
-    marginTop: 8,
-    textAlign: 'center',
-    paddingHorizontal: 20,
-  },
-  
   playButton: {
     position: 'absolute',
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(99, 102, 241, 0.8)',
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: 'rgba(99, 102, 241, 0.85)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  
   imageNavigation: {
     position: 'absolute',
-    bottom: 100,
-    left: 0,
-    right: 0,
+    bottom: 80,
+    left: 0, right: 0,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 40,
+    paddingHorizontal: 30,
   },
-  
   navButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  
-   navButtonDisabled: {
-     backgroundColor: 'rgba(0,0,0,0.2)',
-   },
+  navButtonDisabled: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
 
-   // Location Picker Styles
-   locationPickerContainer: {
-     flex: 1,
-     backgroundColor: '#fff',
-   },
+  // ─── Location picker ────────────────────────────────────
+  locationPickerContainer: {
+    flex: 1,
+    backgroundColor: COLORS.surface,
+  },
+  locationPickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'ios' ? 54 : 18,
+    paddingBottom: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    zIndex: 10,
+    elevation: 5,
+  },
+  locationCancelText: {
+    fontSize: 15,
+    color: COLORS.textMuted,
+    fontWeight: '600',
+  },
+  locationPickerTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  locationDoneText: {
+    fontSize: 15,
+    color: COLORS.primary,
+    fontWeight: '700',
+  },
+  locationDoneTextDisabled: {
+    color: COLORS.textSubtle,
+  },
+  map: {
+    flex: 1,
+  },
+  locationInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    gap: 10,
+    backgroundColor: COLORS.surfaceSubtle,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.border,
+  },
+  locationInfoIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: COLORS.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locationCoordinates: {
+    fontSize: 13,
+    color: COLORS.text,
+    fontWeight: '500',
+    flex: 1,
+  },
 
-   locationPickerHeader: {
-     flexDirection: 'row',
-     justifyContent: 'space-between',
-     alignItems: 'center',
-     paddingHorizontal: 20,
-     paddingVertical: 16,
-     borderBottomWidth: 1,
-     borderBottomColor: '#e2e8f0',
-     backgroundColor: '#fff',
-     zIndex: 10,
-     elevation: 5,
-   },
+  // ─── Service items / addons (kept for compatibility) ────
+  serviceItemsSelection: {
+    marginBottom: 20,
+  },
+  serviceItemCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.md,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: COLORS.borderSoft,
+  },
+  serviceItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  serviceItemInfo: {
+    flex: 1,
+  },
+  serviceItemDescription: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    marginTop: 6,
+    lineHeight: 19,
+  },
+  serviceItemToggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.primarySoft,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: RADIUS.sm,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+  },
+  serviceItemToggleButtonSelected: {
+    backgroundColor: COLORS.successSoft,
+    borderColor: COLORS.success,
+  },
+  serviceItemToggleText: {
+    marginLeft: 4,
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  serviceItemToggleTextSelected: {
+    color: COLORS.success,
+  },
 
-   locationCancelText: {
-     fontSize: 16,
-     color: '#6b7280',
-     fontWeight: '500',
-   },
+  // ─── Add-ons (kept) ─────────────────────────────────────
+  addonCardSelected: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primarySoft,
+  },
+  addonLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  addonInfo: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  addonName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 2,
+  },
+  addonPrice: {
+    fontSize: 14,
+    color: COLORS.primary,
+    fontWeight: '700',
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxSelected: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
 
-   locationPickerTitle: {
-     fontSize: 16,
-     fontWeight: '600',
-     color: '#1a1a1a',
-   },
-
-   locationDoneText: {
-     fontSize: 16,
-     color: '#6366f1',
-     fontWeight: '600',
-   },
-
-   locationDoneTextDisabled: {
-     color: '#9ca3af',
-   },
-
-   map: {
-     flex: 1,
-   },
-
-   locationInfo: {
-     flexDirection: 'row',
-     alignItems: 'center',
-     justifyContent: 'center',
-     padding: 16,
-     backgroundColor: '#f8fafc',
-     borderTopWidth: 1,
-     borderTopColor: '#e2e8f0',
-   },
-
-   locationCoordinates: {
-     fontSize: 14,
-     color: '#4b5563',
-     marginLeft: 8,
-   },
+  // ─── Misc save button (kept) ────────────────────────────
+  saveButton: {
+    position: 'absolute',
+    top: 60,
+    right: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  thumbnailContainer: {
+    position: 'absolute',
+    bottom: 16,
+    left: 0, right: 0,
+    paddingHorizontal: 20,
+  },
+  contactButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: COLORS.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    marginBottom: 24,
+  },
+  statItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  statText: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginLeft: 4,
+  },
 });

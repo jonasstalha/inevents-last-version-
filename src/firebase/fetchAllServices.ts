@@ -1,5 +1,26 @@
-import { collection, doc, getDoc, getDocs, getFirestore, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, getFirestore } from 'firebase/firestore';
 import app from './firebaseConfig';
+
+const normalizeExtrasValue = (value: any): any[] => {
+  if (Array.isArray(value)) {
+    return value.filter(Boolean);
+  }
+  if (value && typeof value === 'object') {
+    return Object.values(value).filter(Boolean);
+  }
+  return [];
+};
+
+const resolveServiceExtras = (data: any): any[] => {
+  const candidates = [data?.extras, data?.addOns, data?.extraServices, data?.extraServicesList];
+  for (const candidate of candidates) {
+    const normalized = normalizeExtrasValue(candidate);
+    if (normalized.length > 0) {
+      return normalized;
+    }
+  }
+  return normalizeExtrasValue(data?.extras ?? data?.addOns ?? data?.extraServices ?? data?.extraServicesList);
+};
 
 // Fetch all services from all users
 export const fetchAllServicesFromFirebase = async () => {
@@ -11,7 +32,7 @@ export const fetchAllServicesFromFirebase = async () => {
     const servicesRef = collection(db, 'users', userDoc.id, 'services');
     const servicesSnap = await getDocs(servicesRef);
     for (const serviceDoc of servicesSnap.docs) {
-      const serviceData = { id: serviceDoc.id, ...serviceDoc.data(), userId: userDoc.id };
+      const serviceData: any = { id: serviceDoc.id, ...serviceDoc.data(), userId: userDoc.id };
       
       // Fetch comments to calculate rating
       try {
@@ -38,12 +59,32 @@ export const fetchAllServicesFromFirebase = async () => {
         serviceData.totalRating = totalRating;
         serviceData.totalRaters = totalRaters;
         serviceData.ordersCount = serviceData.ordersCount || 0;
+        const normalizedExtras = Array.isArray(serviceData.extras)
+          ? serviceData.extras
+          : Array.isArray(serviceData.addOns)
+            ? serviceData.addOns
+            : Array.isArray(serviceData.extraServices)
+              ? serviceData.extraServices
+              : [];
+        serviceData.extras = normalizedExtras;
+        serviceData.addOns = Array.isArray(serviceData.addOns) ? serviceData.addOns : normalizedExtras;
+        serviceData.extraServices = Array.isArray(serviceData.extraServices) ? serviceData.extraServices : normalizedExtras;
       } catch (error) {
         console.error("Error fetching comments for service:", serviceDoc.id, error);
         serviceData.comments = [];
         serviceData.totalRating = 0;
         serviceData.totalRaters = 0;
         serviceData.ordersCount = 0;
+        const fallbackExtras = Array.isArray(serviceData.extras)
+          ? serviceData.extras
+          : Array.isArray(serviceData.addOns)
+            ? serviceData.addOns
+            : Array.isArray(serviceData.extraServices)
+              ? serviceData.extraServices
+              : [];
+        serviceData.extras = fallbackExtras;
+        serviceData.addOns = Array.isArray(serviceData.addOns) ? serviceData.addOns : fallbackExtras;
+        serviceData.extraServices = Array.isArray(serviceData.extraServices) ? serviceData.extraServices : fallbackExtras;
       }
       
       allServices.push(serviceData);
@@ -75,7 +116,16 @@ export const fetchServiceByIdFromFirebase = async (serviceId: string) => {
           ...doc.data(),
         }));
         
-        // Return service with comments and user info
+        // Normalize extras/addOns and return service with comments and user info
+        const normalizedExtras = resolveServiceExtras(serviceData);
+
+        serviceData.extras = normalizedExtras;
+        serviceData.addOns = normalizeExtrasValue(serviceData.addOns).length > 0
+          ? normalizeExtrasValue(serviceData.addOns)
+          : normalizedExtras;
+        serviceData.extraServices = normalizeExtrasValue(serviceData.extraServices).length > 0
+          ? normalizeExtrasValue(serviceData.extraServices)
+          : normalizedExtras;
         return { 
           id: serviceSnap.id, 
           ...serviceData, 
@@ -84,6 +134,16 @@ export const fetchServiceByIdFromFirebase = async (serviceId: string) => {
         };
       } catch (error) {
         console.error("Error fetching comments:", error);
+        const fallbackExtras = Array.isArray(serviceData.extras)
+          ? serviceData.extras
+          : Array.isArray(serviceData.addOns)
+            ? serviceData.addOns
+            : Array.isArray(serviceData.extraServices)
+              ? serviceData.extraServices
+              : [];
+        serviceData.extras = fallbackExtras;
+        serviceData.addOns = Array.isArray(serviceData.addOns) ? serviceData.addOns : fallbackExtras;
+        serviceData.extraServices = Array.isArray(serviceData.extraServices) ? serviceData.extraServices : fallbackExtras;
         // Still return the service even if comments fetch fails
         return { 
           id: serviceSnap.id, 

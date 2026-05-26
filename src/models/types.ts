@@ -44,6 +44,7 @@ export interface Gig {
   video?: string;
   category: string;
   options: GigOption[];
+  extras?: GigOption[];
   rating: number;
   reviewCount: number;
   createdAt: Date;
@@ -135,6 +136,12 @@ export interface Order {
     location?: string;
     guestCount?: string;
     specificRequests?: string;
+    latitude?: number;
+    longitude?: number;
+    locationCoordinates?: {
+      latitude: number;
+      longitude: number;
+    };
   };
   priceProposal?: {
     proposedPrice?: string;
