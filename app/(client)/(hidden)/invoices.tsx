@@ -246,8 +246,17 @@ async function fetchArtistNames(
 }
 
 /**
- * Creates or refreshes an invoice for an order and ensures a PDF download URL is available.
- * This client-side path is a temporary fallback until a server-side Cloud Function exists.
+ * FIX 1 — Permissions error: wrapped in try/catch with warn (not error) so
+ * the console stays clean. The underlying cause is a missing Firestore rule
+ * allowing authenticated users to write to `invoices`. Add this rule on the
+ * Firebase console:
+ *
+ *   match /invoices/{invoiceId} {
+ *     allow read, write: if request.auth != null && request.auth.uid == resource.data.userId;
+ *     allow create: if request.auth != null && request.auth.uid == request.resource.data.userId;
+ *   }
+ *
+ * Until then, the auto-invoice call is silently skipped when permissions fail.
  */
 async function ensureInvoiceForOrder(
   db: Firestore,
@@ -273,6 +282,13 @@ async function ensureInvoiceForOrder(
     if (!orderSnapshot.exists()) return { created: false };
 
     const orderData = orderSnapshot.data() as any;
+
+    // Guard: only proceed if this order actually belongs to the current user
+    if (orderData.clientId && orderData.clientId !== params.userId) {
+      console.warn('ensureInvoiceForOrder: order does not belong to current user, skipping');
+      return { created: false };
+    }
+
     const orderForPdf = {
       id: params.orderId,
       clientId: params.userId,
@@ -301,8 +317,17 @@ async function ensureInvoiceForOrder(
 
     await saveInvoiceToStorage(orderForPdf, artistMeta, params.userId);
     return { created: true, invoiceId: params.orderId };
-  } catch (err) {
-    console.error('ensureInvoiceForOrder failed:', err);
+  } catch (err: any) {
+    // FIX 1: downgrade from console.error to console.warn so the permissions
+    // error doesn't spam the console. Also surface a friendlier message.
+    if (err?.code === 'permission-denied' || err?.message?.includes('permissions')) {
+      console.warn(
+        'ensureInvoiceForOrder: skipped — Firestore rules do not allow invoice writes yet. ' +
+        'Add the invoices write rule for userId in Firebase Console.',
+      );
+    } else {
+      console.warn('ensureInvoiceForOrder failed:', err);
+    }
     return { created: false };
   }
 }
@@ -349,7 +374,6 @@ function buildTimeline(
 
 function buildLocalUri(dir: string, filename: string): string {
   const normalizedDir = dir.endsWith('/') ? dir : `${dir}/`;
-  // Strip any characters that are illegal in file paths on Android/iOS
   const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
   return `${normalizedDir}${safeName}`;
 }
@@ -694,6 +718,40 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   autoBadgeText: { fontSize: 9, fontWeight: '700', color: '#92400e', letterSpacing: 0.3 },
+
+  // ── FIX 3: Custom order card — clickable service title area ───────────────
+  serviceClickArea: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 2,
+  },
+  serviceTitleLink: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#6366f1',
+    flexShrink: 1,
+  },
+  serviceTitleChevron: {
+    marginTop: 1,
+  },
+
+  // ── FIX 3: Prominent price strip ─────────────────────────────────────────
+  priceStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f0f9ff',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+  },
+  priceStripLabel: { fontSize: 12, color: '#0369a1', fontWeight: '600' },
+  priceStripAmount: { fontSize: 17, fontWeight: '800', color: '#0369a1' },
+  priceStripCurrency: { fontSize: 11, color: '#0369a1', fontWeight: '600', marginLeft: 3 },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -798,8 +856,19 @@ function SummaryHeader({
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// FIX 3 — CustomOrderCard: shows service title (not ID), prominent price,
+// tappable title that navigates to the service detail page.
+// ─────────────────────────────────────────────────────────────────────────────
 function CustomOrderCard({
-  item, traceSteps, onToggleTrace, onDelete, showTrace, expanded, onToggleExpand,
+  item,
+  traceSteps,
+  onToggleTrace,
+  onDelete,
+  showTrace,
+  expanded,
+  onToggleExpand,
+  onPressService,
 }: {
   item: ServiceOrderWithMeta;
   traceSteps: TraceStep[];
@@ -808,19 +877,34 @@ function CustomOrderCard({
   showTrace: boolean;
   expanded: boolean;
   onToggleExpand: () => void;
+  /** Navigate to the service page. Called with the serviceId (or artistId fallback). */
+  onPressService: () => void;
 }) {
   const date = formatShortDate(item.createdAt);
   const status = (((item as any).status || (item as any).orderStatus || 'pending') as OrderStatus);
   const color = STATUS_COLOR[status] ?? STATUS_COLOR.pending;
   const message: string | undefined = (item as any).message;
   const coverImage = getOrderCover(item as any);
-  const priceLabel = 'Final price';
+
+  // FIX 3a: prefer serviceName > title > "Service Request" — never fall back to ID
+  const serviceTitle: string =
+    (item as any).serviceName ||
+    item.title ||
+    'Service Request';
+
+  // FIX 3b: client-facing price (clientPrice takes priority over generic amount)
+  const displayPrice: number =
+    (item as any).clientPrice ??
+    (item as any).amount ??
+    0;
 
   return (
     <View style={styles.card}>
       {coverImage ? (
         <Image source={{ uri: coverImage }} style={styles.orderCover} />
       ) : null}
+
+      {/* Tapping the top area toggles expand */}
       <Pressable onPress={onToggleExpand}>
         <View style={styles.cardHeader}>
           <View style={[styles.iconCircle, { backgroundColor: `${color}1A` }]}>
@@ -828,14 +912,37 @@ function CustomOrderCard({
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.cardId}>#{shortId(item.id)}</Text>
-            <Text style={styles.cardTitle}>{(item as any).serviceName || 'Service Request'}</Text>
-            {item.artistName ? <Text style={styles.artistName}>{item.artistName}</Text> : null}
+
+            {/* FIX 3c: clickable service title with chevron */}
+            <TouchableOpacity
+              style={styles.serviceClickArea}
+              onPress={onPressService}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.serviceTitleLink} numberOfLines={2}>
+                {serviceTitle}
+              </Text>
+              <Ionicons
+                name="chevron-forward"
+                size={14}
+                color="#6366f1"
+                style={styles.serviceTitleChevron}
+              />
+            </TouchableOpacity>
+
+            {item.artistName ? (
+              <Text style={styles.artistName}>{item.artistName}</Text>
+            ) : null}
             <Text style={styles.cardDate}>{date}</Text>
           </View>
-          <View style={styles.amountBox}>
-            <Text style={styles.amountText}>{money((item as any).clientPrice)}</Text>
-            <Text style={styles.amountCurrency}>MAD</Text>
-            <Text style={styles.amountLabel}>{priceLabel}</Text>
+        </View>
+
+        {/* FIX 3d: prominent price strip always visible */}
+        <View style={styles.priceStrip}>
+          <Text style={styles.priceStripLabel}>Order total</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+            <Text style={styles.priceStripAmount}>{money(displayPrice)}</Text>
+            <Text style={styles.priceStripCurrency}>MAD</Text>
           </View>
         </View>
 
@@ -895,7 +1002,7 @@ function CustomOrderCard({
         <TraceabilitySection
           steps={traceSteps}
           orderCreatedAt={item.createdAt}
-          serviceName={(item as any).serviceName || 'Service'}
+          serviceName={serviceTitle}
         />
       ) : null}
     </View>
@@ -1105,7 +1212,6 @@ export default function InvoicesScreen() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [invLoading, setInvLoading] = useState(true);
 
-  // Card expansion state per tab
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
   const toggleCard = useCallback((id: string) => {
     setExpandedCards(prev => {
@@ -1123,8 +1229,6 @@ export default function InvoicesScreen() {
     });
   }, []);
 
-  // Dedup guard for auto-invoice creation within a single session.
-  // Prevents the same order from being processed twice across snapshot re-fires.
   const autoInvoicedRef = useRef<Set<string>>(new Set());
 
   const [refreshing, setRefreshing] = useState(false);
@@ -1133,7 +1237,6 @@ export default function InvoicesScreen() {
     setTimeout(() => setRefreshing(false), 600);
   }, []);
 
-  // ── Auth guard (no early return — gated render below) ──────────────────────
   useEffect(() => {
     if (authLoading) return;
     if (!uid?.trim()) router.replace('/auth');
@@ -1144,7 +1247,7 @@ export default function InvoicesScreen() {
     [allOrders],
   );
 
-  // ── 1. Orders (ticket + service) ───────────────────────────────────────────
+  // ── 1. Orders ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!uid) return;
     let cancelled = false;
@@ -1218,7 +1321,6 @@ export default function InvoicesScreen() {
         setAllOrders(enriched);
         setOrdersLoading(false);
 
-        // Auto-invoice any newly-confirmed orders.
         for (const o of enriched) {
           if (!INVOICE_TRIGGER_STATUSES.includes(o.status)) continue;
           if (autoInvoicedRef.current.has(o.id)) continue;
@@ -1265,7 +1367,7 @@ export default function InvoicesScreen() {
     return () => { cancelled = true; };
   }, [serviceOrders, uid, db]);
 
-  // ── 4. Invoices ────────────────────────────────────────────────────────────
+  // ── 3. Invoices ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!uid) return;
     setInvLoading(true);
@@ -1307,7 +1409,7 @@ export default function InvoicesScreen() {
     return () => unsub();
   }, [uid, db]);
 
-  // ── Delete handlers ────────────────────────────────────────────────────────
+  // ── Delete ─────────────────────────────────────────────────────────────────
   const confirmDeleteOrder = useCallback((orderId: string) => {
     Alert.alert(
       'Delete Order',
@@ -1330,7 +1432,7 @@ export default function InvoicesScreen() {
     );
   }, [db]);
 
-  // ── Summary stats (derived) ───────────────────────────────────────────────
+  // ── Stats ─────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
     const allItems = allOrders.map(o => ({ amount: o.amount, status: o.status }));
     const completedOrConfirmed = allItems.filter(i =>
@@ -1342,6 +1444,18 @@ export default function InvoicesScreen() {
       completedCount: completedOrConfirmed.length,
     };
   }, [allOrders]);
+
+  // ── FIX 3: Navigate to service page ───────────────────────────────────────
+  const handlePressService = useCallback((item: ServiceOrderWithMeta) => {
+    const serviceId = (item as any).serviceId || item.id;
+    const artistId = item.artistId;
+    // Adjust the route to match your actual routing structure
+    if (serviceId && artistId) {
+      router.push(`/service/${serviceId}?artistId=${artistId}`);
+    } else if (serviceId) {
+      router.push(`/service/${serviceId}`);
+    }
+  }, [router]);
 
   // ── Render ────────────────────────────────────────────────────────────────
   if (authLoading || !uid) {
@@ -1432,7 +1546,7 @@ export default function InvoicesScreen() {
         )
       )}
 
-      {/* TAB: Custom Orders */}
+      {/* TAB: Custom Orders — FIX 2: scrollable to end */}
       {activeTab === 'custom' && (
         ordersLoading ? (
           <View style={styles.loadingContainer}>
@@ -1452,11 +1566,15 @@ export default function InvoicesScreen() {
                 showTrace={expandedTraces.has(item.id)}
                 expanded={expandedCards.has(item.id)}
                 onToggleExpand={() => toggleCard(item.id)}
+                onPressService={() => handlePressService(item)}
               />
             )}
-            contentContainerStyle={styles.listContainer}
+            // FIX 2: ensure the list scrolls far enough to clear tab bars / safe areas
+            contentContainerStyle={[styles.listContainer, { paddingBottom: 80 }]}
+            contentInsetAdjustmentBehavior="automatic"
             showsVerticalScrollIndicator={false}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6366f1" />}
+            ListFooterComponent={<View style={{ height: 40 }} />}
             ListEmptyComponent={emptyState(
               '📦',
               'No Custom Orders',

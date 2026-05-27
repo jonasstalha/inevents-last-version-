@@ -15,15 +15,10 @@ async function testPhoneVerification() {
     const result = await initiatePhoneVerification(testPhone);
     console.log('Verification initiated successfully!');
     console.log('Formatted phone:', result.formattedPhone);
-    console.log('Verification code:', result.code);
+    console.log('Verification ID:', result.verificationId);
     
-    // Step 3: Verify the code
-    const isValid = await verifyCode(result.formattedPhone, result.code);
-    console.log('Verification result:', isValid ? 'Code is valid! ✅' : 'Code is invalid ❌');
-    
-    // Step 4: Test with invalid code
-    const invalidResult = await verifyCode(result.formattedPhone, '000000');
-    console.log('Invalid code test result:', invalidResult ? 'Code accepted ❌' : 'Code rejected as expected ✅');
+    // Note: A real SMS code was sent to the phone number above.
+    console.log('Enter the 6-digit SMS code to verify the phone manually.');
     
     console.log('=== Test completed ===');
   } catch (error) {

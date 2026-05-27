@@ -29,6 +29,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapView, { Marker } from 'react-native-maps';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -94,6 +95,7 @@ const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/149/149071.png';
 export default function ServiceDetailScreen() {
   const { gigId } = useLocalSearchParams();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [selectedImage, setSelectedImage] = useState(0);
   const [serviceQuantities, setServiceQuantities] = useState<{[key: string]: number}>({ 
     service: 1
@@ -816,11 +818,7 @@ export default function ServiceDetailScreen() {
           activeOpacity={0.85}
           style={styles.headerButton}
           onPress={() => {
-            if (router.canGoBack()) {
-              router.back();
-            } else {
-              router.push('/marketplace');
-            }
+            router.push('/(client)/search');
           }}
         >
           <Ionicons name="arrow-back" size={22} color={COLORS.text} />
@@ -830,7 +828,7 @@ export default function ServiceDetailScreen() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <Animated.ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={{ paddingBottom: TOTAL_TAB_BAR_HEIGHT + 90 }}
+          contentContainerStyle={{ paddingBottom: TOTAL_TAB_BAR_HEIGHT + 120 + insets.bottom }}
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
             { useNativeDriver: false }
@@ -1193,7 +1191,7 @@ export default function ServiceDetailScreen() {
         </Animated.ScrollView>
 
         {/* Floating Action Bar */}
-        <View style={styles.actionBar}>
+        <View style={[styles.actionBar, { bottom: TOTAL_TAB_BAR_HEIGHT + insets.bottom }]}> 
           <View style={styles.priceSection}>
             <Text style={styles.totalLabel}>Total</Text>
             <View style={styles.totalRow}>

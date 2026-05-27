@@ -33,19 +33,45 @@ exports.sendEmail = functions.https.onRequest(async (req, res) => {
 // Notification sending function
 exports.sendNotification = functions.https.onRequest(async (req, res) => {
   if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
-  const { userId, name } = req.body;
+  const { userId, name, title, body } = req.body;
   if (!userId || !name) return res.status(400).send('Missing parameters');
   try {
     const userDoc = await admin.firestore().collection('users').doc(userId).get();
+    if (!userDoc.exists) {
+      return res.status(404).send({ error: 'User not found' });
+    }
     const fcmToken = userDoc.data().fcmToken;
-    if (!fcmToken) return res.status(400).send({ error: 'No FCM token' });
+    if (!fcmToken) return res.status(400).send({ error: 'No FCM token available for user' });
+
+    const notificationTitle = title || 'Admin Notification';
+    const notificationBody = body || `Hello ${name}, you have a new notification from admin.`;
+
     const message = {
       token: fcmToken,
       notification: {
-        title: 'Admin Notification',
-        body: `Hello ${name}, you have a new notification from admin.`,
+        title: notificationTitle,
+        body: notificationBody,
+      },
+      android: {
+        priority: 'high',
+        notification: {
+          channelId: 'default',
+          sound: 'default',
+        },
+      },
+      apns: {
+        headers: {
+          'apns-priority': '10',
+        },
+        payload: {
+          aps: {
+            sound: 'default',
+            contentAvailable: true,
+          },
+        },
       },
     };
+
     await admin.messaging().send(message);
     res.status(200).send({ success: true });
   } catch (e) {

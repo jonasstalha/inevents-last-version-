@@ -812,13 +812,6 @@ export default function AuthScreen() {
             </View>
           </Modal>
 
-          {/* Forgot password — login only */}
-          {isLogin && (
-            <TouchableOpacity style={styles.forgotContainer} activeOpacity={0.7}>
-              <Text style={styles.forgotText}>Forgot Password?</Text>
-            </TouchableOpacity>
-          )}
-
           {/* Role Selection */}
           {!isLogin && (
             <View style={styles.roleSection}>
@@ -1243,19 +1236,6 @@ const styles = StyleSheet.create({
     color: '#111827',
   },
 
-  // Forgot password
-  forgotContainer: {
-    alignSelf: 'flex-end',
-    marginTop: -8,
-    marginBottom: 28,
-  },
-
-  forgotText: {
-    fontSize: 14,
-    color: '#6366F1',
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
 
   // ── Buttons ────────────────────────────────────────
   button: {

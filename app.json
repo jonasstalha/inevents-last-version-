@@ -29,6 +29,7 @@
     },
     "extra": {
       "router": {},
+      "cloudFunctionBaseUrl": "https://us-central1-inevents-2fe56.cloudfunctions.net",
       "eas": {
         "projectId": "d079d504-69ff-40fc-8cf5-aab12017a523"
       }

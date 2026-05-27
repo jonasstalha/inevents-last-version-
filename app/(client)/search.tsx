@@ -795,7 +795,7 @@ export default function SearchScreen() {
   const [selectedServiceForShare, setSelectedServiceForShare] =
     useState<any>(null);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
-  const storyTemplateRef = useRef<View>(null);
+  const storyTemplateRef = useRef<any>(null);
 
   const scrollY = useRef(new Animated.Value(0)).current;
 
@@ -812,7 +812,39 @@ export default function SearchScreen() {
     [priceMin, priceMax, minRating, selectedCity, selectedCategory]
   );
 
-  const filteredGigs = useMemo(() => services, [services]);
+  const filteredGigs = useMemo(() => {
+    let results = services;
+
+    if (selectedCategory !== 'All') {
+      const selectedCategoryLower = selectedCategory.toLowerCase();
+      results = results.filter((gig: any) =>
+        (gig.category || gig.title || gig.description || '')
+          .toLowerCase()
+          .includes(selectedCategoryLower)
+      );
+    }
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      results = results.filter((gig: any) => {
+        const combinedFields = [
+          gig.title,
+          gig.description,
+          gig.category,
+          gig.providerName,
+          gig.artistName,
+          gig.location,
+          gig.city,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return combinedFields.includes(q);
+      });
+    }
+
+    return results;
+  }, [services, searchQuery, selectedCategory]);
 
   // ── Fetch artists once ────────────────────────────────────────────────────
   useEffect(() => {
@@ -853,22 +885,27 @@ export default function SearchScreen() {
   useEffect(() => {
     const timeout = setTimeout(() => {
       let artistResults = [...artists];
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        artistResults = artistResults.filter(
-          a =>
-            (a.name && a.name.toLowerCase().includes(q)) ||
-            (a.bio && a.bio.toLowerCase().includes(q))
-        );
-      } else if (selectedCategory !== 'All') {
+
+      if (selectedCategory !== 'All') {
         artistResults = artistResults.filter(a =>
           a.categories?.some(
             c => c.toLowerCase() === selectedCategory.toLowerCase()
           )
         );
       }
+
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        artistResults = artistResults.filter(
+          a =>
+            (a.name && a.name.toLowerCase().includes(q)) ||
+            (a.bio && a.bio.toLowerCase().includes(q))
+        );
+      }
+
       setFilteredArtists(artistResults);
     }, 300);
+
     return () => clearTimeout(timeout);
   }, [searchQuery, selectedCategory, artists]);
 
@@ -1209,6 +1246,7 @@ export default function SearchScreen() {
             value={searchInput}
             onChangeText={text => {
               setSearchInput(text);
+              setSearchQuery(text);
             }}
             onSubmitEditing={handleSearch}
             returnKeyType="search"
@@ -1581,6 +1619,9 @@ export default function SearchScreen() {
 
               {/* Share options */}
               <Text style={styles.shareOptionsLabel}>Partager vers</Text>
+              <Text style={styles.shareModalHint}>
+                Sélectionnez un canal puis partagez ce service en un seul clic.
+              </Text>
               <View style={styles.shareOptions}>
                 {[
                   {
@@ -1634,7 +1675,12 @@ export default function SearchScreen() {
 
               {/* Story preview */}
               <View style={styles.previewWrapper}>
-                <Text style={styles.shareOptionsLabel}>Aperçu story</Text>
+                <View style={styles.previewHeader}>
+                  <Text style={styles.shareOptionsLabel}>Aperçu story</Text>
+                  <Text style={styles.previewSubtitle} numberOfLines={2}>
+                    {selectedServiceForShare.title}
+                  </Text>
+                </View>
                 <View style={styles.storyPreviewOuter}>
                   <View style={styles.storyPreviewScaled}>
                     <StoryImageTemplate
@@ -2096,25 +2142,51 @@ const styles = StyleSheet.create({
   },
   shareOptions: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: 24,
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 20,
   },
-  shareOption: { alignItems: 'center', width: 72 },
+  shareOption: {
+    alignItems: 'center',
+    width: '48%',
+    marginBottom: 16,
+    borderRadius: 18,
+    paddingVertical: 10,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
   shareIconCircle: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 8,
   },
   shareOptionText: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: '#475569',
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#0f172a',
     textAlign: 'center',
   },
+  shareModalHint: {
+    fontSize: 13,
+    color: '#64748b',
+    marginBottom: 14,
+    lineHeight: 20,
+  },
   previewWrapper: { marginBottom: 16 },
+  previewHeader: {
+    marginBottom: 12,
+  },
+  previewSubtitle: {
+    fontSize: 16,
+    color: '#0f172a',
+    fontWeight: '700',
+    lineHeight: 22,
+    marginTop: 6,
+  },
   storyPreviewOuter: {
     width: 180,
     height: 320,

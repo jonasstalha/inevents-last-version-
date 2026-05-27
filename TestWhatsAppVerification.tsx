@@ -8,7 +8,6 @@ export default function TestWhatsAppVerification() {
   const [verificationCode, setVerificationCode] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [isCodeSent, setIsCodeSent] = useState(false);
-  const [sentCode, setSentCode] = useState('');
   const [message, setMessage] = useState('');
 
   const handleSendCode = async () => {
@@ -23,8 +22,7 @@ export default function TestWhatsAppVerification() {
     try {
       const result = await initiatePhoneVerification(phoneNumber);
       setIsCodeSent(true);
-      setSentCode(result.code); // This is only for development/testing
-      setMessage(`Code sent to ${result.formattedPhone}`);
+      setMessage(`Code sent to ${result.formattedPhone}. Check your phone for the SMS.`);
     } catch (error) {
       console.error('Error sending verification code:', error);
       setMessage('Failed to send code. Please try again.');
@@ -100,13 +98,6 @@ export default function TestWhatsAppVerification() {
         </View>
       )}
 
-      {/* Development mode display */}
-      {sentCode && (
-        <View style={styles.devContainer}>
-          <Text style={styles.devTitle}>DEVELOPMENT MODE</Text>
-          <Text style={styles.devCode}>Your verification code: {sentCode}</Text>
-        </View>
-      )}
 
       {isVerifying && <ActivityIndicator size="large" color="#007bff" />}
       

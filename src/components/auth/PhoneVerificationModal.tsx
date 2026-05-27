@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { initiatePhoneVerification, verifyPhoneCode } from '../../firebase/phoneVerificationService';
+import { ActivityIndicator, Alert, Animated, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { initiatePhoneVerification, verifyCode } from '../../firebase/phoneVerificationService';
 
 interface PhoneVerificationModalProps {
   visible: boolean;
@@ -8,6 +8,25 @@ interface PhoneVerificationModalProps {
   phoneNumber: string;
   onVerificationSuccess: (verifiedPhone: string) => void;
 }
+
+const normalizePhoneNumber = (phoneNumber: string): string => {
+  let formattedPhone = phoneNumber.replace(/[\s()-]/g, '');
+
+  if (formattedPhone.startsWith('00')) {
+    formattedPhone = `+${formattedPhone.slice(2)}`;
+  }
+
+  if (!formattedPhone.startsWith('+')) {
+    if (formattedPhone.length === 9 || (formattedPhone.length === 10 && formattedPhone.startsWith('0'))) {
+      const local = formattedPhone.startsWith('0') ? formattedPhone.slice(1) : formattedPhone;
+      formattedPhone = `+212${local}`;
+    } else {
+      formattedPhone = `+${formattedPhone}`;
+    }
+  }
+
+  return formattedPhone;
+};
 
 export default function PhoneVerificationModal({
   visible,
@@ -63,27 +82,33 @@ export default function PhoneVerificationModal({
 
     setIsSendingCode(true);
     try {
-      const result = await initiatePhoneVerification(phoneNumber);
-      setFormattedPhone(result.formattedPhone);
+      const { formattedPhone: normalizedPhone } = await initiatePhoneVerification(phoneNumber);
+      setFormattedPhone(normalizedPhone);
       setCodeSent(true);
-      setCountdown(60); // 60 second cooldown
-      Alert.alert('Code Sent', `Verification code sent to ${result.formattedPhone}`);
-      if (result.code) {
-        Alert.alert('Mock Verification Code', `Use this code for testing: ${result.code}`);
-      }
-    } catch (error) {
+      setCountdown(60);
+      Alert.alert('Code Sent', `Verification code sent to ${normalizedPhone}.`);
+    } catch (error: any) {
       console.error('Error sending verification code:', error);
-      Alert.alert('Error', 'Failed to send verification code. Please try again.');
+      let message = error?.message || 'Failed to send verification code. Please try again.';
+      if (error?.code === 'auth/operation-not-allowed') {
+        message = 'Phone authentication is disabled in your Firebase console. Please enable Phone sign-in under Authentication -> Sign-in method.';
+      } else if (error?.code === 'auth/invalid-phone-number') {
+        message = 'The phone number is invalid. Please enter a valid phone number including country code.';
+      }
+      Alert.alert('Error', message);
     } finally {
       setIsSendingCode(false);
     }
   }, [phoneNumber]);
 
   useEffect(() => {
-    if (visible && !codeSent && countdown === 0) {
-      handleSendCode();
+    if (!visible) {
+      setVerificationCode('');
+      setCodeSent(false);
+      setCountdown(0);
+      setFormattedPhone('');
     }
-  }, [visible, codeSent, countdown, handleSendCode]);
+  }, [visible]);
 
   useEffect(() => {
     if (countdown > 0) {
@@ -100,16 +125,16 @@ export default function PhoneVerificationModal({
 
     setIsLoading(true);
     try {
-      const isValid = await verifyPhoneCode(phoneNumber, verificationCode);
-      if (isValid) {
+      const verified = await verifyCode(formattedPhone || phoneNumber, verificationCode);
+      if (verified) {
         onVerificationSuccess(formattedPhone || phoneNumber);
         handleClose();
       } else {
         Alert.alert('Invalid Code', 'The verification code you entered is incorrect. Please try again.');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error verifying code:', error);
-      Alert.alert('Error', 'Failed to verify code. Please try again.');
+      Alert.alert('Error', error?.message || 'Failed to verify code. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -167,7 +192,7 @@ export default function PhoneVerificationModal({
 
               <View style={styles.content}>
                 <Text style={styles.description}>
-                  We'll send a verification code to {phoneNumber}
+                  We'll send a real SMS verification code to {phoneNumber}
                 </Text>
 
                 {!codeSent ? (
@@ -283,6 +308,14 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 20,
+  },
+  hiddenRecaptcha: {
+    width: 0,
+    height: 0,
+    opacity: 0,
+    position: 'absolute',
+    left: -9999,
+    top: -9999,
   },
   description: {
     fontSize: 16,
