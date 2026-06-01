@@ -1,5 +1,6 @@
 import { useAuth } from '@/src/context/AuthContext';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as AuthSession from 'expo-auth-session';
 import * as Google from 'expo-auth-session/providers/google';
 import { useRouter } from 'expo-router';
@@ -25,9 +26,9 @@ import {
   View
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
-import PhoneVerificationModal from '../src/components/auth/PhoneVerificationModal';
 
 const { width, height } = Dimensions.get('window');
+const AUTH_PENDING_REDIRECT_KEY = '@auth_pending_redirect';
 
 // Modern Input Component
 const ModernInput = ({ 
@@ -50,25 +51,45 @@ const ModernInput = ({
   placeholder?: string;
 }) => {
   const [isFocused, setIsFocused] = useState(false);
+  const [isPasswordHidden, setIsPasswordHidden] = useState(secureTextEntry);
+  const shouldShowPasswordToggle = secureTextEntry;
   
   return (
     <View style={styles.inputContainer}>
-      <TextInput
-        style={[
-          styles.input, 
-          isFocused && styles.inputFocused,
-          error ? styles.inputError : null
-        ]}
-        value={value}
-        onChangeText={onChangeText}
-        secureTextEntry={secureTextEntry}
-        keyboardType={keyboardType}
-        autoCapitalize={autoCapitalize}
-        placeholder={placeholder || label}
-        placeholderTextColor="#B0B8C1"
-        onFocus={() => setIsFocused(true)}
-        onBlur={() => setIsFocused(false)}
-      />
+      <View style={styles.inputWrapper}>
+        <TextInput
+          style={[
+            styles.input,
+            shouldShowPasswordToggle && styles.inputWithAction,
+            isFocused && styles.inputFocused,
+            error ? styles.inputError : null
+          ]}
+          value={value}
+          onChangeText={onChangeText}
+          secureTextEntry={shouldShowPasswordToggle ? isPasswordHidden : secureTextEntry}
+          keyboardType={keyboardType}
+          autoCapitalize={autoCapitalize}
+          placeholder={placeholder || label}
+          placeholderTextColor="#B0B8C1"
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
+        />
+        {shouldShowPasswordToggle ? (
+          <TouchableOpacity
+            style={styles.inputAction}
+            onPress={() => setIsPasswordHidden((current) => !current)}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={isPasswordHidden ? 'Show password' : 'Hide password'}
+          >
+            <Ionicons
+              name={isPasswordHidden ? 'eye-off-outline' : 'eye-outline'}
+              size={20}
+              color="#6B7280"
+            />
+          </TouchableOpacity>
+        ) : null}
+      </View>
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
     </View>
   );
@@ -161,6 +182,31 @@ export default function AuthScreen() {
   const { login, register } = useAuth();
   const router = useRouter();
 
+  const navigateAfterAuth = async (fallbackRoute: string) => {
+    try {
+      const storedRedirect = await AsyncStorage.getItem(AUTH_PENDING_REDIRECT_KEY);
+      if (storedRedirect) {
+        await AsyncStorage.removeItem(AUTH_PENDING_REDIRECT_KEY);
+        const parsedRedirect = JSON.parse(storedRedirect) as {
+          pathname?: string;
+          params?: Record<string, string>;
+        };
+
+        if (parsedRedirect?.pathname) {
+          router.replace({
+            pathname: parsedRedirect.pathname as any,
+            params: parsedRedirect.params,
+          } as any);
+          return;
+        }
+      }
+    } catch (redirectError) {
+      console.warn('Failed to restore pending auth redirect:', redirectError);
+    }
+
+    router.replace(fallbackRoute as any);
+  };
+
   // Verify redirect URI for Google Sign-In
   console.log('REDIRECT URI:', AuthSession.makeRedirectUri());
 
@@ -170,9 +216,6 @@ export default function AuthScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [selectedCountryCode, setSelectedCountryCode] = useState('+212');
-  const [showCountryPicker, setShowCountryPicker] = useState(false);
   const [city, setCity] = useState('');
   const [userRole, setUserRole] = useState<'client' | 'artist'>('client');
   const [loading, setLoading] = useState(false);
@@ -182,10 +225,6 @@ export default function AuthScreen() {
   const [showRoleSelection, setShowRoleSelection] = useState(false);
   const [googleUserData, setGoogleUserData] = useState<any>(null);
   const [showGoogleArtistForm, setShowGoogleArtistForm] = useState(false);
-  
-  // Phone verification states
-  const [showPhoneVerification, setShowPhoneVerification] = useState(false);
-  const [pendingRegistrationData, setPendingRegistrationData] = useState<any>(null);
   
   // Google Sign-In hook - CORRECTED for Native Android
   // NOTE: androidClientId MUST match the OAuth 2.0 credential registered in Firebase Console
@@ -197,10 +236,10 @@ export default function AuthScreen() {
     iosClientId: '780609459655-33kqf1801palf7v922atpse13ictumgr.apps.googleusercontent.com',
     webClientId: '780609459655-33kqf1801palf7v922atpse13ictumgr.apps.googleusercontent.com',
     scopes: ['profile', 'email', 'openid'],
-    redirectUrl: AuthSession.makeRedirectUri({
+    redirectUri: AuthSession.makeRedirectUri({
       useProxy: true,
       scheme: 'com.jonass7896.InEvent',
-    }),
+    } as any),
   });
 
   // Error states
@@ -234,10 +273,6 @@ export default function AuthScreen() {
     { id: 'buffet', name: 'Buffet', icon: 'coffee' as const },
   ];
 
-  const countryOptions = [
-    { name: 'Morocco', code: '+212', flag: '🇲🇦' }
-  ];
-
   const moroccanCities = [
     'Casablanca',
     'Rabat',
@@ -260,18 +295,6 @@ export default function AuthScreen() {
     'Al Hoceïma',
     'Taroudant',
   ];
-
-  const formatPhoneForRegistration = (rawPhone: string) => {
-    const trimmed = rawPhone.trim();
-    if (!trimmed) return trimmed;
-
-    if (trimmed.startsWith('+')) {
-      return trimmed;
-    }
-
-    const local = trimmed.replace(/^0+/, '');
-    return `${selectedCountryCode}${local}`;
-  };
 
   // Function to add a category
   const addCategory = (categoryName: string) => {
@@ -384,9 +407,9 @@ export default function AuthScreen() {
           console.log('✅ Existing user logged in with Google');
           const userData = userDocSnap.data();
           if (userData?.role === 'artist') {
-            router.replace('/(artist)');
+            await navigateAfterAuth('/(artist)');
           } else {
-            router.replace('/(client)');
+            await navigateAfterAuth('/(client)');
           }
           setGoogleLoading(false);
           return;
@@ -493,7 +516,7 @@ export default function AuthScreen() {
       console.log(`✅ Google account created in Firestore! User role: ${userRole}`);
       
       // Navigate based on role
-      router.replace('/(client)');
+      await navigateAfterAuth('/(client)');
       
     } catch (error: any) {
       setLoading(false);
@@ -544,7 +567,7 @@ export default function AuthScreen() {
       setCategories([]);
       
       // Navigate to artist dashboard
-      router.replace('/(artist)');
+      await navigateAfterAuth('/(artist)');
       
     } catch (error: any) {
       setLoading(false);
@@ -589,9 +612,9 @@ export default function AuthScreen() {
         if (userData?.role === 'admin') {
           router.replace('/(admin)');
         } else if (userData?.role === 'artist') {
-          router.replace('/(artist)');
+          await navigateAfterAuth('/(artist)');
         } else {
-          router.replace('/(client)');
+          await navigateAfterAuth('/(client)');
         }
       } else {
         // Perform registration
@@ -605,31 +628,31 @@ export default function AuthScreen() {
           return;
         }
 
-        // Check if phone number is provided for verification
-        if (!phone.trim()) {
-          Alert.alert('Validation Error', 'Please enter your phone number for verification');
-          return;
-        }
-
-        // Store registration data and show phone verification
         const artistDetails = userRole === 'artist' ? {
           storeName,
           city,
           categories,
         } : undefined;
 
-        const fullPhone = formatPhoneForRegistration(phone);
-
-        setPendingRegistrationData({
+        setLoading(true);
+        await register(
           email,
           password,
           name,
-          phone: fullPhone,
+          '',
+          false,
           userRole,
           artistDetails
-        });
+        );
+        setLoading(false);
 
-        setShowPhoneVerification(true);
+        console.log(`✅ Registration successful! User role: ${userRole}`);
+
+        if (userRole === 'artist') {
+          await navigateAfterAuth('/(artist)');
+        } else {
+          await navigateAfterAuth('/(client)');
+        }
       }
     } catch (error: any) {
       setLoading(false);
@@ -651,37 +674,6 @@ export default function AuthScreen() {
     setEmailError('');
     setPasswordError('');
     setConfirmPasswordError('');
-  };
-
-  // Handle successful phone verification and complete registration
-  const handlePhoneVerificationSuccess = async (verifiedPhone: string) => {
-    if (!pendingRegistrationData) return;
-
-    try {
-      setLoading(true);
-      setShowPhoneVerification(false);
-
-      const { email, password, name, userRole, artistDetails } = pendingRegistrationData;
-
-      await register(email, password, name, verifiedPhone, true, userRole, artistDetails);
-      setLoading(false);
-
-      console.log(`✅ Registration successful! User role: ${userRole}`);
-
-      // Clear pending data
-      setPendingRegistrationData(null);
-
-      // Navigate based on role
-      if (userRole === 'artist') {
-        router.replace('/(artist)');
-      } else {
-        router.replace('/(client)');
-      }
-    } catch (error: any) {
-      setLoading(false);
-      console.error('Registration error after phone verification:', error);
-      Alert.alert('Registration Error', error.message || 'Failed to complete registration');
-    }
   };
 
   return (
@@ -764,53 +756,6 @@ export default function AuthScreen() {
               placeholder="Confirm password"
             />
           )}
-
-          {!isLogin && (
-            <View style={styles.phoneInputGroup}>
-              <TouchableOpacity
-                style={styles.countrySelector}
-                onPress={() => setShowCountryPicker(true)}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.countryText}>
-                  {countryOptions.find((item) => item.code === selectedCountryCode)?.flag || '🌍'} {selectedCountryCode}
-                </Text>
-              </TouchableOpacity>
-              <TextInput
-                style={[styles.phoneInput, styles.input]}
-                value={phone}
-                onChangeText={setPhone}
-                keyboardType="phone-pad"
-                placeholder="Phone number"
-                placeholderTextColor="#B0B8C1"
-              />
-            </View>
-          )}
-
-          <Modal
-            visible={showCountryPicker}
-            animationType="slide"
-            transparent={true}
-          >
-            <TouchableWithoutFeedback onPress={() => setShowCountryPicker(false)}>
-              <View style={styles.countryModalOverlay} />
-            </TouchableWithoutFeedback>
-            <View style={styles.countryPickerModal}>
-              <Text style={styles.countryModalTitle}>Select country code</Text>
-              {countryOptions.map((country) => (
-                <TouchableOpacity
-                  key={country.code}
-                  style={styles.countryOption}
-                  onPress={() => {
-                    setSelectedCountryCode(country.code);
-                    setShowCountryPicker(false);
-                  }}
-                >
-                  <Text style={styles.countryOptionText}>{country.flag} {country.name} ({country.code})</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </Modal>
 
           {/* Role Selection */}
           {!isLogin && (
@@ -1007,15 +952,6 @@ export default function AuthScreen() {
           </View>
         </KeyboardAwareScrollView>
       </TouchableWithoutFeedback>
-      <PhoneVerificationModal
-        visible={showPhoneVerification}
-        onClose={() => {
-          setShowPhoneVerification(false);
-          setPendingRegistrationData(null);
-        }}
-        phoneNumber={pendingRegistrationData?.phone || ''}
-        onVerificationSuccess={handlePhoneVerificationSuccess}
-      />
     </View>
   );
 }
@@ -1139,6 +1075,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 
+  inputWrapper: {
+    position: 'relative',
+    justifyContent: 'center',
+  },
+
   input: {
     backgroundColor: '#F9FAFB',
     borderRadius: 16,
@@ -1149,6 +1090,18 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#E5E7EB',
     fontWeight: '500',
+  },
+
+  inputWithAction: {
+    paddingRight: 56,
+  },
+
+  inputAction: {
+    position: 'absolute',
+    right: 18,
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 
   inputFocused: {
@@ -1172,70 +1125,6 @@ const styles = StyleSheet.create({
     marginTop: 5,
     marginLeft: 4,
   },
-
-  phoneInputGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 18,
-  },
-
-  countrySelector: {
-    minWidth: 110,
-    paddingVertical: 16,
-    paddingHorizontal: 14,
-    marginRight: 12,
-    borderRadius: 16,
-    backgroundColor: '#F9FAFB',
-    borderWidth: 1.5,
-    borderColor: '#E5E7EB',
-    justifyContent: 'center',
-  },
-
-  countryText: {
-    fontSize: 15,
-    color: '#1F2937',
-    fontWeight: '600',
-  },
-
-  phoneInput: {
-    flex: 1,
-  },
-
-   countryPickerModal: {
-     position: 'absolute',
-     bottom: 0,
-     left: 0,
-     right: 0,
-     backgroundColor: '#FFFFFF',
-     padding: 20,
-     borderTopLeftRadius: 24,
-     borderTopRightRadius: 24,
-     maxHeight: height * 0.5,
-   },
-
-   countryModalOverlay: {
-     flex: 1,
-     backgroundColor: 'rgba(15, 23, 42, 0.4)',
-   },
-
-   countryModalTitle: {
-     fontSize: 18,
-     fontWeight: '800',
-     color: '#0F172A',
-     marginBottom: 16,
-   },
-
-  countryOption: {
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-
-  countryOptionText: {
-    fontSize: 16,
-    color: '#111827',
-  },
-
 
   // ── Buttons ────────────────────────────────────────
   button: {

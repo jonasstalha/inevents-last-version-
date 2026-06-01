@@ -271,6 +271,8 @@ export const addServiceToFirebase = async (artistId: string, service: ServiceDat
     const updateData: any = {};
     if (imageUrls.length > 0) {
       updateData.images = imageUrls;
+      updateData.image = imageUrls[0];
+      updateData.cover = imageUrls[0];
     }
     if (videoUrl) {
       updateData.video = videoUrl;
@@ -280,6 +282,9 @@ export const addServiceToFirebase = async (artistId: string, service: ServiceDat
       if (!updateData.video) {
         updateData.video = videoUrls[0];
       }
+    }
+
+    if (Object.keys(updateData).length > 0) {
       await updateDoc(docRef, updateData);
       console.log('[addServiceToFirebase] Service document updated with media URLs');
     }
@@ -441,6 +446,7 @@ export const fetchArtistById = async (artistId: string): Promise<Artist | null> 
       name: artistName,
       role: 'artist',
       profileImage: profileImage,
+      phoneNumber: userData.phoneNumber || userData.phone || '',
       bio: generateArtistBio(userData.specialization, userData),
       storeId: userData.storeId || `store-${artistSnapshot.id}`,
       rating: userData.rating || generateRandomRating(),

@@ -119,7 +119,6 @@ export default function Ticket() {
     description: string;
     images: string[];
     videos: string[];
-    basePrice: string;
     serviceRadius: number;
     items: { title: string; price: string; maxQuantity: string }[];
     extraServices: { title: string; price: string; maxQuantity: string }[];
@@ -132,7 +131,6 @@ export default function Ticket() {
     description: '',
     images: [],
     videos: [],
-    basePrice: '',
     serviceRadius: 5,
     items: [{ title: '', price: '', maxQuantity: '' }],
     extraServices: [{ title: '', price: '', maxQuantity: '' }],
@@ -279,54 +277,55 @@ export default function Ticket() {
 
   // --- LOCATION PICKER ---
   const pickLocation = async () => {
+    const DEFAULT_COORDS = { latitude: 33.5731, longitude: -7.5898 };
+
+    const openModalWithCoords = (coords: { latitude: number; longitude: number }) => {
+      setPickedLocation(coords);
+      setMapRegion({
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        latitudeDelta: 0.05,
+        longitudeDelta: 0.05,
+      });
+      setLocationModalVisible(true);
+    };
+
     setLoadingLocation(true);
     try {
-      let { status } = await Location.requestForegroundPermissionsAsync();
+      const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission denied', 'Location permission is required to pick a location. Please enable it in your device settings.');
-        setLoadingLocation(false);
+        Alert.alert('Permission denied', 'Location permission is required.');
         return;
       }
-      
-      try {
-        let loc = await Location.getCurrentPositionAsync({});
-        if (loc && loc.coords) {
-          setMapRegion({
-            latitude: loc.coords.latitude,
-            longitude: loc.coords.longitude,
-            latitudeDelta: 0.05,
-            longitudeDelta: 0.05,
-          });
-          setPickedLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
-          setLocationModalVisible(true);
-        } else {
-          // Use default coordinates (Casablanca) if location unavailable
-          setMapRegion({
-            latitude: 33.5731,
-            longitude: -7.5898,
-            latitudeDelta: 0.05,
-            longitudeDelta: 0.05,
-          });
-          setPickedLocation({ latitude: 33.5731, longitude: -7.5898 });
-          Alert.alert('Location Unavailable', 'Using default location (Casablanca). You can manually select a location on the map.');
-          setLocationModalVisible(true);
-        }
-      } catch (locError: any) {
-        console.error('Error getting location:', locError);
-        // Use default coordinates if location fails
-        setMapRegion({
-          latitude: 33.5731,
-          longitude: -7.5898,
-          latitudeDelta: 0.05,
-          longitudeDelta: 0.05,
+
+      const lastKnown = await Location.getLastKnownPositionAsync({}).catch(() => null);
+      if (lastKnown?.coords) {
+        openModalWithCoords({
+          latitude: lastKnown.coords.latitude,
+          longitude: lastKnown.coords.longitude,
         });
-        setPickedLocation({ latitude: 33.5731, longitude: -7.5898 });
-        Alert.alert('Location Unavailable', 'Using default location (Casablanca). You can manually select a location on the map.');
-        setLocationModalVisible(true);
+        return;
+      }
+
+      const currentLocation = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+        // Runtime supports timeout on native even when typings may lag.
+        timeout: 8000 as never,
+      } as Location.LocationOptions).catch(() => null);
+
+      if (currentLocation?.coords) {
+        openModalWithCoords({
+          latitude: currentLocation.coords.latitude,
+          longitude: currentLocation.coords.longitude,
+        });
+      } else {
+        openModalWithCoords(DEFAULT_COORDS);
+        Alert.alert('Location Unavailable', 'Using default location (Casablanca).');
       }
     } catch (error) {
       console.error('Error requesting location:', error);
-      Alert.alert('Error', 'Failed to access location. Please try again.');
+      openModalWithCoords(DEFAULT_COORDS);
+      Alert.alert('Location Unavailable', 'Using default location (Casablanca).');
     } finally {
       setLoadingLocation(false);
     }
@@ -591,14 +590,10 @@ export default function Ticket() {
     console.log('[handleServiceSubmit] Service images:', serviceImages);
     setServiceSubmitting(true);
     try {
-      
-      // Use the base price from the form
-      const basePrice = parseFloat(serviceForm.basePrice) || 0;
-      
       const serviceDataWithPrice = {
         ...serviceForm,
-        price: basePrice,
-        basePrice: basePrice,
+        price: 0,
+        basePrice: 0,
         serviceRadius: serviceForm.serviceRadius || 5,
         // Include map coordinates if map location was selected
         ...(pickedLocation && pickedLocation.latitude && pickedLocation.longitude ? {
@@ -620,11 +615,11 @@ export default function Ticket() {
         description: '',
         images: [],
         videos: [],
-        basePrice: '',
         serviceRadius: 5,
         items: [{ title: '', price: '', maxQuantity: '' }],
         extraServices: [{ title: '', price: '', maxQuantity: '' }],
       });
+      setServiceImages([]);
       setServiceVideos([]);
       setServiceError('');
       Alert.alert('Success', 'Service created and saved to Firebase!', [
@@ -654,14 +649,14 @@ export default function Ticket() {
   };
 
   const renderHeader = () => (
-    <View style={[styles.header, { paddingTop: 0 }]}> {/* Remove extra top padding */}
+    <View style={styles.header}>
       <LinearGradient
         colors={['#667eea', '#764ba2']}
         style={styles.headerGradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
       >
-        <View style={[styles.headerContent, { marginTop: 0 }]}> {/* Remove extra margin */}
+        <View style={styles.headerContent}>
           <Text style={styles.headerTitle}>
             {activeTab === 'createTicket' ? 'Create Ticket' : 'Create Service'}
           </Text>
@@ -849,22 +844,6 @@ export default function Ticket() {
               ))}
             </ScrollView>
           )}
-        </View>
-        {/* Base Price */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.inputLabel}>Base Price (MAD)</Text>
-          <View style={styles.inputContainer}>
-            <Ionicons name="cash-outline" size={20} color="#667eea" style={styles.inputIcon} />
-            <TextInput
-              style={styles.textInput}
-              placeholder="0"
-              placeholderTextColor="#a1a1aa"
-              value={serviceForm.basePrice}
-              onChangeText={v => handleServiceChange('basePrice', v.replace(/[^0-9]/g, ''))}
-              keyboardType="numeric"
-              maxLength={6}
-            />
-          </View>
         </View>
         {/* Description */}
         <View style={styles.inputGroup}>
@@ -1498,20 +1477,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8fafc',
   },
-  header: {
-    height: 180,
-    paddingTop: Platform.OS === 'ios' ? 44 : 24,
-  },
+  header: {},
   headerGradient: {
-    flex: 1,
-    justifyContent: 'center',
     paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 20,
+    justifyContent: 'center',
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
   },
-  headerContent: {
-    marginTop: 0,
-  },
+  headerContent: {},
   headerTitle: {
     fontSize: 28,
     fontWeight: 'bold',

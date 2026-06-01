@@ -146,13 +146,18 @@ const styles = StyleSheet.create({
   headerContainer: {
     backgroundColor: '#fff',
     borderBottomWidth: 0,
-    ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0, shadowRadius: 0 }, android: { elevation: 0 } }),
   },
-  header: { flexDirection: 'row', paddingHorizontal: 16, paddingTop: Platform.select({ ios: 18, default: 14 }), paddingBottom: 0, alignItems: 'center', justifyContent: 'space-between' },
+  header: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingTop: Platform.select({ ios: 18, default: 14 }),
+    paddingBottom: 0,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   headerTitle: { fontSize: 18, fontWeight: '700', color: '#111' },
   headerRightIcons: { flexDirection: 'row', alignItems: 'center' },
   headerIconButton: { padding: 10, marginLeft: 8 },
-
   tabBarContainer: {
     position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 999,
     backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#eee', paddingBottom: Platform.OS === 'ios' ? 20 : 8,

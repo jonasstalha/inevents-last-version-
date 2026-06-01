@@ -2,6 +2,19 @@ import { collection, doc, getDoc, getDocs, getFirestore, orderBy, query } from '
 import { Ticket } from '../models/types';
 import app from './firebaseConfig';
 
+const getMainItemsTotal = (serviceData: any): number => {
+  if (!Array.isArray(serviceData?.items) || serviceData.items.length === 0) {
+    return Number(serviceData?.price ?? serviceData?.basePrice ?? 0) || 0;
+  }
+
+  const total = serviceData.items.reduce((sum: number, item: any) => {
+    const itemPrice = Number(item?.price ?? 0);
+    return sum + (Number.isFinite(itemPrice) ? itemPrice : 0);
+  }, 0);
+
+  return total > 0 ? total : Number(serviceData?.price ?? serviceData?.basePrice ?? 0) || 0;
+};
+
 // Fetch all tickets from all users (for client view)
 export const fetchAllTickets = async (): Promise<Ticket[]> => {
   const db = getFirestore(app);
@@ -62,10 +75,13 @@ export const fetchAllServices = async (): Promise<any[]> => {
       };
 
       const extras = resolveServiceExtras(data);
+      const normalizedMainItemsTotal = getMainItemsTotal(data);
 
       allServices.push({
         id: serviceDoc.id,
         ...data,
+        price: normalizedMainItemsTotal,
+        basePrice: normalizedMainItemsTotal,
         extras,
         addOns: Array.isArray(data.addOns) ? data.addOns : extras,
         extraServices: Array.isArray(data.extraServices) ? data.extraServices : extras,

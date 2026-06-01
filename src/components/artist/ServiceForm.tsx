@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ImagePickerAsset } from 'expo-image-picker';
 import * as Location from 'expo-location';
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -88,9 +88,6 @@ export const ServiceForm: React.FC<ServiceFormProps> = ({
   // Form state
   const [title, setTitle] = useState(initialValues?.title || '');
   const [description, setDescription] = useState(initialValues?.description || '');
-  const [basePrice, setBasePrice] = useState(
-    initialValues?.basePrice ? initialValues.basePrice.toString() : ''
-  );
   const [category, setCategory] = useState(initialValues?.category || '');
   const [options, setOptions] = useState<GigOption[]>(initialValues?.options || []);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -340,7 +337,7 @@ export const ServiceForm: React.FC<ServiceFormProps> = ({
   // Form submission
   const handleSubmit = async () => {
     // Validation
-    if (!title || !description || !basePrice || !category) {
+    if (!title || !description || !category) {
       Alert.alert('Missing Information', 'Please fill in all required fields');
       return;
     }
@@ -353,7 +350,7 @@ export const ServiceForm: React.FC<ServiceFormProps> = ({
     const serviceData: GigInput = {
       title,
       description,
-      basePrice: Number(basePrice),
+      basePrice: 0,
       category,
       options,
       extras,
@@ -392,6 +389,10 @@ export const ServiceForm: React.FC<ServiceFormProps> = ({
           selectedImages,
           selectedVideo
         );
+
+        setSelectedImages([]);
+        setExistingImages([]);
+        setImagesToDelete([]);
       }
       console.log('[ServiceForm] Service saved successfully');
       
@@ -635,14 +636,6 @@ export const ServiceForm: React.FC<ServiceFormProps> = ({
           numberOfLines={4}
           value={description}
           onChangeText={setDescription}
-        />
-        
-        <TextInput
-          style={styles.input}
-          placeholder="Base Price"
-          keyboardType="decimal-pad"
-          value={basePrice}
-          onChangeText={setBasePrice}
         />
         
         <TextInput

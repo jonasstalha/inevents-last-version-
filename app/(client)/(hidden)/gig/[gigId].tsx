@@ -6,6 +6,7 @@ import { createOrder } from '@/src/firebase/orderService';
 import { validatePromoCode } from '@/src/firebase/promoService';
 import { addServiceReview } from '@/src/firebase/reviewService';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { ResizeMode, Video } from 'expo-av';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -91,6 +92,8 @@ const RADIUS = {
 // Default image to show when no images are available
 const DEFAULT_SERVICE_IMAGE = 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
 const DEFAULT_AVATAR = 'https://cdn-icons-png.flaticon.com/512/149/149071.png';
+const AUTH_PENDING_REDIRECT_KEY = '@auth_pending_redirect';
+const GIG_DRAFT_STORAGE_PREFIX = '@gig_detail_draft:';
 
 export default function ServiceDetailScreen() {
   const { gigId } = useLocalSearchParams();
@@ -149,6 +152,77 @@ export default function ServiceDetailScreen() {
   const scrollY = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
+  const getDraftStorageKey = () => `${GIG_DRAFT_STORAGE_PREFIX}${String(gigId)}`;
+
+  const saveDraftAndRedirectToAuth = async (overrides?: { showOfferForm?: boolean }) => {
+    if (!gigId) {
+      router.push('/auth');
+      return;
+    }
+
+    try {
+      const draftPayload = {
+        serviceQuantities,
+        customMessage,
+        clientBudget,
+        personalInfo,
+        selectedLocation,
+        coupon,
+        couponApplied,
+        discount,
+        showOfferForm: overrides?.showOfferForm ?? showOfferForm,
+      };
+
+      const redirectPayload = {
+        pathname: '/(client)/(hidden)/gig/[gigId]',
+        params: { gigId: String(gigId) },
+      };
+
+      await AsyncStorage.multiSet([
+        [AUTH_PENDING_REDIRECT_KEY, JSON.stringify(redirectPayload)],
+        [getDraftStorageKey(), JSON.stringify(draftPayload)],
+      ]);
+    } catch (storageError) {
+      console.warn('Failed to save gig draft before auth redirect:', storageError);
+    }
+
+    router.push('/auth');
+  };
+
+  useEffect(() => {
+    const restoreDraft = async () => {
+      if (!gigId) return;
+
+      try {
+        const storedDraft = await AsyncStorage.getItem(getDraftStorageKey());
+        if (!storedDraft) return;
+
+        const parsedDraft = JSON.parse(storedDraft);
+
+        if (parsedDraft?.serviceQuantities) setServiceQuantities(parsedDraft.serviceQuantities);
+        if (typeof parsedDraft?.customMessage === 'string') setCustomMessage(parsedDraft.customMessage);
+        if (typeof parsedDraft?.clientBudget === 'string') setClientBudget(parsedDraft.clientBudget);
+        if (parsedDraft?.personalInfo) {
+          setPersonalInfo((current) => ({
+            ...current,
+            ...parsedDraft.personalInfo,
+          }));
+        }
+        if (parsedDraft?.selectedLocation) setSelectedLocation(parsedDraft.selectedLocation);
+        if (typeof parsedDraft?.coupon === 'string') setCoupon(parsedDraft.coupon);
+        if (typeof parsedDraft?.couponApplied === 'boolean') setCouponApplied(parsedDraft.couponApplied);
+        if (typeof parsedDraft?.discount === 'number') setDiscount(parsedDraft.discount);
+        if (typeof parsedDraft?.showOfferForm === 'boolean') setShowOfferForm(parsedDraft.showOfferForm);
+
+        await AsyncStorage.removeItem(getDraftStorageKey());
+      } catch (restoreError) {
+        console.warn('Failed to restore gig draft after auth:', restoreError);
+      }
+    };
+
+    restoreDraft();
+  }, [gigId]);
+
   // Handle opening full screen image preview
   const handleImagePress = (imageUri: string, index: number) => {
     setPreviewMedia({ type: 'image', uri: imageUri, index });
@@ -174,9 +248,8 @@ export default function ServiceDetailScreen() {
         setIsLoading(true);
         // Fetch service data
         const service = await fetchServiceByIdFromFirebase(String(gigId));
-        setServiceData(service);
 
-        const resolveServiceStorageUrl = async (uri?: string | null) => {
+        const resolveStorageUrl = async (uri?: string | null) => {
           if (!uri) return null;
           const value = String(uri).trim();
           if (!value) return null;
@@ -186,12 +259,29 @@ export default function ServiceDetailScreen() {
           try {
             return await getDownloadURL(storageRef(storage, value));
           } catch (resolveError) {
-            console.warn('Unable to resolve video storage URL:', value, resolveError);
+            console.warn('Unable to resolve storage URL:', value, resolveError);
             return null;
           }
         };
 
         const serviceAny = service as any;
+        const rawServiceImages = Array.from(new Set([
+          serviceAny.cover,
+          serviceAny.image,
+          ...(Array.isArray(serviceAny.images) ? serviceAny.images : []),
+        ].filter(Boolean)));
+
+        const resolvedImages = (
+          await Promise.all(rawServiceImages.map(resolveStorageUrl))
+        ).filter((uri): uri is string => !!uri);
+
+        setServiceData({
+          ...service,
+          cover: resolvedImages[0] || serviceAny.cover,
+          image: resolvedImages[0] || serviceAny.image,
+          images: resolvedImages,
+        });
+
         const rawServiceVideos = Array.from(new Set([
           serviceAny.video,
           serviceAny.videoUrl,
@@ -202,7 +292,7 @@ export default function ServiceDetailScreen() {
         ].filter(Boolean)));
 
         const resolvedVideos = (
-          await Promise.all(rawServiceVideos.map(resolveServiceStorageUrl))
+          await Promise.all(rawServiceVideos.map(resolveStorageUrl))
         ).filter((uri): uri is string => !!uri);
 
         setServiceVideos(resolvedVideos);
@@ -212,15 +302,20 @@ export default function ServiceDetailScreen() {
           try {
             const artist = await fetchArtistById(service.userId);
             if (artist) {
-              setProviderData(artist);
+              const resolvedProfileImage = await resolveStorageUrl(artist.profileImage);
+              setProviderData({
+                ...artist,
+                profileImage: resolvedProfileImage || artist.profileImage,
+              });
             } else {
               // Set default provider data if artist not found
               setProviderData({
                 name: (service as any).artistName || "Service Provider",
-                avatar: DEFAULT_AVATAR,
+                profileImage: DEFAULT_AVATAR,
                 level: "Service Provider",
                 responseTime: "24 hours",
                 completedOrders: "0",
+                phoneNumber: '',
               });
             }
           } catch (artistError) {
@@ -228,10 +323,11 @@ export default function ServiceDetailScreen() {
             // Set default provider data if artist fetch fails
             setProviderData({
               name: (service as any).artistName || "Service Provider",
-              avatar: DEFAULT_AVATAR,
+              profileImage: DEFAULT_AVATAR,
               level: "Service Provider",
               responseTime: "24 hours",
               completedOrders: "0",
+              phoneNumber: '',
             });
           }
         }
@@ -309,10 +405,11 @@ export default function ServiceDetailScreen() {
 
     provider: {
       name: providerData?.storeName || providerData?.name || serviceData?.artistName || "Service Provider",
-      avatar: providerData?.avatar || DEFAULT_AVATAR,
+      avatar: providerData?.profileImage || providerData?.avatar || DEFAULT_AVATAR,
       level: providerData?.level || "Service Provider",
       responseTime: providerData?.responseTime || "24 hours",
       completedOrders: providerData?.completedOrders || "0",
+      phoneNumber: providerData?.phoneNumber || '',
     },
   };
 
@@ -384,30 +481,61 @@ export default function ServiceDetailScreen() {
 
   const extrasList = useMemo(() => getExtrasCandidates(serviceData), [serviceData]);
 
-  const calculatePrice = () => {
-    // Calculate base price for all selected items and extras
-    let total = 0;
-    
-    if (serviceData?.items) {
-      serviceData.items.forEach((item: any, index: number) => {
-        const itemId = `item_${index}`;
-        const quantity = serviceQuantities[itemId] || 0;
-        if (quantity > 0 && item.price) {
-          const itemPrice = typeof item.price === 'number' ? item.price : parseFloat(String(item.price));
-          total += itemPrice * quantity;
-        }
-      });
+  useEffect(() => {
+    if (!serviceData?.items?.length && !extrasList.length) {
+      return;
     }
 
-    if (extrasList.length > 0) {
-      extrasList.forEach((extra: any, index: number) => {
-        const extraId = `extra_${index}`;
-        const quantity = serviceQuantities[extraId] || 0;
-        if (quantity > 0) {
-          total += getExtraPrice(extra) * quantity;
+    setServiceQuantities((current) => {
+      const next = { ...current };
+
+      if (Array.isArray(serviceData?.items)) {
+        serviceData.items.forEach((_: any, index: number) => {
+          const itemKey = `item_${index}`;
+          if (next[itemKey] == null) {
+            next[itemKey] = 1;
+          }
+        });
+      }
+
+      extrasList.forEach((_: any, index: number) => {
+        const extraKey = `extra_${index}`;
+        if (next[extraKey] == null) {
+          next[extraKey] = 0;
         }
       });
-    }
+
+      return next;
+    });
+  }, [extrasList, serviceData?.items]);
+
+  const calculateItemsTotal = () => {
+    if (!serviceData?.items) return 0;
+
+    return serviceData.items.reduce((total: number, item: any, index: number) => {
+      const itemId = `item_${index}`;
+      const quantity = serviceQuantities[itemId] || 0;
+      if (quantity <= 0 || !item?.price) return total;
+
+      const itemPrice = typeof item.price === 'number' ? item.price : parseFloat(String(item.price));
+      return total + itemPrice * quantity;
+    }, 0);
+  };
+
+  const calculateExtrasTotal = () => {
+    if (extrasList.length === 0) return 0;
+
+    return extrasList.reduce((total: number, extra: any, index: number) => {
+      const extraId = `extra_${index}`;
+      const quantity = serviceQuantities[extraId] || 0;
+      if (quantity <= 0) return total;
+
+      return total + getExtraPrice(extra) * quantity;
+    }, 0);
+  };
+
+  const calculatePrice = () => {
+    let total = calculateItemsTotal() + calculateExtrasTotal();
     
     if (couponApplied) total -= discount;
     
@@ -525,6 +653,8 @@ export default function ServiceDetailScreen() {
           },
         ],
       );
+
+      await AsyncStorage.removeItem(getDraftStorageKey()).catch(() => undefined);
     } catch (error: any) {
       console.error('Error creating order:', error);
       const errorMsg = error?.message || 'There was a problem placing your order. Please try again.';
@@ -547,7 +677,9 @@ export default function ServiceDetailScreen() {
           },
           {
             text: 'Login',
-            onPress: () => router.push('/auth')
+            onPress: () => {
+              void saveDraftAndRedirectToAuth({ showOfferForm: true });
+            }
           }
         ]
       );
@@ -567,7 +699,19 @@ export default function ServiceDetailScreen() {
       
       if (!currentUser) {
         console.log('❌ No current user found');
-        Alert.alert('Error', 'You need to be logged in to place an order.');
+        Alert.alert(
+          'Login Required',
+          'You need to be logged in to place an order.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Login',
+              onPress: () => {
+                void saveDraftAndRedirectToAuth({ showOfferForm: true });
+              },
+            },
+          ],
+        );
         return;
       }
       
@@ -919,6 +1063,14 @@ export default function ServiceDetailScreen() {
                 <View style={styles.titleSection}>
                   <Text style={styles.title}>{defaultServiceData.title}</Text>
 
+                  <View style={styles.serviceTotalCard}>
+                    <Text style={styles.serviceTotalLabel}>Service items total</Text>
+                    <View style={styles.serviceTotalValueRow}>
+                      <Text style={styles.serviceTotalValue}>{calculateItemsTotal()}</Text>
+                      <Text style={styles.serviceTotalCurrency}>MAD</Text>
+                    </View>
+                  </View>
+
                   {/* Inline rating row beneath title */}
                   <View style={styles.titleRatingRow}>
                     <View style={styles.starInline}>
@@ -976,6 +1128,14 @@ export default function ServiceDetailScreen() {
                           Replies in {defaultServiceData.provider.responseTime}
                         </Text>
                       </View>
+                      {defaultServiceData.provider.phoneNumber ? (
+                        <View style={styles.providerMetaRow}>
+                          <Ionicons name="call-outline" size={13} color={COLORS.textMuted} />
+                          <Text style={styles.providerMetaText}>
+                            {defaultServiceData.provider.phoneNumber}
+                          </Text>
+                        </View>
+                      ) : null}
                     </View>
                   </View>
                 </View>
@@ -1862,6 +2022,37 @@ const styles = StyleSheet.create({
     lineHeight: isSmallScreen ? 28 : 31,
     letterSpacing: -0.3,
     marginBottom: 10,
+  },
+  serviceTotalCard: {
+    alignSelf: 'flex-start',
+    backgroundColor: COLORS.primarySoft,
+    borderRadius: RADIUS.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 14,
+  },
+  serviceTotalLabel: {
+    fontSize: 12,
+    color: COLORS.primaryDark,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  serviceTotalValueRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  serviceTotalValue: {
+    fontSize: 22,
+    color: COLORS.primaryDark,
+    fontWeight: '800',
+    lineHeight: 24,
+  },
+  serviceTotalCurrency: {
+    fontSize: 12,
+    color: COLORS.primaryDark,
+    fontWeight: '700',
+    marginBottom: 2,
   },
   titleRatingRow: {
     flexDirection: 'row',

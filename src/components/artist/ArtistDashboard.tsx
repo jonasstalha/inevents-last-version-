@@ -722,8 +722,6 @@ const ArtistMobileApp = () => {
               <TextInput style={styles.textInput} placeholder="Service title" value={newService.title} onChangeText={t => setNewService({ ...newService, title: t })} />
               <Text style={styles.inputLabel}>Description</Text>
               <TextInput style={[styles.textInput, styles.textArea]} placeholder="Description" value={newService.description} onChangeText={t => setNewService({ ...newService, description: t })} multiline numberOfLines={3} />
-              <Text style={styles.inputLabel}>Base Price (MAD)</Text>
-              <TextInput style={styles.textInput} placeholder="0" keyboardType="numeric" value={newService.basePrice} onChangeText={t => setNewService({ ...newService, basePrice: t.replace(/[^0-9]/g, '') })} />
 
               <Text style={styles.inputLabel}>Region</Text>
               <TouchableOpacity style={[styles.dropdownButtonCompact, { justifyContent: 'space-between' }]} onPress={() => setShowRegionModal(true)}>

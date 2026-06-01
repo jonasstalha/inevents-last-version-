@@ -1,6 +1,19 @@
 import { collection, getDocs, getDoc, doc, getFirestore, query, orderBy, limit, startAfter, where } from 'firebase/firestore';
 import app from './firebaseConfig';
 
+const getMainItemsTotal = (serviceData: any): number => {
+  if (!Array.isArray(serviceData?.items) || serviceData.items.length === 0) {
+    return Number(serviceData?.price ?? serviceData?.basePrice ?? 0) || 0;
+  }
+
+  const total = serviceData.items.reduce((sum: number, item: any) => {
+    const itemPrice = Number(item?.price ?? 0);
+    return sum + (Number.isFinite(itemPrice) ? itemPrice : 0);
+  }, 0);
+
+  return total > 0 ? total : Number(serviceData?.price ?? serviceData?.basePrice ?? 0) || 0;
+};
+
 export interface ServiceFilters {
   priceMin?: number;
   priceMax?: number;
@@ -16,6 +29,10 @@ const transformServiceWithRating = async (db: any, serviceDoc: any) => {
     ...serviceDoc.data(),
     userId: serviceDoc.ref.parent.parent?.id || null,
   };
+
+  const normalizedMainItemsTotal = getMainItemsTotal(serviceData);
+  serviceData.price = normalizedMainItemsTotal;
+  serviceData.basePrice = normalizedMainItemsTotal;
   
   // Fetch artist info to get store name
   let artistName = 'Service Provider';

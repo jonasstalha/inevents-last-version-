@@ -125,10 +125,24 @@ const getIconByName = (iconName: string) => {
 };
 
 // ─── Transform helper ────────────────────────────────────────────────────────
+const getMainItemsTotal = (gig: any) => {
+  if (!Array.isArray(gig?.items) || gig.items.length === 0) {
+    return Number(gig?.basePrice ?? gig?.price ?? 500) || 500;
+  }
+
+  const total = gig.items.reduce((sum: number, item: any) => {
+    const itemPrice = Number(item?.price ?? 0);
+    return sum + (Number.isFinite(itemPrice) ? itemPrice : 0);
+  }, 0);
+
+  return total > 0 ? total : Number(gig?.basePrice ?? gig?.price ?? 500) || 500;
+};
+
 const transformGigData = (gig: any) => {
   const totalRating = gig.totalRating || 0;
   const totalRaters = gig.totalRaters || 0;
   const rating = totalRaters > 0 ? totalRating / totalRaters : 0;
+  const displayPrice = getMainItemsTotal(gig);
   return {
     id: gig.id,
     title: gig.title,
@@ -144,7 +158,7 @@ const transformGigData = (gig: any) => {
       gig.artistName || gig.userName || gig.providerName || 'Service Provider',
     city: gig.city || gig.location || '',
     location: gig.location || gig.city || '',
-    basePrice: gig.basePrice || gig.price || 500,
+    basePrice: displayPrice,
     rating,
     totalRating,
     totalRaters,

@@ -22,15 +22,18 @@ const firebaseConfig = {
   appId: '1:780609459655:android:c4535e1323f166ef7f75e2',
 };
 
+const hasExistingApp = getApps().length > 0;
+
 // Initialize app once
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+const app = hasExistingApp ? getApp() : initializeApp(firebaseConfig);
 
 // Initialize auth with persistent storage in React Native
-const auth = getApps().length === 0
-  ? initializeAuth(app, {
+const auth = hasExistingApp
+  ? getAuth(app)
+  : initializeAuth(app, {
       persistence: getReactNativePersistence(AsyncStorage),
     })
-  : getAuth(app);
+  ;
 
 // Initialize Firestore & Storage
 const db = getFirestore(app);
