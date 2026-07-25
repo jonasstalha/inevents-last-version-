@@ -6,7 +6,9 @@ import {
   Dimensions,
   FlatList,
   Modal,
+  RefreshControl,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -15,9 +17,6 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { dummyTickets } from './tickets';
-// Update the import path below to the correct location of your api file
-// Example: If api.ts is in app/src/api.ts, use '../src/api'
-import { collection, getDocs, getFirestore } from 'firebase/firestore';
 import { fetchArtists, fetchServices, fetchTickets } from '../../src/api';
 import { useApp } from '@/src/context/AppContext';
 import { fetchArtistsFromFirebase } from '../../src/firebase/artistsService';
@@ -26,18 +25,6 @@ import { useMarketplaceStore } from '../../stores/useMarketplaceStore';
 
 const { width, height } = Dimensions.get('window');
 
-interface Event {
-  id: number;
-  name: string;
-  description: string;
-  category: string;
-  date: string;
-  location: string;
-  image: string;
-  price: string;
-}
-
-// 1. Fix Service type to allow optional image
 interface Service {
   id: string | number;
   title: string;
@@ -59,12 +46,6 @@ interface Artist {
   image: string;
 }
 
-interface Category {
-  id: string;
-  name: string;
-  icon: string;
-}
-
 interface NavigationItem {
   id: string;
   title: string;
@@ -81,49 +62,15 @@ interface FeaturedService {
   icon: string;
 }
 
-const cardGradients: [string, string][] = [
-  ['#667eea', '#764ba2'],
-  ['#f093fb', '#f5576c'],
-  ['#4facfe', '#00f2fe'],
-  ['#43e97b', '#38f9d7'],
-  ['#fa709a', '#fee140'],
-  ['#a8edea', '#fed6e3']
-];
-
-const categories = [
-  { id: 'all', name: 'All', icon: 'grid' },
-  { id: 'wedding', name: 'Wedding', icon: 'heart' },
-  { id: 'conference', name: 'Conference', icon: 'briefcase' },
-  { id: 'photography', name: 'Photography', icon: 'camera' },
-  { id: 'kids', name: 'Kids', icon: 'smile' },
-  { id: 'music', name: 'Music', icon: 'music' },
-  { id: 'mariage', name: 'Mariage', icon: 'heart' },
-  { id: 'anniversaire', name: 'Anniversaire', icon: 'gift' },
-  { id: 'traiteur', name: 'Traiteur', icon: 'coffee' },
-  { id: 'musique', name: 'Musique', icon: 'music' },
-  { id: 'neggafa', name: 'Neggafa', icon: 'user' },
-  { id: 'conference', name: 'Conference', icon: 'briefcase' },
-  { id: 'evenement', name: "Evenement d'entreprise", icon: 'users' },
-  { id: 'kermesse', name: 'Kermesse', icon: 'smile' },
-  { id: 'henna', name: 'Henna', icon: 'award' }, // 'leaf' replaced with 'award'
-  { id: 'photographie', name: 'Photographie', icon: 'camera' },
-  { id: 'animation', name: 'Animation', icon: 'film' },
-  { id: 'decoration', name: 'Decoration', icon: 'award' },
-  { id: 'buffet', name: 'Buffet', icon: 'coffee' },
-];
-
 
 
 export default function EventApp() {
   const scrollViewRef = useRef<ScrollView>(null);
   const { user } = useAuth();
   const router = useRouter();
-  const [activeCategory, setActiveCategory] = useState('All');
-  const [activeSection, setActiveSection] = useState('events');
   const [isPopupVisible, setPopupVisible] = useState(false);
-  const [popupContent, setPopupContent] = useState<'features' | 'services' | 'events' | 'artists' | 'tickets'>('features');
+  const [popupContent, setPopupContent] = useState<'features' | 'services' | 'artists' | 'tickets'>('features');
   const [searchQuery, setSearchQuery] = useState('');
-  const [events] = useState<Event[]>([]);
 
   const artists = [
     {
@@ -159,6 +106,7 @@ export default function EventApp() {
   const [realServices, setRealServices] = useState<Service[]>([]);
   const [topTickets, setTopTickets] = useState<any[]>([]);
   const [topGlobalServices, setTopGlobalServices] = useState<any[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
   const { services } = useMarketplaceStore();
   const { savedArtists, getSavedArtists } = useApp();
   
@@ -174,13 +122,9 @@ export default function EventApp() {
   }));
 
   // Define functions first before using them in useMemo
-  const handleShowPopup = (content: 'features' | 'services' | 'events' | 'artists' | 'tickets') => {
+  const handleShowPopup = (content: 'features' | 'services' | 'artists' | 'tickets') => {
     setPopupContent(content);
     setPopupVisible(true);
-  };
-
-  const handleSectionChange = (sectionName: string) => {
-    setActiveSection(sectionName);
   };
 
   // For top-rated services:
@@ -282,74 +226,6 @@ export default function EventApp() {
     return () => pulseAnimation.stop();
   }, []);
 
-  // Enhanced animation values
-  // const headerAnimation = useRef(new Animated.Value(0)).current;  // Initialize animated values first
-  // const [animatedValues] = useState(() => {
-  //   const defaultValues = {
-  //     scale: new Animated.Value(1),
-  //     press: new Animated.Value(1),
-  //     navigation: new Animated.Value(0),
-  //     wiggle: new Animated.Value(0),
-  //     pulse: new Animated.Value(1),
-  //   };
-
-  //   // Add card animations later after navigation items are defined
-  //   return {
-  //     ...defaultValues,
-  //     cards: Array(5).fill(0).map(() => new Animated.Value(0)),
-  //   };
-  // });
-
-  // Enhanced animations on mount
-  // useEffect(() => {
-  //   const cardAnimations = animatedValues.cards.map((anim, index) =>
-  //     Animated.spring(anim, {
-  //       toValue: 1,
-  //       useNativeDriver: true,
-  //       delay: index * 100,
-  //       damping: 15,
-  //       mass: 0.8,
-  //       stiffness: 100,
-  //     })
-  //   );
-
-  //   Animated.parallel([
-  //     Animated.spring(animatedValues.navigation, {
-  //       toValue: 1,
-  //       useNativeDriver: true,
-  //       damping: 12,
-  //       mass: 0.9,
-  //       stiffness: 100,
-  //     }),
-  //     Animated.spring(headerAnimation, {
-  //       toValue: 1,
-  //       useNativeDriver: true,
-  //       damping: 15,
-  //       mass: 0.8,
-  //       stiffness: 100,
-  //     }),
-  //     ...cardAnimations,
-  //   ]).start();
-
-  //   // Pulse animation for badges
-  //   const pulseAnimation = Animated.loop(
-  //     Animated.sequence([
-  //       Animated.timing(animatedValues.pulse, {
-  //         toValue: 1.2,
-  //         duration: 1000,
-  //         useNativeDriver: true,
-  //       }),
-  //       Animated.timing(animatedValues.pulse, {
-  //         toValue: 1,
-  //         duration: 1000,
-  //         useNativeDriver: true,
-  //       }),
-  //     ])
-  //   );
-  //   pulseAnimation.start();
-
-  //   return () => pulseAnimation.stop();
-  // }, []);
   // Enhanced navigation item renderer with better animations
   const renderNavItem = (item: NavigationItem, index: number) => {
     const cardAnim = animatedValues.cards[index];
@@ -449,61 +325,7 @@ export default function EventApp() {
     );
   };
 
-  // Enhanced event card renderer
-  const renderEventCard = (event: Event, index: number) => {
-    const gradientIndex = index % cardGradients.length;
-
-    return (
-      <TouchableOpacity
-        key={event.id}
-        style={styles.enhancedEventCard}
-        onPress={() => { }}
-        activeOpacity={0.95}
-      >
-        <View style={styles.eventCardHeader}>
-          <View style={[styles.eventImageContainer, { backgroundColor: cardGradients[gradientIndex][0] }]}>
-            <Icon name="calendar" size={24} color="#ffffff" style={styles.eventIcon} />
-            <View style={styles.eventCardOverlay} />
-          </View>
-          <View style={styles.eventDateBadge}>
-            <Text style={styles.eventDateText}>{event.date.split(',')[0]}</Text>
-            <Text style={styles.eventMonthText}>{event.date.split(',')[1]}</Text>
-          </View>
-        </View>
-
-        <View style={styles.enhancedEventContent}>
-          <View style={styles.eventTitleSection}>
-            <Text style={styles.enhancedEventTitle}>{event.name}</Text>
-            <View style={styles.eventCategoryBadge}>
-              <Text style={styles.eventCategoryText}>{event.category}</Text>
-            </View>
-          </View>
-
-          <Text style={styles.enhancedEventDescription}>{event.description}</Text>
-
-          <View style={styles.enhancedEventFooter}>
-            <View style={styles.eventLocationContainer}>
-              <View style={styles.locationIconContainer}>
-                <Icon name="map-pin" size={14} color="#6b7280" />
-              </View>
-              <Text style={styles.eventLocationText}>{event.location}</Text>
-            </View>
-            <View style={styles.eventPriceContainer}>
-              <Text style={styles.eventPriceLabel}>From</Text>
-              <Text style={styles.enhancedEventPrice}>{event.price}</Text>
-            </View>
-          </View>
-
-          <TouchableOpacity style={styles.enhancedBuyButton}>
-            <Text style={styles.buyButtonText}>Book Now</Text>
-            <Icon name="arrow-right" size={16} color="#fff" style={styles.buyButtonIcon} />
-          </TouchableOpacity>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
-  // Star rating component
+  // Enhanced navigation item renderer with better animations
   type StarRatingProps = { rating: number; count?: number; size?: number };
   const StarRating: React.FC<StarRatingProps> = ({ rating, count = 5, size = 14 }) => {
     const stars = [];
@@ -521,55 +343,15 @@ export default function EventApp() {
     return <View style={{ flexDirection: 'row', alignItems: 'center' }}>{stars}</View>;
   };
 
-  // Fetch average rating for a service from Firestore
-  type ServiceRating = { avgRating: number | null; reviewCount: number };
-  const useServiceRating = (artistId: string, serviceId: string): ServiceRating => {
-    const [avgRating, setAvgRating] = useState<number | null>(null);
-    const [reviewCount, setReviewCount] = useState<number>(0);
-
-    useEffect(() => {
-      if (!artistId || !serviceId) return;
-      const fetchRating = async () => {
-        try {
-          const db = getFirestore();
-          const commentsRef = collection(db, 'users', artistId, 'services', serviceId, 'comments');
-          const snapshot = await getDocs(commentsRef);
-          let total = 0;
-          let count = 0;
-          snapshot.forEach(doc => {
-            const data = doc.data();
-            if (typeof data.rating === 'number') {
-              total += data.rating;
-              count++;
-            }
-          });
-          setAvgRating(count > 0 ? total / count : null);
-          setReviewCount(count);
-        } catch (e) {
-          setAvgRating(null);
-          setReviewCount(0);
-        }
-      };
-      fetchRating();
-    }, [artistId, serviceId]);
-    return { avgRating, reviewCount };
-  };
-
   // Transform service data to prioritize cover image
   const transformServiceData = (service: any) => ({
     ...service,
     image: service.cover || service.image || (Array.isArray(service.images) && service.images.length > 0 ? service.images[0] : null),
   });
 
-  // Enhanced service card renderer with rating
-  const renderServiceCard = (service: Service & { artistId?: string }, index: number) => {
+  const renderServiceCard = (service: any, index: number) => {
     const transformedService = transformServiceData(service);
-    const gradientIndex = index % cardGradients.length;
-    // If service has artistId, fetch rating from Firestore
-    let ratingInfo: ServiceRating = { avgRating: null, reviewCount: 0 };
-    if (service.artistId) {
-      ratingInfo = useServiceRating(service.artistId, String(service.id));
-    }
+    const gradientIndex = index % 6;
     return (
       <TouchableOpacity
         key={service.id}
@@ -578,7 +360,7 @@ export default function EventApp() {
         activeOpacity={0.95}
       >
         <View style={styles.serviceCardHeader}>
-          <View style={[styles.serviceImageContainer, { backgroundColor: cardGradients[gradientIndex][0] }]}> 
+          <View style={[styles.serviceImageContainer, { backgroundColor: ['#667eea','#f093fb','#4facfe','#43e97b','#fa709a','#a8edea'][gradientIndex] }]}> 
             {transformedService.image && typeof transformedService.image === 'string' && transformedService.image.startsWith('http') ? (
               <View style={{ width: '100%', height: '100%', borderRadius: 20, overflow: 'hidden' }}>
                 <Animated.Image
@@ -612,15 +394,7 @@ export default function EventApp() {
             </View>
             <View style={styles.serviceMetric}>
               <Icon name="star" size={12} color="#f59e0b" />
-              {/* Show average rating from Firestore if available, else fallback to service.reviews */}
-              {service.artistId && ratingInfo.avgRating !== null ? (
-                <>
-                  <StarRating rating={ratingInfo.avgRating} />
-                  <Text style={styles.serviceMetricText}>({ratingInfo.reviewCount})</Text>
-                </>
-              ) : (
-                <Text style={styles.serviceMetricText}>{service.reviews}</Text>
-              )}
+              <Text style={styles.serviceMetricText}>{service.reviews}</Text>
             </View>
             <View style={styles.serviceMetric}>
               <Icon name="shopping-bag" size={12} color="#6b7280" />
@@ -628,27 +402,21 @@ export default function EventApp() {
             </View>
           </View>
         </View>
-        {/* If user is signed in, show rate button */}
-        {user && service.artistId && (
-          <TouchableOpacity style={{ marginTop: 8, alignSelf: 'flex-start', backgroundColor: '#f3f4f6', borderRadius: 8, padding: 6 }}
-            onPress={() => {/* TODO: open rate modal */}}>
-            <Text style={{ color: '#4f46e5', fontWeight: 'bold' }}>Rate this service</Text>
-          </TouchableOpacity>
-        )}
       </TouchableOpacity>
     );
   };
 
   // Enhanced artist card renderer
   const renderArtistCard = (artist: Artist, index: number) => {
-    const gradientIndex = index % cardGradients.length;
+    const gradientIndex = index % 6;
+    const COLORS = ['#667eea','#f093fb','#4facfe','#43e97b','#fa709a','#a8edea'];
 
     return (
 <TouchableOpacity
   key={artist.id}
   style={styles.enhancedArtistCard}
   activeOpacity={0.95}
-onPress={() => {
+  onPress={() => {
   if (!user) {
     router.replace('/auth');
     return;
@@ -661,7 +429,7 @@ onPress={() => {
 }}
 >
         <View style={styles.artistCardHeader}>
-          <View style={[styles.artistImageContainer, { backgroundColor: cardGradients[gradientIndex][0] }]}>
+          <View style={[styles.artistImageContainer, { backgroundColor: ['#667eea','#f093fb','#4facfe','#43e97b','#fa709a','#a8edea'][gradientIndex] }]}>
             <Icon name="user" size={24} color="#ffffff" />
             <View style={styles.artistCardOverlay} />
           </View>
@@ -692,7 +460,8 @@ onPress={() => {
 
   // Enhanced ticket card renderer
   const renderTicketCard = (ticket: any, index: number) => {
-    const gradientIndex = index % cardGradients.length;
+    const gradientIndex = index % 6;
+    const COLORS = ['#667eea','#f093fb','#4facfe','#43e97b','#fa709a','#a8edea'];
 
     return (
       <TouchableOpacity
@@ -703,7 +472,7 @@ onPress={() => {
       >
         <View style={[
           styles.trendingImageContainer,
-          { backgroundColor: cardGradients[index % cardGradients.length][0] }
+          { backgroundColor: ['#667eea','#f093fb','#4facfe','#43e97b','#fa709a','#a8edea'][index % 6] }
         ]}>
           <Icon name="calendar" size={24} color="#ffffff" />
           <View style={styles.trendingCardOverlay} />
@@ -831,7 +600,6 @@ onPress={() => {
   useEffect(() => {
     fetchServices()
       .then(services => {
-        console.log('Fetched services:', services);
         if (Array.isArray(services)) {
           // Shuffle services for randomness
           const shuffled = services.sort(() => 0.5 - Math.random());
@@ -846,6 +614,39 @@ onPress={() => {
         setRealServices([]);
       });
   }, []);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const [servicesData, ticketsData] = await Promise.all([
+        fetchServices(),
+        fetchAllTickets(),
+      ]);
+      if (Array.isArray(servicesData)) {
+        const shuffled = servicesData.sort(() => 0.5 - Math.random());
+        setRealServices(shuffled);
+      }
+      if (Array.isArray(ticketsData)) {
+        setRealTickets(ticketsData);
+        setEventCount(ticketsData.length);
+        const sorted = [...ticketsData].sort((a: any, b: any) => {
+          if (typeof b.availableTickets === 'number' && typeof a.availableTickets === 'number') {
+            return b.availableTickets - a.availableTickets;
+          }
+          return (Number(b.id) || 0) - (Number(a.id) || 0);
+        });
+        setTopTickets(sorted.slice(0, 8));
+      }
+      const firebaseArtists = await fetchArtistsFromFirebase();
+      const mapped = firebaseArtists.map((a: any, i: number) => ({
+        id: a.id ?? i, name: a.name ?? '', description: a.description ?? '',
+        specialty: a.specialty ?? '', rating: a.rating ?? 0, image: a.image ?? '',
+      }));
+      setRealArtists(mapped);
+      setArtistCount(mapped.length);
+    } catch { /* ignore refresh errors */ }
+    setRefreshing(false);
+  };
 
   const handleFeatureNavigation = (featureTitle: string) => {
     setPopupVisible(false); // Close the popup first
@@ -870,8 +671,6 @@ onPress={() => {
         router.push('/(client)/(hidden)/features/terms-of-service');
         break;
       default:
-        // For service categories, you could navigate to a filtered services page
-        console.log(`Navigate to ${featureTitle} services`);
         break;
     }
   };
@@ -894,7 +693,7 @@ onPress={() => {
                   onPress={() => handleFeatureNavigation(item.title)}
                 >
                   <View style={[styles.enhancedFeatureIcon, {
-                    backgroundColor: cardGradients[index % cardGradients.length][0],
+                    backgroundColor: ['#667eea','#f093fb','#4facfe','#43e97b','#fa709a','#a8edea'][index % 6],
                   }]}>
                     <Icon name={item.icon} size={24} color="#fff" />
                   </View>
@@ -979,67 +778,6 @@ onPress={() => {
     return `Good ${getTimeOfDay()}${user?.name ? `, ${user.name.split(' ')[0]}` : ''}!`;
   };
 
-  // Enhanced navigation data
-  // const navigationItems: NavigationItem[] = [
-  //   {
-  //     id: 'features',
-  //     title: 'Features',
-  //     subtitle: 'Explore all',
-  //     icon: 'grid',
-  //     colors: ['#4f46e5', '#818cf8'],
-  //     onPress: () => showPopup('features'),
-  //     badge: true,
-  //   },
-  //   {
-  //     id: 'services',
-  //     title: 'Services',
-  //     subtitle: 'Premium quality',
-  //     icon: 'package',
-  //     colors: ['#059669', '#10b981'],
-  //     onPress: () => showPopup('services'),
-  //   },
-  //   {
-  //     id: 'events',
-  //     title: 'Events',
-  //     subtitle: 'Discover amazing',
-  //     icon: 'calendar',
-  //     colors: ['#d946ef', '#f472b6'],
-  //     onPress: () => handleSectionChange('events'),
-  //   },
-  //   {
-  //     id: 'artists',
-  //     title: 'Artists',
-  //     subtitle: 'Meet creators',
-  //     icon: 'users',
-  //     colors: ['#0ea5e9', '#38bdf8'],
-  //     onPress: () => showPopup('artists'),
-  //   },
-  //   {
-  //     id: 'tickets',
-  //     title: 'Tickets',
-  //     subtitle: 'Book now',
-  //     icon: 'ticket',
-  //     colors: ['#f59e0b', '#fbbf24'],
-  //     onPress: () => showPopup('tickets'),
-  //   },
-  // ];
-
-  const categories: Category[] = [
-    { id: 'mariage', name: 'Mariage', icon: 'heart' },
-    { id: 'anniversaire', name: 'Anniversaire', icon: 'gift' },
-    { id: 'traiteur', name: 'Traiteur', icon: 'coffee' },
-    { id: 'musique', name: 'Musique', icon: 'music' },
-    { id: 'neggafa', name: 'Neggafa', icon: 'user' },
-    { id: 'conference', name: 'Conference', icon: 'briefcase' },
-    { id: 'evenement', name: "Evenement d'entreprise", icon: 'users' },
-    { id: 'kermesse', name: 'Kermesse', icon: 'smile' },
-    { id: 'henna', name: 'Henna', icon: 'award' },
-    { id: 'photographie', name: 'Photographie', icon: 'camera' },
-    { id: 'animation', name: 'Animation', icon: 'film' },
-    { id: 'decoration', name: 'Decoration', icon: 'award' },
-    { id: 'buffet', name: 'Buffet', icon: 'coffee' },
-  ];
-
   const featuredServices: FeaturedService[] = [
 
     { id: 7, title: 'Become Provider', icon: 'user' },
@@ -1050,17 +788,15 @@ onPress={() => {
     { id: 12, title: 'Terms of Service', icon: 'file-text' }
   ];
 
-  const filteredEvents = activeCategory === 'All'
-    ? events
-    : events.filter(event => event.category === activeCategory);
-
   return (
     <ScrollView
       ref={scrollViewRef}
       style={styles.container}
       showsVerticalScrollIndicator={true}
       contentContainerStyle={{ flexGrow: 1 }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#4f46e5']} tintColor="#4f46e5" />}
     >
+      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
       <View style={{ flex: 1, paddingBottom: 20 }}>
         {/* Enhanced Header Section */}
         <Animated.View style={[styles.enhancedHeader, {
@@ -1079,7 +815,7 @@ onPress={() => {
                 placeholderTextColor="#9ca3af"
                 value={searchQuery}
                 onChangeText={setSearchQuery}
-                onFocus={() => router.push('/search')}
+                onFocus={() => router.push('/(client)/search')}
               />
               {searchQuery.length > 0 && (
                 <TouchableOpacity

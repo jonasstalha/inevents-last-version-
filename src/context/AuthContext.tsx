@@ -16,7 +16,7 @@ interface User {
   name: string;
   phoneNumber: string;
   isPhoneVerified: boolean;
-  role: 'client' | 'artist' | 'admin';
+  role: 'client' | 'artist' | 'admin' | null;
   storeName?: string;
   storeBio?: string;
   city?: string;
@@ -47,6 +47,38 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const VALID_ROLES: Array<User['role']> = ['client', 'artist', 'admin'];
+
+const normalizeRole = (role: unknown): User['role'] => {
+  if (typeof role !== 'string') return null;
+  const normalized = role.trim().toLowerCase() as User['role'];
+  return VALID_ROLES.includes(normalized) ? normalized : null;
+};
+
+const buildUserFromFirebase = (firebaseUser: FirebaseUser, profileData?: any): User => {
+  const resolvedRole = normalizeRole(profileData?.role);
+  const base = {
+    uid: firebaseUser.uid,
+    email: profileData?.email || firebaseUser.email || '',
+    name: profileData?.name || firebaseUser.displayName || '',
+    phoneNumber: profileData?.phoneNumber || firebaseUser.phoneNumber || '',
+    isPhoneVerified: Boolean(profileData?.isPhoneVerified),
+    role: resolvedRole,
+  };
+  if (resolvedRole === 'artist') {
+    return {
+      ...base,
+      storeName: profileData?.storeName,
+      storeBio: profileData?.storeBio,
+      city: profileData?.city,
+      categories: Array.isArray(profileData?.categories)
+        ? profileData.categories
+        : undefined,
+    };
+  }
+  return base;
+};
+
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
@@ -63,16 +95,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
       if (firebaseUser) {
         try {
-          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+          const userRef = doc(db, 'users', firebaseUser.uid);
+          const userDoc = await getDoc(userRef);
+
           if (userDoc.exists()) {
-            const userData = { ...userDoc.data(), uid: firebaseUser.uid } as User;
+            const userData = buildUserFromFirebase(firebaseUser, userDoc.data());
             setUser(userData);
           } else {
-            setUser(null);
+            setUser((currentUser) => {
+              if (currentUser?.uid === firebaseUser.uid) {
+                return currentUser;
+              }
+              const fallbackUser = buildUserFromFirebase(firebaseUser);
+              setDoc(userRef, {
+                uid: fallbackUser.uid,
+                email: fallbackUser.email,
+                name: fallbackUser.name,
+                phoneNumber: fallbackUser.phoneNumber,
+                isPhoneVerified: fallbackUser.isPhoneVerified,
+                role: fallbackUser.role,
+              }, { merge: true }).catch(() => {});
+              return fallbackUser;
+            });
           }
         } catch (error) {
           console.error('Error fetching user data:', error);
-          setUser(null);
+          // Do not force-logout users on transient Firestore/network issues
+          setUser((currentUser) => {
+            if (currentUser?.uid === firebaseUser.uid) {
+              return currentUser;
+            }
+            return buildUserFromFirebase(firebaseUser);
+          });
         }
       } else {
         setUser(null);
@@ -94,30 +148,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const firebaseUser = userCredential.user;
-      const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+
+      const userRef = doc(db, 'users', firebaseUser.uid);
+      const userDoc = await getDoc(userRef);
       if (userDoc.exists()) {
-        const data = userDoc.data();
-        // Validate that the role field exists and is valid
-        if (data.role && ['client', 'artist', 'admin'].includes(data.role)) {
-          const userData: User = {
-            uid: firebaseUser.uid,
-            email: data.email || firebaseUser.email || '',
-            name: data.name || '',
-            phoneNumber: data.phoneNumber || '',
-            isPhoneVerified: data.isPhoneVerified || false,
-            role: data.role,
-            storeName: data.storeName,
-            storeBio: data.storeBio,
-            city: data.city,
-            categories: data.categories,
-          };
-          return userData;
-        } else {
-          console.error('User document exists but role field is missing or invalid:', data);
-          return null;
-        }
+        const userData = buildUserFromFirebase(firebaseUser, userDoc.data());
+        setUser(userData);
+        return userData;
       }
-      return null;
+
+      const fallbackUser = buildUserFromFirebase(firebaseUser);
+      await setDoc(
+        userRef,
+        {
+          uid: fallbackUser.uid,
+          email: fallbackUser.email,
+          name: fallbackUser.name,
+          phoneNumber: fallbackUser.phoneNumber,
+          isPhoneVerified: fallbackUser.isPhoneVerified,
+          role: fallbackUser.role,
+        },
+        { merge: true },
+      );
+      setUser(fallbackUser);
+      return fallbackUser;
     } catch (error) {
       console.error('Login error:', error);
       throw error;
@@ -181,7 +235,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!firebaseUser) return;
       const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
       if (userDoc.exists()) {
-        const userData = { ...userDoc.data(), uid: firebaseUser.uid } as User;
+        const userData = buildUserFromFirebase(firebaseUser, userDoc.data());
         setUser(userData);
       }
     } catch (error) {

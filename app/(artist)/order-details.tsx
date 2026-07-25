@@ -5,7 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getAuth } from 'firebase/auth';
 import { ArrowLeft } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 
 const getStatusColor = (status: string): string => {
@@ -243,7 +243,12 @@ export default function OrderDetailsPage() {
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 180 }} showsVerticalScrollIndicator={false}>
+        {/* Service Image */}
+        {order.serviceImage ? (
+          <Image source={{ uri: order.serviceImage }} style={styles.serviceImage} />
+        ) : null}
+
         {/* Service Title and Status */}
         <View style={styles.section}>
           <Text style={styles.label}>{order.serviceTitle || order.gigTitle || order.ticketName || 'Order'}</Text>
@@ -259,15 +264,21 @@ export default function OrderDetailsPage() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Pricing Details</Text>
           <View style={styles.priceRow}>
-            <Text style={styles.priceLabel}>Offered Price:</Text>
-            <Text style={styles.priceAmount}>{order.totalPrice?.toFixed(2)} MAD</Text>
+            <Text style={styles.priceLabel}>Client Budget:</Text>
+            <Text style={styles.priceAmount}>{(order.clientPrice ?? order.budget ?? 0)?.toFixed(2)} MAD</Text>
           </View>
-          {order.budget ? (
+          {order.price != null && order.price !== (order.clientPrice ?? order.budget) && (
             <View style={styles.priceRow}>
-              <Text style={styles.priceLabel}>Client Budget:</Text>
-              <Text style={styles.priceAmount}>{order.budget?.toFixed(2)} MAD</Text>
+              <Text style={styles.priceLabel}>Service Price:</Text>
+              <Text style={styles.priceAmount}>{order.price?.toFixed(2)} MAD</Text>
             </View>
-          ) : null}
+          )}
+          {order.totalPrice != null && order.totalPrice !== (order.clientPrice ?? order.budget) && (
+            <View style={styles.priceRow}>
+              <Text style={styles.priceLabel}>Customization Total:</Text>
+              <Text style={styles.priceAmount}>{order.totalPrice?.toFixed(2)} MAD</Text>
+            </View>
+          )}
           {order.priceProposal?.proposedPrice ? (
             <View style={styles.priceRow}>
               <Text style={styles.priceLabel}>Proposed Price:</Text>
@@ -483,6 +494,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 8,
+  },
+  serviceImage: {
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
+    marginBottom: 12,
   },
   status: {
     fontSize: 14,

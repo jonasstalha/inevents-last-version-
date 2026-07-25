@@ -1,29 +1,26 @@
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
-import * as Notifications from 'expo-notifications';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '@/src/firebase/firebaseConfig';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
-
-function getProjectId(): string | undefined {
+function getProjectId(): string {
   const constants: any = Constants;
   return (
     constants?.expoConfig?.extra?.eas?.projectId ||
-    constants?.easConfig?.projectId
+    constants?.easConfig?.projectId ||
+    'd079d504-69ff-40fc-8cf5-aab12017a523'
   );
 }
 
 export async function registerPushTokenForUser(userId: string): Promise<void> {
   if (!userId) return;
+
+  if (Constants.appOwnership === 'expo') {
+    console.warn(
+      '[push] Running in Expo Go — skipping push registration. Use a development build instead.',
+    );
+    return;
+  }
 
   if (!Device.isDevice) {
     console.log('[push] Skipping push token registration on simulator');
@@ -31,6 +28,18 @@ export async function registerPushTokenForUser(userId: string): Promise<void> {
   }
 
   try {
+    const Notifications = (await import('expo-notifications')) as typeof import('expo-notifications');
+
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      }),
+    });
+
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
 
@@ -45,24 +54,12 @@ export async function registerPushTokenForUser(userId: string): Promise<void> {
     }
 
     const projectId = getProjectId();
-    const expoTokenResponse = await Notifications.getExpoPushTokenAsync(
-      projectId ? { projectId } : undefined,
-    );
+    const expoTokenResponse = await Notifications.getExpoPushTokenAsync({ projectId });
     const expoPushToken = expoTokenResponse.data;
-
-    let nativePushToken = '';
-    try {
-      const nativeTokenResponse = await Notifications.getDevicePushTokenAsync();
-      nativePushToken = String(nativeTokenResponse.data || '');
-    } catch (nativeTokenError) {
-      console.warn('[push] Unable to get native push token', nativeTokenError);
-    }
 
     const userRef = doc(db, 'users', userId);
     await updateDoc(userRef, {
       expoPushToken,
-      pushToken: expoPushToken,
-      ...(nativePushToken ? { fcmToken: nativePushToken } : {}),
       pushTokenUpdatedAt: new Date().toISOString(),
     });
 

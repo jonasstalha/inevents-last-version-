@@ -168,13 +168,21 @@ export const fetchServicesWithPaginationFromFirebase = async (
         if (rating < filters.minRating || rating >= filters.minRating + 1) passesFilters = false;
       }
       
-      // Region filter
+      // Region filter (be tolerant: normalize requested region and fall back to using it as a city name)
       if (filters?.region) {
+        const requestedRegion = String(filters.region).trim();
         const serviceLocation = (transformedService.city || transformedService.location || '').toLowerCase();
-        const regionCities = moroccoRegions[filters.region] || [];
-        const matchesRegion = regionCities.some(city => 
-          serviceLocation.includes(city.toLowerCase())
-        );
+
+        // Find a matching region key in moroccoRegions using case-insensitive comparison
+        const regionKeys = Object.keys(moroccoRegions);
+        const exactKey = regionKeys.find(k => k.toLowerCase() === requestedRegion.toLowerCase());
+        const containsKey = regionKeys.find(k => k.toLowerCase().includes(requestedRegion.toLowerCase()));
+        const containedByKey = regionKeys.find(k => requestedRegion.toLowerCase().includes(k.toLowerCase()));
+
+        const matchedKey = exactKey || containsKey || containedByKey;
+        const regionCities = matchedKey ? moroccoRegions[matchedKey] : [requestedRegion];
+
+        const matchesRegion = regionCities.some(city => serviceLocation.includes(city.toLowerCase()));
         if (!matchesRegion && serviceLocation !== '') {
           passesFilters = false;
         }

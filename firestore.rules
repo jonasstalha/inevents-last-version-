@@ -52,7 +52,11 @@ service cloud.firestore {
       match /services/{serviceId} {
         allow read: if true; // Public read for marketplace
         allow create, update: if isOwnerOrAdmin(userId);
-        allow delete: if isOwnerOrAdmin(userId);
+        allow delete: if isAuthenticated() && (
+          request.auth.uid == userId ||
+          request.auth.uid == resource.data.artistId ||
+          isAdmin()
+        );
         
         // Comments on services
         match /comments/{commentId} {

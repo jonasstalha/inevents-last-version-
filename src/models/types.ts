@@ -76,7 +76,7 @@ export interface GigOption {
   maxQuantity?: number;
 }
 
-export type OrderStatus = 'pending' | 'confirmed' | 'rejected' | 'completed';
+export type OrderStatus = 'pending' | 'confirmed' | 'rejected' | 'completed' | 'counter_offered';
 export type OrderType = 'ticket' | 'service';
 export type PaymentStatus = 'unpaid' | 'paid';
 
@@ -102,7 +102,10 @@ export interface Order {
   type: OrderType;
   status: OrderStatus;
   totalPrice: number;
+  price?: number;
+  clientPrice?: number;
   budget?: number;
+  counterOfferPrice?: number;
   selectedPackage?: string;
   currency?: string;
   paymentStatus?: PaymentStatus;

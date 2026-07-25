@@ -81,7 +81,7 @@ export const validatePromoCode = async (
     }
 
     // Check if service matches (if serviceId provided)
-    if (serviceId && coupon.serviceId !== serviceId) {
+    if (serviceId && coupon.serviceId !== 'all' && coupon.serviceId !== serviceId) {
       console.log('❌ Service mismatch. Coupon serviceId:', coupon.serviceId, 'Required serviceId:', serviceId);
       return 0;
     }
@@ -92,9 +92,18 @@ export const validatePromoCode = async (
       return 0;
     }
 
-    // Return discount value
-    const discountValue = typeof coupon.discountValue === 'number' ? coupon.discountValue : 0;
-    console.log('✅ Coupon valid! Discount value:', discountValue);
+    // Return discount value (properly calculated for percentage vs fixed)
+    let discountValue = 0;
+    if (coupon.discountType === 'percentage' && orderValue != null) {
+      discountValue = (orderValue * Number(coupon.discountValue)) / 100;
+    } else if (coupon.discountType === 'fixed') {
+      discountValue = typeof coupon.discountValue === 'number' ? coupon.discountValue : 0;
+    } else {
+      discountValue = typeof coupon.discountValue === 'number' ? coupon.discountValue : 0;
+    }
+    // Ensure discount doesn't exceed order value
+    if (orderValue != null) discountValue = Math.min(discountValue, orderValue);
+    console.log('✅ Coupon valid! Discount value:', discountValue, '(type:', coupon.discountType, ')');
     return discountValue;
 
   } catch (error) {

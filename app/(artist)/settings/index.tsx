@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View, Modal, Animated, Dimensions, Alert } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View, Modal, Animated, Dimensions, Alert, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useArtistStore } from '../../../src/components/artist/ArtistStore';
 
@@ -78,15 +78,15 @@ const SettingsPage = () => {
               });
               
               if (result.success) {
-                console.log('✅ Logout completed successfully - redirecting to client side');
+                console.log('✅ Logout completed successfully - redirecting to auth');
                 
-                // Step 3: Redirect to client side immediately
-                router.replace('/(client)');
+                // Step 3: Redirect to auth
+                router.replace('/auth');
               } else {
                 console.error('❌ Logout failed:', result.error);
                 
                 // Still try to redirect even if logout had issues
-                router.replace('/(client)');
+                router.replace('/auth');
                 Alert.alert("Logout Notice", "You have been logged out, but some data may not have been cleared completely.");
               }
               
@@ -101,7 +101,7 @@ const SettingsPage = () => {
                 console.error('❌ Emergency logout failed:', emergencyError);
               } finally {
                 // Always redirect regardless of errors
-                router.replace('/(client)');
+                router.replace('/auth');
               }
             }
           }
@@ -111,7 +111,7 @@ const SettingsPage = () => {
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: Platform.OS === 'ios' ? 180 : 160 }}>
       {/* Profile Settings */}
       <View style={styles.sectionCard}>
         <Text style={styles.sectionTitle}>Profile Settings</Text>

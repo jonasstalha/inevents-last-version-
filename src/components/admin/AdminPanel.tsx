@@ -1,22 +1,27 @@
 import Constants from 'expo-constants';
-import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, Timestamp, updateDoc, where } from 'firebase/firestore';
 import {
   Activity,
   ChartBar as BarChart,
+  ArrowDown,
+  ArrowUp,
+  BarChart3,
   Bell,
   Check,
   ChevronRight,
+  Circle,
   ClipboardCheck,
   CreditCard,
   DollarSign,
-  Edit,
   Eye,
   Filter,
   Gift,
   Mail,
+  Play,
   Plus,
   Search,
   Shield,
+  ShoppingBag,
   Trash2,
   TrendingUp,
   Users,
@@ -27,6 +32,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Image,
   Modal,
   RefreshControl,
   ScrollView,
@@ -107,18 +113,29 @@ export default function AdminPanel({ initialTab = 'dashboard', hideTabBar = fals
   const [usersLoading, setUsersLoading] = useState(false);
   const [services, setServices] = useState<Service[]>([]);
   const [servicesLoading, setServicesLoading] = useState(false);
+  const [showServiceModal, setShowServiceModal] = useState(false);
+  const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [coupons, setCoupons] = useState<Coupon[]>([]);
+  const [couponsLoading, setCouponsLoading] = useState(false);
 
   const [financialLoading, setFinancialLoading] = useState(false);
+  const [financePeriod, setFinancePeriod] = useState<'week' | 'month' | 'year'>('month');
+  const [serviceOrderCounts, setServiceOrderCounts] = useState<Record<string, number>>({});
   const [financialData, setFinancialData] = useState<any>({
     totalRevenue: 0,
+    servicesRevenue: 0,
+    ticketsRevenue: 0,
     weeklyIncome: 0,
     monthlyIncome: 0,
     averageOrderValue: 0,
     totalOrders: 0,
+    serviceOrders: 0,
+    ticketOrders: 0,
     pendingPayouts: 0,
     topEarners: [],
     revenueData: [],
+    periodRevenue: [],
+    periodLabels: [],
   });
 
   const [activeTab, setActiveTab] = useState<'dashboard'|'users'|'services'|'financial'|'coupons'>(initialTab ?? 'dashboard');
@@ -130,6 +147,7 @@ export default function AdminPanel({ initialTab = 'dashboard', hideTabBar = fals
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [serviceSearchQuery, setServiceSearchQuery] = useState('');
   const [couponSearchQuery, setCouponSearchQuery] = useState('');
+  const [couponStatusFilter, setCouponStatusFilter] = useState<'all' | 'active' | 'stopped' | 'expired'>('all');
   const [userFilters, setUserFilters] = useState<UserFilters>({ role: 'all', status: 'all', region: 'all' });
   const [serviceFilters, setServiceFilters] = useState<ServiceFilters>({ category: 'all', status: 'all', creator: 'all' });
   const [newUser, setNewUser] = useState({
@@ -158,12 +176,10 @@ export default function AdminPanel({ initialTab = 'dashboard', hideTabBar = fals
     type: 'percentage' as 'percentage' | 'fixed',
     expirationDate: '',
     maxUsage: '',
-    status: 'active' as 'active' | 'stopped',
-    description: '',
     minOrderAmount: '',
-    scope: 'all' as 'all' | 'services' | 'tickets' | 'selected',
-    targetType: 'all' as 'all' | 'service' | 'ticket',
-    targetIds: [] as string[],
+    scope: 'all' as 'all' | 'specific',
+    selectedServiceId: '',
+    selectedServiceName: '',
   });
 
   useEffect(() => {
@@ -215,9 +231,47 @@ export default function AdminPanel({ initialTab = 'dashboard', hideTabBar = fals
       const matchesSearch = searchLower === '' ||
         (coupon.name || '').toString().toLowerCase().includes(searchLower) ||
         (coupon.code || '').toString().toLowerCase().includes(searchLower);
-      return matchesSearch;
+      if (!matchesSearch) return false;
+      const exp = coupon.expirationDate instanceof Date ? coupon.expirationDate : new Date(coupon.expirationDate);
+      const isExp = !isNaN(exp.getTime()) && exp < new Date();
+      if (couponStatusFilter === 'expired') return isExp;
+      if (couponStatusFilter === 'active') return coupon.status === 'active' && !isExp;
+      if (couponStatusFilter === 'stopped') return coupon.status === 'stopped';
+      return true;
     });
-  }, [coupons, couponSearchQuery]);
+  }, [coupons, couponSearchQuery, couponStatusFilter]);
+
+  const fetchCoupons = async () => {
+    setCouponsLoading(true);
+    try {
+      const q = query(collection(db, 'coupons'), where('artistId', '==', 'admin'));
+      const snapshot = await getDocs(q);
+      const fetched: Coupon[] = snapshot.docs.map(doc => {
+        const d = doc.data();
+        return {
+          id: doc.id,
+          name: d.code || '',
+          code: d.code || '',
+          discount: d.discountValue || 0,
+          type: d.discountType || 'percentage',
+          expirationDate: d.expiryDate?.toDate?.() || new Date(d.expiryDate) || new Date(),
+          usageCount: d.currentUses || 0,
+          maxUsage: d.maxUses || 0,
+          status: d.isActive ? 'active' : 'stopped',
+          description: d.description || '',
+          minOrderAmount: d.minOrderValue || 0,
+          scope: d.serviceId === 'all' ? 'all' : 'selected',
+          targetType: 'service',
+          targetIds: d.serviceId && d.serviceId !== 'all' ? [d.serviceId] : [],
+        } as Coupon;
+      });
+      setCoupons(fetched);
+    } catch (err) {
+      console.error('Error fetching coupons:', err);
+    } finally {
+      setCouponsLoading(false);
+    }
+  };
 
   const clearAllFilters = () => {
     setUserSearchQuery('');
@@ -271,7 +325,18 @@ export default function AdminPanel({ initialTab = 'dashboard', hideTabBar = fals
       console.log('🔄 Manual refresh triggered');
       await fetchUsers();
       await fetchServicesAndTickets();
+      await fetchCoupons();
       await fetchFinancialData();
+      // Refresh real order counts
+      const ordersRef = collection(db, 'orders');
+      const snap = await getDocs(ordersRef);
+      const counts: Record<string, number> = {};
+      snap.docs.forEach(d => {
+        const data = d.data() as any;
+        const sid = data.serviceId || data.service_id || '';
+        if (sid) counts[sid] = (counts[sid] || 0) + 1;
+      });
+      setServiceOrderCounts(counts);
       console.log('✅ Manual refresh completed');
     } catch (error) {
       console.error('❌ Error refreshing data:', error);
@@ -1187,40 +1252,57 @@ service cloud.firestore {
   const fetchFinancialData = async () => {
     try {
       setFinancialLoading(true);
-      console.log('=== FETCHING COMPREHENSIVE FINANCIAL DATA ===');
 
       let totalRevenue = 0;
+      let servicesRevenue = 0;
+      let ticketsRevenue = 0;
       let totalOrders = 0;
+      let serviceOrders = 0;
+      let ticketOrders = 0;
       let pendingPayouts = 0;
       const orderValues: number[] = [];
       const artistRevenueMap = new Map<string, { name: string; revenue: number; artistId: string }>();
       const monthlyRevenue = new Map<string, number>();
-      const currentYear = new Date().getFullYear();
+      const weekRevenue = new Map<string, number>();
+      const yearRevenue = new Map<string, number>();
+      const now = new Date();
+      const currentYear = now.getFullYear();
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      months.forEach(month => monthlyRevenue.set(month, 0));
 
-      const processOrder = (orderData: any, source: string) => {
-        const price = orderData.price || orderData.totalPrice || orderData.totalAmount || orderData.amount || orderData.cost || 0;
-        const createdAt = orderData.createdAt?.toDate() || orderData.orderDate?.toDate() || orderData.date?.toDate() || orderData.timestamp?.toDate() || new Date();
-        const artistId = orderData.artistId || orderData.sellerId || orderData.providerId || orderData.serviceProviderId;
+      const getWeekId = (d: Date) => {
+        const start = new Date(d);
+        start.setDate(start.getDate() - start.getDay());
+        return `${start.getMonth()+1}/${start.getDate()}`;
+      };
+
+      const processOrder = (orderData: any) => {
+        const price = Number(orderData.totalPrice ?? orderData.clientPrice ?? orderData.price ?? orderData.totalAmount ?? orderData.amount ?? orderData.cost ?? 0);
+        const createdAt = orderData.createdAt?.toDate?.() || orderData.date?.toDate?.() || orderData.timestamp?.toDate?.() || new Date(orderData.createdAt || orderData.date) || new Date();
+        const artistId = orderData.artistId || orderData.sellerId || orderData.providerId;
         const artistName = orderData.artistName || orderData.sellerName || orderData.providerName || orderData.serviceName || `Artist ${artistId}`;
         const status = orderData.status || orderData.orderStatus || 'completed';
-        console.log(`Processing order from ${source}:`, { price, artistId, artistName, status, createdAt });
-        if (price > 0) {
-          totalRevenue += price;
-          totalOrders++;
-          orderValues.push(price);
-          if (artistId) {
-            const existing = artistRevenueMap.get(artistId) || { name: artistName, revenue: 0, artistId };
-            artistRevenueMap.set(artistId, { ...existing, revenue: existing.revenue + price });
-          }
-          if (createdAt.getFullYear() === currentYear) {
-            const monthName = months[createdAt.getMonth()];
-            monthlyRevenue.set(monthName, (monthlyRevenue.get(monthName) || 0) + price);
-          }
-          if (status === 'completed' || status === 'paid' || status === 'pending_payout') {
-            pendingPayouts += price * 0.8;
-          }
+        const type = orderData.type || orderData.orderType || '';
+        const isTicket = type === 'ticket' || type === 'Ticket' || !!orderData.ticketName || !!orderData.eventName;
+        if (price <= 0) return;
+        totalRevenue += price;
+        totalOrders++;
+        orderValues.push(price);
+        if (isTicket) { ticketsRevenue += price; ticketOrders++; }
+        else { servicesRevenue += price; serviceOrders++; }
+        if (artistId) {
+          const existing = artistRevenueMap.get(artistId) || { name: artistName, revenue: 0, artistId };
+          artistRevenueMap.set(artistId, { ...existing, revenue: existing.revenue + price });
+        }
+        if (createdAt.getFullYear() === currentYear) {
+          const monthName = months[createdAt.getMonth()];
+          monthlyRevenue.set(monthName, (monthlyRevenue.get(monthName) || 0) + price);
+        }
+        const weekId = getWeekId(createdAt);
+        weekRevenue.set(weekId, (weekRevenue.get(weekId) || 0) + price);
+        const yearLabel = `${createdAt.getFullYear()}`;
+        yearRevenue.set(yearLabel, (yearRevenue.get(yearLabel) || 0) + price);
+        if (status === 'completed' || status === 'paid' || status === 'pending_payout') {
+          pendingPayouts += price * 0.8;
         }
       };
 
@@ -1229,74 +1311,69 @@ service cloud.firestore {
         try {
           const ref = collection(db, colName);
           const snap = await getDocs(ref);
-          console.log(`Scanning root collection '${colName}': ${snap.docs.length} documents`);
-          snap.docs.forEach(d => processOrder(d.data(), colName));
-        } catch (error) {
-          // ignore missing collections or permission issues for each
-        }
+          snap.docs.forEach(d => processOrder(d.data()));
+        } catch { /* ignore */ }
       }
 
       try {
         const usersRef = collection(db, 'users');
         const usersSnapshot = await getDocs(usersRef);
-        console.log(`👥 Checking ${usersSnapshot.docs.length} users for order/payment subcollections`);
-        const userSubcollectionsToScan = ['orders', 'incoming_orders', 'custom_orders', 'incomingCustomOrders', 'incoming_custom_orders', 'incoming_orders', 'transactions', 'payments', 'bookings'];
+        const userSubcollectionsToScan = ['orders', 'incoming_orders', 'custom_orders', 'incomingCustomOrders', 'incoming_custom_orders', 'transactions', 'payments', 'bookings'];
         for (const userDoc of usersSnapshot.docs) {
           for (const subcol of userSubcollectionsToScan) {
             try {
-              const ref = collection(db, 'users', userDoc.id, subcol as any);
+              const ref = collection(db, 'users', userDoc.id, subcol);
               const snap = await getDocs(ref);
-              if (snap.docs.length > 0) {
-                console.log(`User ${userDoc.id} subcollection '${subcol}': ${snap.docs.length} documents`);
-              }
-              snap.docs.forEach(d => processOrder({ ...d.data(), actorName: userDoc.data().name || userDoc.id }, `users/${userDoc.id}/${subcol}`));
-            } catch (err) {
-            }
+              snap.docs.forEach(d => processOrder({ ...d.data(), actorName: userDoc.data().name || userDoc.id }));
+            } catch { /* ignore */ }
           }
         }
-      } catch (error) {
-        console.log('Error fetching user subcollections for financial data:', error);
-      }
+      } catch { /* ignore */ }
 
       const averageOrderValue = orderValues.length > 0 ? totalRevenue / orderValues.length : 0;
-      const now = new Date();
       const currentMonth = months[now.getMonth()];
       const monthlyIncome = monthlyRevenue.get(currentMonth) || 0;
       const weeklyIncome = monthlyIncome / 4;
+
+      let periodRevenue: number[] = [];
+      let periodLabels: string[] = [];
+      if (financePeriod === 'week') {
+        const sortedWeeks = Array.from(weekRevenue.entries()).sort((a, b) => {
+          const [mA, dA] = a[0].split('/').map(Number);
+          const [mB, dB] = b[0].split('/').map(Number);
+          return mA !== mB ? mA - mB : dA - dB;
+        });
+        periodLabels = sortedWeeks.map(([k]) => k);
+        periodRevenue = sortedWeeks.map(([, v]) => v);
+      } else if (financePeriod === 'month') {
+        periodLabels = months;
+        periodRevenue = months.map(m => monthlyRevenue.get(m) || 0);
+      } else {
+        periodLabels = [String(currentYear)];
+        periodRevenue = [yearRevenue.get(String(currentYear)) || 0];
+      }
+
       const topEarners = Array.from(artistRevenueMap.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
-      const revenueData = months.map(month => ({ month, revenue: monthlyRevenue.get(month) || 0 }));
+
       setFinancialData({
-        totalRevenue,
-        weeklyIncome,
-        monthlyIncome,
+        totalRevenue, servicesRevenue, ticketsRevenue,
+        weeklyIncome, monthlyIncome,
         averageOrderValue: Math.round(averageOrderValue),
-        totalOrders,
+        totalOrders, serviceOrders, ticketOrders,
         pendingPayouts: Math.round(pendingPayouts),
         topEarners,
-        revenueData,
+        revenueData: months.map(month => ({ month, revenue: monthlyRevenue.get(month) || 0 })),
+        periodRevenue, periodLabels,
       });
-      console.log('=== FINANCIAL DATA RESULTS ===');
-      console.log('Total Revenue:', totalRevenue);
-      console.log('Total Orders:', totalOrders);
-      console.log('Average Order Value:', averageOrderValue);
-      console.log('Monthly Income:', monthlyIncome);
-      console.log('Top Earners:', topEarners);
-      if (totalRevenue === 0) {
-        console.warn('No financial data found - no orders with valid amounts. Ensure orders exist in Firestore and amounts are stored in expected fields.');
-      }
-    } catch (error) {
-      console.error('❌ Error fetching financial data:', error);
-      Alert.alert('Error', `Failed to load financial data: ${(error as Error).message}`);
+    } catch {
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       setFinancialData({
-        totalRevenue: 0,
-        weeklyIncome: 0,
-        monthlyIncome: 0,
-        averageOrderValue: 0,
-        totalOrders: 0,
-        pendingPayouts: 0,
-        topEarners: [],
-        revenueData: months.map((month: string) => ({ month, revenue: 0 })),
+        totalRevenue: 0, servicesRevenue: 0, ticketsRevenue: 0,
+        weeklyIncome: 0, monthlyIncome: 0,
+        averageOrderValue: 0, totalOrders: 0, serviceOrders: 0, ticketOrders: 0,
+        pendingPayouts: 0, topEarners: [],
+        revenueData: months.map(m => ({ month: m, revenue: 0 })),
+        periodRevenue: [], periodLabels: [],
       });
     } finally {
       setFinancialLoading(false);
@@ -1371,14 +1448,8 @@ service cloud.firestore {
         setUsers(sampleUsers);
         console.log('✅ Added sample inevents users for testing');
         console.log('Sample users:', sampleUsers);
-        Alert.alert(
-          'No Firebase Users Found',
-          `No users found in Firestore collection 'users'.\n\nProject: inevents-2fe56\n\nPossible solutions:\n1. Register some users in your app\n2. Check Firestore security rules\n3. Verify collection name is 'users'\n\nSample users added for testing.`,
-          [{ text: 'OK' }]
-        );
       } else {
-        console.log('✅ Successfully loaded real users from Firebase');
-        Alert.alert('Success', `Loaded ${usersData.length} real users from Firebase project: inevents-2fe56`);
+        console.log(`✅ Loaded ${usersData.length} real users from Firebase`);
       }
     } catch (error) {
       console.error('❌ FIREBASE ERROR:', error);
@@ -1416,26 +1487,35 @@ service cloud.firestore {
             }
         }
       }
-      Alert.alert(
-        'Firebase Connection Error',
-        `${errorMessage}\n\nProject: inevents-2fe56\nError Code: ${(error as any).code || 'unknown'}${troubleshootingInfo}`,
-        [
-          { text: 'OK' },
-          { text: 'Debug', onPress: () => {
-              console.log('=== DETAILED ERROR DEBUG ===');
-              console.log('Firebase Config Check:', db.app.options);
-              console.log('Error Object:', error);
-              console.log('Error Details:', errorDetails);
-              Alert.alert('Debug Info', `Check console for detailed error information.\n\nProject ID: ${db.app.options.projectId}\nAPI Key: ${db.app.options.apiKey?.substring(0, 20)}...`);
-            } }
-        ]
-      );
+      console.error('Firebase fetch error:', errorMessage, troubleshootingInfo);
       const sampleUsers: User[] = [{ id: 'error-sample-1', name: 'Test User (Error Mode)', email: 'test@inevents.com', phone: '+1234567890', role: 'client', status: 'active', signupDate: new Date(), lastLogin: new Date(), revenue: 0, region: 'Test Region' }];
       setUsers(sampleUsers);
     } finally {
       setUsersLoading(false);
       console.log('=== END FIREBASE FETCH ===');
     }
+  };
+
+  // Compute price from document data, checking all possible field names and arrays
+  const resolveServicePrice = (data: any): number => {
+    const p = Number(data?.price ?? data?.basePrice ?? data?.totalPrice ?? data?.amount ?? data?.budget ?? 0);
+    if (p > 0) return p;
+    const opts = data?.options ?? data?.items ?? data?.addOns ?? data?.extraServices ?? data?.gigOptions ?? data?.serviceItems ?? [];
+    if (Array.isArray(opts)) {
+      const total = opts.reduce((sum: number, o: any) => sum + Number(o.price ?? o.unitPrice ?? o.amount ?? 0), 0);
+      if (total > 0) return total;
+    }
+    return p;
+  };
+  const resolveServiceBasePrice = (data: any): number => {
+    const p = Number(data?.basePrice ?? data?.price ?? data?.totalPrice ?? data?.amount ?? data?.budget ?? 0);
+    if (p > 0) return p;
+    const opts = data?.options ?? data?.items ?? data?.addOns ?? data?.extraServices ?? data?.gigOptions ?? data?.serviceItems ?? [];
+    if (Array.isArray(opts)) {
+      const total = opts.reduce((sum: number, o: any) => sum + Number(o.price ?? o.unitPrice ?? o.amount ?? 0), 0);
+      if (total > 0) return total;
+    }
+    return p;
   };
 
   const fetchServicesAndTickets = async () => {
@@ -1449,6 +1529,7 @@ service cloud.firestore {
           ? (typeof createdAtRaw.toDate === 'function' ? createdAtRaw.toDate() : new Date(createdAtRaw))
           : new Date();
         return {
+          ...data,
           id: d.id,
           name: data?.name ?? data?.title ?? '',
           title: data?.title ?? data?.name ?? '',
@@ -1456,14 +1537,14 @@ service cloud.firestore {
           creator: data?.creator ?? data?.artistId ?? data?.owner ?? 'Unknown',
           artistId: data?.artistId ?? data?.creator ?? undefined,
           status: data?.status ?? 'pending',
-          price: data?.price ?? data?.basePrice ?? 0,
-          basePrice: data?.basePrice ?? data?.price ?? 0,
-          views: data?.views ?? 0,
-          purchases: data?.purchases ?? data?.sales ?? 0,
+          price: resolveServicePrice(data),
+          basePrice: resolveServiceBasePrice(data),
+          views: Number(data?.viewCount ?? data?.views ?? 0),
+          purchases: Number(data?.purchases ?? data?.sales ?? 0),
           createdAt,
           images: Array.isArray(data?.images) ? data.images : [],
           description: data?.description ?? '',
-          type: inferredType,
+          type: data?.type ?? inferredType,
         };
       };
       const allItems: Service[] = [];
@@ -1479,6 +1560,7 @@ service cloud.firestore {
             ? (typeof createdAtRaw.toDate === 'function' ? createdAtRaw.toDate() : new Date(createdAtRaw))
             : new Date();
           return {
+            ...s,
             id: s.id,
             name: s.name ?? s.title ?? '',
             title: s.title ?? s.name ?? '',
@@ -1486,10 +1568,10 @@ service cloud.firestore {
             creator: s.creator ?? s.artistId ?? s.userId ?? 'Unknown',
             artistId: s.artistId ?? s.userId ?? undefined,
             status: s.status ?? 'pending',
-            price: s.price ?? s.basePrice ?? 0,
-            basePrice: s.basePrice ?? s.price ?? 0,
-            views: s.views ?? 0,
-            purchases: s.purchases ?? s.sales ?? 0,
+            price: resolveServicePrice(s),
+            basePrice: resolveServiceBasePrice(s),
+            views: Number(s.viewCount ?? s.views ?? 0),
+            purchases: Number(s.purchases ?? s.sales ?? 0),
             createdAt,
             images: Array.isArray(s.images) ? s.images : [],
             description: s.description ?? '',
@@ -1508,7 +1590,6 @@ service cloud.firestore {
       }
     } catch (error) {
       console.error('❌ Error fetching services and tickets:', error);
-      Alert.alert('Error', 'Failed to fetch services and tickets.');
     } finally {
       setServicesLoading(false);
     }
@@ -1516,65 +1597,89 @@ service cloud.firestore {
 
   useEffect(() => {
     const unsubscribeServices = onSnapshot(collection(db, 'services'), (snapshot) => {
-      const updatedServices: Service[] = snapshot.docs.map((doc) => {
-        const data = doc.data();
-        const createdAtRaw = data?.createdAt;
-        const createdAt = createdAtRaw
-          ? (typeof createdAtRaw.toDate === 'function' ? createdAtRaw.toDate() : new Date(createdAtRaw))
-          : new Date();
-        return {
-          id: doc.id,
-          name: data?.name ?? data?.title ?? '',
-          title: data?.title ?? data?.name ?? '',
-          category: data?.category ?? 'Uncategorized',
-          creator: data?.creator ?? data?.artistId ?? 'Unknown',
-          artistId: data?.artistId ?? undefined,
-          status: data?.status ?? 'pending',
-          price: data?.price ?? data?.basePrice ?? 0,
-          basePrice: data?.basePrice ?? data?.price ?? 0,
-          views: data?.views ?? 0,
-          purchases: data?.purchases ?? data?.sales ?? 0,
-          createdAt,
-          images: Array.isArray(data?.images) ? data.images : [],
-          description: data?.description ?? '',
-          type: 'service',
-        } as Service;
+      setServices((prev) => {
+        const merged = new Map(prev.map(s => [s.id, s]));
+        snapshot.docs.forEach((doc) => {
+          const data = doc.data();
+          const createdAtRaw = data?.createdAt;
+          const createdAt = createdAtRaw
+            ? (typeof createdAtRaw.toDate === 'function' ? createdAtRaw.toDate() : new Date(createdAtRaw))
+            : new Date();
+          merged.set(doc.id, {
+            id: doc.id,
+            name: data?.name ?? data?.title ?? '',
+            title: data?.title ?? data?.name ?? '',
+            category: data?.category ?? 'Uncategorized',
+            creator: data?.creator ?? data?.artistId ?? 'Unknown',
+            artistId: data?.artistId ?? undefined,
+            status: data?.status ?? 'pending',
+            price: resolveServicePrice(data),
+            basePrice: resolveServiceBasePrice(data),
+            views: Number(data?.viewCount ?? data?.views ?? 0),
+            purchases: Number(data?.purchases ?? data?.sales ?? 0),
+            createdAt,
+            images: Array.isArray(data?.images) ? data.images : [],
+            description: data?.description ?? '',
+            type: 'service',
+          } as Service);
+        });
+        return Array.from(merged.values());
       });
-      setServices((prev) => [...prev.filter((item) => item.type !== 'service'), ...updatedServices]);
     });
 
     const unsubscribeTickets = onSnapshot(collection(db, 'tickets'), (snapshot) => {
-      const updatedTickets: Service[] = snapshot.docs.map((doc) => {
-        const data = doc.data();
-        const createdAtRaw = data?.createdAt;
-        const createdAt = createdAtRaw
-          ? (typeof createdAtRaw.toDate === 'function' ? createdAtRaw.toDate() : new Date(createdAtRaw))
-          : new Date();
-        return {
-          id: doc.id,
-          name: data?.name ?? data?.title ?? '',
-          title: data?.title ?? data?.name ?? '',
-          category: data?.category ?? 'Uncategorized',
-          creator: data?.creator ?? data?.artistId ?? 'Unknown',
-          artistId: data?.artistId ?? undefined,
-          status: data?.status ?? 'pending',
-          price: data?.price ?? data?.basePrice ?? 0,
-          basePrice: data?.basePrice ?? data?.price ?? 0,
-          views: data?.views ?? 0,
-          purchases: data?.purchases ?? data?.sales ?? 0,
-          createdAt,
-          images: Array.isArray(data?.images) ? data.images : [],
-          description: data?.description ?? '',
-          type: 'ticket',
-        } as Service;
+      setServices((prev) => {
+        const merged = new Map(prev.map(s => [s.id, s]));
+        snapshot.docs.forEach((doc) => {
+          const data = doc.data();
+          const createdAtRaw = data?.createdAt;
+          const createdAt = createdAtRaw
+            ? (typeof createdAtRaw.toDate === 'function' ? createdAtRaw.toDate() : new Date(createdAtRaw))
+            : new Date();
+          merged.set(doc.id, {
+            id: doc.id,
+            name: data?.name ?? data?.title ?? '',
+            title: data?.title ?? data?.name ?? '',
+            category: data?.category ?? 'Uncategorized',
+            creator: data?.creator ?? data?.artistId ?? 'Unknown',
+            artistId: data?.artistId ?? undefined,
+            status: data?.status ?? 'pending',
+            price: resolveServicePrice(data),
+            basePrice: resolveServiceBasePrice(data),
+            views: Number(data?.viewCount ?? data?.views ?? 0),
+            purchases: Number(data?.purchases ?? data?.sales ?? 0),
+            createdAt,
+            images: Array.isArray(data?.images) ? data.images : [],
+            description: data?.description ?? '',
+            type: 'ticket',
+          } as Service);
+        });
+        return Array.from(merged.values());
       });
-      setServices((prev) => [...prev.filter((item) => item.type !== 'ticket'), ...updatedTickets]);
     });
 
     return () => {
       unsubscribeServices();
       unsubscribeTickets();
     };
+  }, []);
+
+  // Fetch real order counts per service
+  useEffect(() => {
+    const fetchOrderCounts = async () => {
+      try {
+        const ordersRef = collection(db, 'orders');
+        const snap = await getDocs(ordersRef);
+        const counts: Record<string, number> = {};
+        snap.docs.forEach(d => {
+          const data = d.data() as any;
+          const sid = data.serviceId || data.service_id || '';
+          if (sid) counts[sid] = (counts[sid] || 0) + 1;
+        });
+        setServiceOrderCounts(counts);
+      } catch { /* ignore */ }
+    };
+    fetchOrderCounts();
   }, []);
 
   const handleDeleteUser = async (userId: string) => {
@@ -1635,6 +1740,8 @@ service cloud.firestore {
         console.log('✅ Users fetch completed');
         await fetchServicesAndTickets();
         console.log('✅ Services and tickets fetch completed');
+        await fetchCoupons();
+        console.log('✅ Coupons fetch completed');
         await fetchFinancialData();
         console.log('✅ Financial data fetch completed');
       } catch (error) {
@@ -1681,160 +1788,210 @@ service cloud.firestore {
     };
   }, []);
 
-  const renderDashboardTab = () => (
+  useEffect(() => { fetchFinancialData(); }, [financePeriod]);
+
+  const renderDashboardTab = () => {
+    const roleDistData = [
+      { label: 'Artists', count: artists.length, color: Theme.colors.primary, pct: users.length ? Math.round((artists.length / users.length) * 100) : 0 },
+      { label: 'Clients', count: users.filter(u => u?.role === 'client').length, color: Theme.colors.success, pct: users.length ? Math.round((users.filter(u => u?.role === 'client').length / users.length) * 100) : 0 },
+      { label: 'Admins', count: users.filter(u => u?.role === 'admin').length, color: Theme.colors.warning, pct: users.length ? Math.round((users.filter(u => u?.role === 'admin').length / users.length) * 100) : 0 },
+    ];
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const monthlyRev = months.map((m, i) => financialData.revenueData?.[i]?.revenue ?? 0);
+    const maxMonthlyRev = Math.max(...monthlyRev, 1);
+    const currentMonthIdx = new Date().getMonth();
+    const prevMonthRev = currentMonthIdx > 0 ? monthlyRev[currentMonthIdx - 1] : 0;
+    const thisMonthRev = monthlyRev[currentMonthIdx];
+    const revTrend = prevMonthRev > 0 ? ((thisMonthRev - prevMonthRev) / prevMonthRev) * 100 : 0;
+
+    return (
     <ScrollView
       style={styles.tabContent}
+      contentContainerStyle={{ paddingBottom: 32 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
       <View style={styles.header}>
-        <Text style={styles.greeting}>{activeTab === 'dashboard' && 'Admin Dashboard'}</Text>
-        <Text style={styles.date}>{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</Text>
+        <Text style={{ fontSize: 26, fontWeight: '800', color: '#111', letterSpacing: -0.5 }}>Admin Dashboard</Text>
+        <Text style={{ fontSize: 13, color: '#888', marginTop: 4 }}>{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</Text>
       </View>
 
-      <View style={styles.metricsGrid}>
-        <Card style={styles.metricCard}>
-          <View style={styles.metricIconContainer}>
-            <Users size={24} color={Theme.colors.primary} />
+      <View style={{ marginBottom: 20 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
+          <TouchableOpacity onPress={() => setActiveTab('users')} style={{ flex: 1, backgroundColor: 'white', borderRadius: 16, padding: 16, marginRight: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 }}>
+            <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: '#eef2ff', justifyContent: 'center', alignItems: 'center', marginBottom: 12 }}>
+              <Users size={22} color={Theme.colors.primary} />
+            </View>
+            <Text style={{ fontSize: 22, fontWeight: '800', color: '#111' }}>{totalUsers}</Text>
+            <Text style={{ fontSize: 13, color: '#888', marginTop: 2 }}>Total users</Text>
+            <Text style={{ fontSize: 12, color: Theme.colors.success, fontWeight: '600', marginTop: 4 }}>{activeUsers} active</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setActiveTab('financial')} style={{ flex: 1, backgroundColor: 'white', borderRadius: 16, padding: 16, marginLeft: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 }}>
+            <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: '#ecfdf5', justifyContent: 'center', alignItems: 'center', marginBottom: 12 }}>
+              <DollarSign size={22} color={Theme.colors.success} />
+            </View>
+            <Text style={{ fontSize: 22, fontWeight: '800', color: '#111' }}>${totalRevenue.toLocaleString()}</Text>
+            <Text style={{ fontSize: 13, color: '#888', marginTop: 2 }}>Total revenue</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+              {revTrend >= 0
+                ? <ArrowUp size={13} color={Theme.colors.success} />
+                : <ArrowDown size={13} color={Theme.colors.error} />}
+              <Text style={{ fontSize: 12, fontWeight: '600', color: revTrend >= 0 ? Theme.colors.success : Theme.colors.error, marginLeft: 3 }}>
+                {Math.abs(revTrend).toFixed(1)}% this month
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+          <TouchableOpacity onPress={() => setActiveTab('services')} style={{ flex: 1, backgroundColor: 'white', borderRadius: 16, padding: 14, marginRight: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 }}>
+            <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: '#fffbeb', justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}>
+              <ClipboardCheck size={20} color={Theme.colors.warning} />
+            </View>
+            <Text style={{ fontSize: 20, fontWeight: '800', color: '#111' }}>{pendingServices}</Text>
+            <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>Pending</Text>
+            <Text style={{ fontSize: 11, color: '#aaa', marginTop: 2 }}>Need approval</Text>
+          </TouchableOpacity>
+          <View style={{ flex: 1, backgroundColor: 'white', borderRadius: 16, padding: 14, marginHorizontal: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 }}>
+            <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: '#f0f9ff', justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}>
+              <BarChart3 size={20} color={Theme.colors.info} />
+            </View>
+            <Text style={{ fontSize: 20, fontWeight: '800', color: '#111' }}>{orders}</Text>
+            <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>Orders</Text>
+            <Text style={{ fontSize: 11, color: '#aaa', marginTop: 2 }}>{financialData.serviceOrders} svc · {financialData.ticketOrders} tkt</Text>
           </View>
-          <Text style={styles.metricValue}>{totalUsers}</Text>
-          <Text style={styles.metricLabel}>Total Users</Text>
-          <Text style={styles.metricSubtext}>{activeUsers} active</Text>
-        </Card>
-
-        <Card style={styles.metricCard}>
-          <View style={styles.metricIconContainer}>
-            <DollarSign size={24} color={Theme.colors.success} />
+          <View style={{ flex: 1, backgroundColor: 'white', borderRadius: 16, padding: 14, marginLeft: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 }}>
+            <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: '#fdf2f8', justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}>
+              <TrendingUp size={20} color="#db2777" />
+            </View>
+            <Text style={{ fontSize: 20, fontWeight: '800', color: '#111' }}>{financialData.averageOrderValue.toLocaleString()}</Text>
+            <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>Avg order</Text>
+            <Text style={{ fontSize: 11, color: '#aaa', marginTop: 2 }}>${(financialData.monthlyIncome / 1000).toFixed(0)}k/month</Text>
           </View>
-          <Text style={styles.metricValue}>${totalRevenue.toLocaleString()}</Text>
-          <Text style={styles.metricLabel}>Total Revenue</Text>
-          <Text style={styles.metricSubtext}>+12% this month</Text>
-        </Card>
-
-        <Card style={styles.metricCard}>
-          <View style={styles.metricIconContainer}>
-            <ClipboardCheck size={24} color={Theme.colors.warning} />
-          </View>
-          <Text style={styles.metricValue}>{pendingServices}</Text>
-          <Text style={styles.metricLabel}>Pending Services</Text>
-          <Text style={styles.metricSubtext}>Need approval</Text>
-        </Card>
-
-        <Card style={styles.metricCard}>
-          <View style={styles.metricIconContainer}>
-            <TrendingUp size={24} color={Theme.colors.info} />
-          </View>
-          <Text style={styles.metricValue}>${financialData.weeklyIncome.toLocaleString()}</Text>
-          <Text style={styles.metricLabel}>Weekly Income</Text>
-          <Text style={styles.metricSubtext}>Estimated from monthly</Text>
-        </Card>
+        </View>
       </View>
 
-      <Card style={styles.quickActionsCard}>
-        <Text style={styles.cardTitle}>Quick Actions</Text>
-        <View style={styles.quickActionsGrid}>
-          <TouchableOpacity style={styles.quickActionItem} onPress={() => setActiveTab('users')}>
-            <Users size={20} color={Theme.colors.primary} />
-            <Text style={styles.quickActionText}>Manage Users</Text>
+      <Card style={{ marginBottom: 20, padding: 20, borderRadius: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <View>
+            <Text style={{ fontSize: 17, fontWeight: '700', color: '#111' }}>Monthly Revenue</Text>
+            <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{months[currentMonthIdx]} ${thisMonthRev.toLocaleString()} · {revTrend >= 0 ? '+' : ''}{Math.abs(revTrend).toFixed(0)}% MoM</Text>
+          </View>
+          <TouchableOpacity onPress={fetchFinancialData} style={{ backgroundColor: '#f5f5f5', width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' }}>
+            <Activity size={18} color="#666" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.quickActionItem} onPress={() => setActiveTab('services')}>
-            <ClipboardCheck size={20} color={Theme.colors.primary} />
-            <Text style={styles.quickActionText}>Review Services</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickActionItem} onPress={() => setActiveTab('financial')}>
-            <BarChart size={20} color={Theme.colors.primary} />
-            <Text style={styles.quickActionText}>View Analytics</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickActionItem} onPress={() => setActiveTab('coupons')}>
-            <Gift size={20} color={Theme.colors.primary} />
-            <Text style={styles.quickActionText}>Manage Coupons</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickActionItem} onPress={fetchUsers}>
-            <Users size={20} color={Theme.colors.info} />
-            <Text style={styles.quickActionText}>Refresh Users</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickActionItem} onPress={createTestUser}>
-            <Plus size={20} color={Theme.colors.success} />
-            <Text style={styles.quickActionText}>Create Test User</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickActionItem} onPress={handleDebugFirebase}>
-            <Activity size={20} color={Theme.colors.warning} />
-            <Text style={styles.quickActionText}>Debug Firebase</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickActionItem} onPress={fetchServicesAndTickets}>
-            <ClipboardCheck size={20} color={Theme.colors.info} />
-            <Text style={styles.quickActionText}>Refresh Services</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickActionItem} onPress={handleDeployRules}>
-            <Shield size={20} color={Theme.colors.error} />
-            <Text style={styles.quickActionText}>Fix Permissions</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickActionItem} onPress={checkRulesDeployment}>
-            <Check size={20} color={Theme.colors.success} />
-            <Text style={styles.quickActionText}>Check Rules</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickActionItem} onPress={scanAllCollections}>
-            <Search size={20} color={Theme.colors.info} />
-            <Text style={styles.quickActionText}>Find Data</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickActionItem} onPress={createTestData}>
-            <Plus size={20} color={Theme.colors.warning} />
-            <Text style={styles.quickActionText}>Create Test Data</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickActionItem} onPress={cleanupTestData}>
-            <Text style={[styles.quickActionText, { color: Theme.colors.error }]}>🗑️ Clean Test Data</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickActionItem} onPress={fetchFinancialData}>
-            <DollarSign size={20} color={Theme.colors.success} />
-            <Text style={styles.quickActionText}>Load Financial Data</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickActionItem} onPress={createTestFinancialData}>
-            <CreditCard size={20} color={Theme.colors.info} />
-            <Text style={styles.quickActionText}>Create Test Orders</Text>
-          </TouchableOpacity>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: 100, justifyContent: 'space-between', marginBottom: 8 }}>
+          {months.slice(0, 12).map((m, i) => {
+            const height = (monthlyRev[i] / maxMonthlyRev) * 85;
+            const isCurrent = i === currentMonthIdx;
+            return (
+              <View key={m} style={{ flex: 1, alignItems: 'center', marginHorizontal: 2 }}>
+                <View style={{
+                  width: '80%', height: Math.max(height, 4),
+                  backgroundColor: isCurrent ? Theme.colors.primary : '#e5e7eb',
+                  borderTopLeftRadius: 6, borderTopRightRadius: 6, borderBottomLeftRadius: 2, borderBottomRightRadius: 2,
+                }} />
+              </View>
+            );
+          })}
+        </View>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 2 }}>
+          {['J','F','M','A','M','J','J','A','S','O','N','D'].map((m, i) => (
+            <Text key={`ml-${i}`} style={{ flex: 1, textAlign: 'center', fontSize: 10, fontWeight: i === currentMonthIdx ? '700' : '400', color: i === currentMonthIdx ? Theme.colors.primary : '#bbb' }}>{m}</Text>
+          ))}
         </View>
       </Card>
 
-      <Card style={styles.statusCard}>
-        <Text style={styles.cardTitle}>Platform Status - inevents Project</Text>
-        <View style={styles.statusGrid}>
-          <View style={styles.statusItem}>
-            <Text style={styles.statusLabel}>Firebase Users</Text>
-            <Text style={styles.statusValue}>{users.length}</Text>
-            <Text style={styles.statusSubtext}>{usersLoading ? 'Loading...' : 'From inevents-2fe56'}</Text>
-          </View>
-          <View style={styles.statusItem}>
-            <Text style={styles.statusLabel}>Active Users</Text>
-            <Text style={styles.statusValue}>{activeUsers}</Text>
-            <Text style={styles.statusSubtext}>Real-time count</Text>
-          </View>
-          <View style={styles.statusItem}>
-            <Text style={styles.statusLabel}>Artists</Text>
-            <Text style={styles.statusValue}>{artists.length}</Text>
-            <Text style={styles.statusSubtext}>Event creators</Text>
-          </View>
-          <View style={styles.statusItem}>
-            <Text style={styles.statusLabel}>Services</Text>
-            <Text style={styles.statusValue}>{gigs.length}</Text>
-            <Text style={styles.statusSubtext}>Total events</Text>
-          </View>
-          <View style={styles.statusItem}>
-            <Text style={styles.statusLabel}>Orders</Text>
-            <Text style={styles.statusValue}>{orders}</Text>
-            <Text style={styles.statusSubtext}>Bookings</Text>
-          </View>
-          <View style={styles.statusItem}>
-            <Text style={styles.statusLabel}>Tickets</Text>
-            <Text style={styles.statusValue}>{tickets.length}</Text>
-            <Text style={styles.statusSubtext}>Support tickets</Text>
-          </View>
-        </View>
-        <View style={styles.healthStatus}>
-          <View style={styles.healthIndicator} />
-          <Text style={styles.healthText}>{usersLoading ? 'Loading Users...' : `Connected to inevents-2fe56`}</Text>
-        </View>
+      <View style={{ marginBottom: 20 }}>
+        <Text style={{ fontSize: 17, fontWeight: '700', color: '#111', marginBottom: 14 }}>Platform Insights</Text>
+        <Card style={{ padding: 20, borderRadius: 16, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 }}>
+          <Text style={{ fontSize: 15, fontWeight: '600', color: '#333', marginBottom: 16 }}>Users by Role</Text>
+          {roleDistData.map(item => (
+            <View key={item.label} style={{ marginBottom: 14 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: item.color, marginRight: 8 }} />
+                  <Text style={{ fontSize: 14, color: '#555' }}>{item.label}</Text>
+                </View>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#111' }}>{item.count} · {item.pct}%</Text>
+              </View>
+              <View style={{ height: 8, backgroundColor: '#f0f0f0', borderRadius: 4, overflow: 'hidden' }}>
+                <View style={{ width: `${item.pct}%`, height: '100%', backgroundColor: item.color, borderRadius: 4 }} />
+              </View>
+            </View>
+          ))}
+        </Card>
+        <Card style={{ padding: 20, borderRadius: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 }}>
+          <Text style={{ fontSize: 15, fontWeight: '600', color: '#333', marginBottom: 16 }}>Revenue Breakdown</Text>
+          {(() => {
+            const svcPct = financialData.totalRevenue > 0 ? Math.round((financialData.servicesRevenue / financialData.totalRevenue) * 100) : 0;
+            return (
+              <View>
+                <View style={{ flexDirection: 'row', height: 10, borderRadius: 5, overflow: 'hidden', marginBottom: 16 }}>
+                  <View style={{ flex: svcPct, backgroundColor: Theme.colors.primary }} />
+                  <View style={{ flex: 100 - svcPct, backgroundColor: '#f59e0b' }} />
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
+                  <View style={{ alignItems: 'center' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: Theme.colors.primary, marginRight: 6 }} />
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: '#333' }}>Services</Text>
+                    </View>
+                    <Text style={{ fontSize: 20, fontWeight: '800', color: '#111' }}>${(financialData.servicesRevenue / 1000).toFixed(1)}k</Text>
+                    <Text style={{ fontSize: 12, color: '#888' }}>{svcPct}% · {financialData.serviceOrders} orders</Text>
+                  </View>
+                  <View style={{ alignItems: 'center' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#f59e0b', marginRight: 6 }} />
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: '#333' }}>Tickets</Text>
+                    </View>
+                    <Text style={{ fontSize: 20, fontWeight: '800', color: '#111' }}>${(financialData.ticketsRevenue / 1000).toFixed(1)}k</Text>
+                    <Text style={{ fontSize: 12, color: '#888' }}>{100 - svcPct}% · {financialData.ticketOrders} orders</Text>
+                  </View>
+                </View>
+              </View>
+            );
+          })()}
+        </Card>
+      </View>
+
+      <Card style={{ padding: 20, borderRadius: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 }}>
+        <Text style={{ fontSize: 17, fontWeight: '700', color: '#111', marginBottom: 16 }}>Quick Actions</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <TouchableOpacity onPress={() => setActiveTab('users')} style={{ alignItems: 'center', marginRight: 20, width: 80 }}>
+            <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: '#eef2ff', justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}>
+              <Users size={24} color={Theme.colors.primary} />
+            </View>
+            <Text style={{ fontSize: 12, fontWeight: '600', color: '#555', textAlign: 'center' }}>Users</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setActiveTab('services')} style={{ alignItems: 'center', marginRight: 20, width: 80 }}>
+            <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: '#fffbeb', justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}>
+              <ClipboardCheck size={24} color={Theme.colors.warning} />
+            </View>
+            <Text style={{ fontSize: 12, fontWeight: '600', color: '#555', textAlign: 'center' }}>Services</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setActiveTab('financial')} style={{ alignItems: 'center', marginRight: 20, width: 80 }}>
+            <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: '#ecfdf5', justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}>
+              <BarChart size={24} color={Theme.colors.success} />
+            </View>
+            <Text style={{ fontSize: 12, fontWeight: '600', color: '#555', textAlign: 'center' }}>Financial</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setActiveTab('coupons')} style={{ alignItems: 'center', marginRight: 20, width: 80 }}>
+            <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: '#f0f9ff', justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}>
+              <Gift size={24} color={Theme.colors.info} />
+            </View>
+            <Text style={{ fontSize: 12, fontWeight: '600', color: '#555', textAlign: 'center' }}>Coupons</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={onRefresh} style={{ alignItems: 'center', marginRight: 20, width: 80 }}>
+            <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: '#f5f5f5', justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}>
+              <Activity size={24} color="#666" />
+            </View>
+            <Text style={{ fontSize: 12, fontWeight: '600', color: '#555', textAlign: 'center' }}>Refresh</Text>
+          </TouchableOpacity>
+        </ScrollView>
       </Card>
     </ScrollView>
-  );
+    );
+  };
 
   const renderUsersTab = () => (
     <View style={styles.tabContent}>
@@ -1849,6 +2006,13 @@ service cloud.firestore {
             <Text style={styles.filterText}>Filter</Text>
           </TouchableOpacity>
         </View>
+      </View>
+      <View style={{ flexDirection: 'row', marginBottom: 12, gap: 8 }}>
+        {(['all', 'artist', 'client'] as const).map(role => (
+          <TouchableOpacity key={role} onPress={() => setUserFilters(prev => ({ ...prev, role }))} style={{ paddingVertical: 6, paddingHorizontal: 16, borderRadius: 20, backgroundColor: userFilters.role === role ? Theme.colors.primary : '#f0f0f0' }}>
+            <Text style={{ fontSize: 13, fontWeight: '600', color: userFilters.role === role ? 'white' : '#666', textTransform: 'capitalize' }}>{role === 'all' ? 'All' : role === 'artist' ? 'Artist' : 'Customer'}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
       <View style={styles.bulkActionsContainer}>
         <View style={styles.bulkActionsRow}>
@@ -1958,156 +2122,450 @@ service cloud.firestore {
     </View>
   );
 
+  const handleDenyService = async (serviceId: string) => {
+    Alert.alert('Deny Service', 'This will permanently delete this service. Continue?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            const service = services.find(s => s.id === serviceId);
+            if (!service) return;
+            const topLevelCollection = service.type === 'service' ? 'services' : 'tickets';
+            const topDocRef = doc(db, topLevelCollection, serviceId);
+            const topSnap = await getDoc(topDocRef);
+            if (topSnap.exists()) {
+              await deleteDoc(topDocRef);
+            }
+            const usersRef = collection(db, 'users');
+            const usersSnap = await getDocs(usersRef);
+            for (const userDoc of usersSnap.docs) {
+              const userServiceRef = doc(db, 'users', userDoc.id, 'services', serviceId);
+              const userServiceSnap = await getDoc(userServiceRef);
+              if (userServiceSnap.exists()) {
+                await deleteDoc(userServiceRef);
+              }
+              const userTicketRef = doc(db, 'users', userDoc.id, 'tickets', serviceId);
+              const userTicketSnap = await getDoc(userTicketRef);
+              if (userTicketSnap.exists()) {
+                await deleteDoc(userTicketRef);
+              }
+            }
+            setServices(prev => prev.filter(s => s.id !== serviceId));
+            Alert.alert('Deleted', 'Service has been permanently deleted.');
+          } catch (err) {
+            console.error('Failed to delete service:', err);
+            Alert.alert('Error', 'Failed to delete service.');
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleImproveService = (serviceId: string) => {
+    handleApproveService(serviceId);
+  };
+
   const renderServicesTab = () => {
     if (servicesLoading) {
       return (
         <View style={[styles.tabContent, { justifyContent: 'center', alignItems: 'center' }]}> 
           <ActivityIndicator size="large" color={Theme.colors.primary} />
-          <Text style={[{ marginTop: 16, color: Theme.colors.text, fontSize: 16 }]}>Loading services and tickets from Firebase...</Text>
-        </View>
-      );
-    }
-    if (services.length === 0) {
-      return (
-        <View style={[styles.tabContent, { justifyContent: 'center', alignItems: 'center' }]}> 
-          <Text style={[{ color: Theme.colors.text, fontSize: 16, marginBottom: 16 }]}>No services or tickets found</Text>
-          <TouchableOpacity style={[styles.approveButton, { marginTop: 16 }]} onPress={fetchServicesAndTickets}>
-            <Text style={styles.refreshButtonText}>Refresh</Text>
-          </TouchableOpacity>
+          <Text style={[{ marginTop: 16, color: Theme.colors.text, fontSize: 16 }]}>Loading services from Firebase...</Text>
         </View>
       );
     }
     return (
       <View style={styles.tabContent}>
-        <View style={{ padding: 16, backgroundColor: '#f0f0f0', marginBottom: 10, borderRadius: 8 }}>
-          <Text style={{ fontWeight: 'bold', color: '#333' }}>Debug Info:</Text>
-          <Text style={{ color: '#666' }}>Services array length: {services.length}</Text>
-          <Text style={{ color: '#666' }}>Loading state: {servicesLoading ? 'true' : 'false'}</Text>
-          {services.length > 0 && (
-            <Text style={{ color: '#666' }}>Sample service: {services[0]?.name || services[0]?.title || 'No name'}</Text>
-          )}
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: Theme.spacing.md }}>
+          <View style={styles.searchContainer}>
+            <Search size={16} color={Theme.colors.textLight} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search services..."
+              placeholderTextColor={Theme.colors.textLight}
+              value={serviceSearchQuery}
+              onChangeText={setServiceSearchQuery}
+            />
+          </View>
+          <TouchableOpacity style={styles.filterButton} onPress={() => {
+            Alert.alert('Filter Services', 'Filter by status', [
+              { text: 'All', onPress: () => updateServiceFilter('status', 'all') },
+              { text: 'Active', onPress: () => updateServiceFilter('status', 'active') },
+              { text: 'Pending', onPress: () => updateServiceFilter('status', 'pending') },
+              { text: 'Rejected', onPress: () => updateServiceFilter('status', 'rejected') },
+            ]);
+          }}>
+            <Filter size={16} color={Theme.colors.primary} />
+            <Text style={styles.filterText}>{serviceFilters.status === 'all' ? 'Status' : serviceFilters.status}</Text>
+          </TouchableOpacity>
         </View>
-        <FlatList
-          data={services}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <Card style={styles.serviceItem}>
-              <View style={styles.serviceHeader}>
-                <View style={styles.serviceInfo}>
-                  <Text style={styles.serviceName}>{item.name || item.title || 'Untitled'}</Text>
-                  <Text style={styles.serviceCategory}>{item.category} ({item.type})</Text>
-                  <Text style={styles.serviceCreator}>By {item.creator || item.artistId || 'Unknown'}</Text>
-                </View>
-                <View style={styles.serviceStatus}>
-                  <View style={[styles.statusBadge, { backgroundColor: item.status === 'approved' ? Theme.colors.success : item.status === 'pending' ? Theme.colors.warning : Theme.colors.error }]}>
-                    <Text style={styles.statusText}>{item.status}</Text>
+        {services.length === 0 ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <Text style={[{ color: Theme.colors.text, fontSize: 16, marginBottom: 16 }]}>No services posted by artists</Text>
+            <TouchableOpacity style={[styles.approveButton, { marginTop: 16 }]} onPress={fetchServicesAndTickets}>
+              <Text style={styles.refreshButtonText}>Refresh</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <FlatList
+            data={filteredServices}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => {
+              const imageUri = Array.isArray(item.images) && item.images.length > 0 ? item.images[0] : null;
+              const statusColor = item.status === 'approved' || item.status === 'active' ? '#C59400' : item.status === 'rejected' ? Theme.colors.error : Theme.colors.warning;
+              return (
+                <Card style={[styles.serviceItem, (item.status === 'approved' || item.status === 'active') && { borderLeftWidth: 4, borderLeftColor: '#C59400' }]}>
+                  <TouchableOpacity onPress={() => { setSelectedService(item); setShowServiceModal(true); }} activeOpacity={0.7}>
+                    <View style={styles.serviceHeader}>
+                      {imageUri && (
+                        <Image source={{ uri: imageUri }} style={{ width: 60, height: 60, borderRadius: 8, marginRight: Theme.spacing.md }} />
+                      )}
+                      <View style={styles.serviceInfo}>
+                        <Text style={styles.serviceName}>{item.name || item.title || 'Untitled'}</Text>
+                        <Text style={styles.serviceCategory}>{item.category} &middot; {item.type}</Text>
+                        <Text style={styles.serviceCreator}>By {item.creator || item.artistId || 'Unknown'}</Text>
+                      </View>
+                      <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
+                        <Text style={styles.statusText}>{item.status || 'pending'}</Text>
+                      </View>
+                    </View>
+                    {item.description && (
+                      <Text numberOfLines={2} style={{ fontSize: 12, color: Theme.colors.textLight, marginBottom: Theme.spacing.sm }}>
+                        {item.description}
+                      </Text>
+                    )}
+                    <View style={styles.serviceStats}>
+                      <View style={styles.serviceStat}>
+                        <Eye size={14} color={Theme.colors.textLight} />
+                        <Text style={styles.serviceStatText}>{item.views ?? 0}</Text>
+                      </View>
+                      <View style={styles.serviceStat}>
+                        <ShoppingBag size={14} color={Theme.colors.textLight} />
+                        <Text style={styles.serviceStatText}>{serviceOrderCounts[item.id] ?? item.purchases ?? 0}</Text>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                  <View style={styles.serviceActions}>
+                    <TouchableOpacity style={[styles.actionButton, styles.approveButton]} onPress={() => handleImproveService(item.id)}>
+                      <Check size={16} color="white" />
+                      <Text style={styles.actionButtonText}>Improve</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.actionButton, styles.rejectButton]} onPress={() => handleDenyService(item.id)}>
+                      <X size={16} color="white" />
+                      <Text style={styles.actionButtonText}>Deny</Text>
+                    </TouchableOpacity>
                   </View>
-                </View>
-              </View>
-              <View style={styles.serviceStats}>
-                <View style={styles.serviceStat}>
-                  <Eye size={16} color={Theme.colors.textLight} />
-                  <Text style={styles.serviceStatText}>{item.views} views</Text>
-                </View>
-                <View style={styles.serviceStat}>
-                  <CreditCard size={16} color={Theme.colors.textLight} />
-                  <Text style={styles.serviceStatText}>{item.purchases} sales</Text>
-                </View>
-                <Text style={styles.servicePrice}>${item.price}</Text>
-              </View>
-              <View style={styles.serviceActions}>
-                <TouchableOpacity style={[styles.actionButton, styles.approveButton]} onPress={() => handleApproveService(item.id)}>
-                  <Check size={16} color="white" />
-                  <Text style={styles.actionButtonText}>Approve</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.actionButton, styles.rejectButton]} onPress={() => handleSuspendService(item.id)}>
-                  <X size={16} color="white" />
-                  <Text style={styles.actionButtonText}>Suspend</Text>
-                </TouchableOpacity>
-              </View>
-            </Card>
-          )}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        />
+                </Card>
+              );
+            }}
+            ListFooterComponent={filteredServices.length !== services.length ? (
+              <Text style={{ textAlign: 'center', color: Theme.colors.textLight, padding: Theme.spacing.md }}>
+                Showing {filteredServices.length} of {services.length} services
+              </Text>
+            ) : null}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          />
+        )}
       </View>
     );
   };
 
-  const renderFinancialTab = () => (
-    <View style={styles.tabContent}>
-      <View style={styles.financialHeader}>
-        <Text style={styles.sectionTitle}>Financial Overview</Text>
-        {financialLoading && <ActivityIndicator size="small" color={Theme.colors.primary} style={{ marginLeft: 10 }} />}
+  const renderServiceModal = () => {
+    const service = selectedService;
+    const allItems = [
+      ...(Array.isArray(service?.items) ? service.items : []),
+      ...(Array.isArray(service?.options) ? service.options : []),
+      ...(Array.isArray(service?.ticketTypes) ? service.ticketTypes : []),
+    ];
+    const extras = [
+      ...(Array.isArray(service?.extras) ? service.extras : []),
+      ...(Array.isArray(service?.addOns) ? service.addOns : []),
+    ];
+
+    return (
+    <Modal visible={showServiceModal} animationType="slide" onRequestClose={() => setShowServiceModal(false)} transparent>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' }}>
+        <View style={{ backgroundColor: 'white', borderRadius: 12, width: '90%', maxHeight: '85%', padding: 24 }}>
+          {service && (
+            <ScrollView>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <Text style={{ fontWeight: 'bold', fontSize: 20, flex: 1 }}>{service.name || service.title || 'Untitled'}</Text>
+                <TouchableOpacity onPress={() => setShowServiceModal(false)}><X size={24} color={Theme.colors.textDark} /></TouchableOpacity>
+              </View>
+              {Array.isArray(service.images) && service.images.length > 0 && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+                  {service.images.map((uri, i) => (
+                    <Image key={i} source={{ uri }} style={{ width: 200, height: 150, borderRadius: 8, marginRight: 8 }} />
+                  ))}
+                </ScrollView>
+              )}
+              <View style={{ flexDirection: 'row', marginBottom: 12 }}>
+                <View style={[styles.statusBadge, { backgroundColor: service.status === 'approved' || service.status === 'active' ? '#C59400' : service.status === 'rejected' ? Theme.colors.error : Theme.colors.warning }]}>
+                  <Text style={styles.statusText}>{service.status || 'pending'}</Text>
+                </View>
+              </View>
+              <View style={{ marginBottom: 8 }}>
+                <Text style={{ fontWeight: '600', color: Theme.colors.textLight, fontSize: 12 }}>CATEGORY</Text>
+                <Text style={{ fontSize: 16, color: Theme.colors.textDark }}>{service.category || 'N/A'} ({service.type})</Text>
+              </View>
+              <View style={{ marginBottom: 8 }}>
+                <Text style={{ fontWeight: '600', color: Theme.colors.textLight, fontSize: 12 }}>ARTIST</Text>
+                <Text style={{ fontSize: 16, color: Theme.colors.textDark }}>{service.creator || service.artistId || 'Unknown'}</Text>
+              </View>
+              {service.description && (
+                <View style={{ marginBottom: 8 }}>
+                  <Text style={{ fontWeight: '600', color: Theme.colors.textLight, fontSize: 12 }}>DESCRIPTION</Text>
+                  <Text style={{ fontSize: 14, color: Theme.colors.textDark, lineHeight: 20 }}>{service.description}</Text>
+                </View>
+              )}
+              {allItems.length > 0 && (
+                <View style={{ marginBottom: 8 }}>
+                  <Text style={{ fontWeight: '600', color: Theme.colors.textLight, fontSize: 12, marginBottom: 4 }}>ITEMS ({allItems.length})</Text>
+                  {allItems.map((it: any, i: number) => (
+                    <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4, borderBottomWidth: 0.5, borderBottomColor: '#eee' }}>
+                      <Text style={{ fontSize: 14, color: Theme.colors.textDark, flex: 1 }}>{it.title || it.name || it.type || `Item ${i + 1}`}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              {extras.length > 0 && (
+                <View style={{ marginBottom: 8 }}>
+                  <Text style={{ fontWeight: '600', color: Theme.colors.textLight, fontSize: 12, marginBottom: 4 }}>EXTRAS ({extras.length})</Text>
+                  {extras.map((ex: any, i: number) => (
+                    <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4, borderBottomWidth: 0.5, borderBottomColor: '#eee' }}>
+                      <Text style={{ fontSize: 14, color: Theme.colors.textDark, flex: 1 }}>{ex.title || ex.name || `Extra ${i + 1}`}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              <View style={{ flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#eee', marginTop: 8 }}>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 20, fontWeight: 'bold', color: Theme.colors.textDark }}>{service.views ?? service.viewCount ?? 0}</Text>
+                  <Text style={{ fontSize: 12, color: Theme.colors.textLight }}>Views</Text>
+                </View>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 20, fontWeight: 'bold', color: Theme.colors.textDark }}>{service.purchases ?? 0}</Text>
+                  <Text style={{ fontSize: 12, color: Theme.colors.textLight }}>Purchases</Text>
+                </View>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 20, fontWeight: 'bold', color: Theme.colors.textDark }}>{service.id ? service.id.slice(0, 6) : 'N/A'}</Text>
+                  <Text style={{ fontSize: 12, color: Theme.colors.textLight }}>ID</Text>
+                </View>
+              </View>
+            </ScrollView>
+          )}
+        </View>
       </View>
+    </Modal>
+    );
+  };
+
+  const renderFinancialTab = () => {
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const monthlyRev = months.map((m, i) => financialData.revenueData?.[i]?.revenue ?? 0);
+    const maxRevPeriod = Math.max(...financialData.periodRevenue, 1);
+    const currentMonthIdx = new Date().getMonth();
+    const prevMonthRev = currentMonthIdx > 0 ? monthlyRev[currentMonthIdx - 1] : 0;
+    const thisMonthRev = monthlyRev[currentMonthIdx];
+    const momGrowth = prevMonthRev > 0 ? ((thisMonthRev - prevMonthRev) / prevMonthRev) * 100 : 0;
+    const svcPct = financialData.totalRevenue > 0 ? Math.round((financialData.servicesRevenue / financialData.totalRevenue) * 100) : 50;
+
+    const periodLabels = financialData.periodLabels.length > 0 ? financialData.periodLabels : months;
+    const periodRevenue = financialData.periodRevenue.length > 0 ? financialData.periodRevenue : monthlyRev;
+    const maxRev = Math.max(...periodRevenue, 1);
+
+    const totalRev = financialData.totalRevenue;
+
+    return (
+    <ScrollView
+      style={styles.tabContent}
+      contentContainerStyle={{ paddingBottom: 32 }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+    >
+      <View style={{ marginBottom: 20 }}>
+        <Text style={{ fontSize: 26, fontWeight: '800', color: '#111', letterSpacing: -0.5 }}>Financial Overview</Text>
+        <Text style={{ fontSize: 13, color: '#888', marginTop: 4 }}>
+          ${totalRev.toLocaleString()} total · {financialData.totalOrders} orders
+          {financialLoading && ' · loading...'}
+        </Text>
+      </View>
+
+      <View style={{ flexDirection: 'row', marginBottom: 20, backgroundColor: '#f0f0f0', borderRadius: 14, padding: 5 }}>
+        {(['week', 'month', 'year'] as const).map(p => (
+          <TouchableOpacity key={p} onPress={() => setFinancePeriod(p)} style={{ flex: 1, paddingVertical: 12, borderRadius: 11, backgroundColor: financePeriod === p ? Theme.colors.primary : 'transparent', alignItems: 'center', shadowColor: financePeriod === p ? Theme.colors.primary : 'transparent', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 6, elevation: financePeriod === p ? 4 : 0 }}>
+            <Text style={{ fontSize: 15, fontWeight: '800', color: financePeriod === p ? 'white' : '#888', textTransform: 'capitalize' }}>{p}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       {financialLoading ? (
-        <View style={{ padding: 40, alignItems: 'center' }}>
+        <View style={{ padding: 50, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator size="large" color={Theme.colors.primary} />
-          <Text style={{ marginTop: 10, color: Theme.colors.textLight }}>Loading financial data...</Text>
+          <Text style={{ marginTop: 14, fontSize: 15, color: '#888' }}>Crunching numbers...</Text>
         </View>
       ) : (
         <>
-          <View style={styles.revenueCards}>
-            <Card style={styles.revenueCard}>
-              <Text style={styles.revenueLabel}>Total Revenue</Text>
-              <Text style={styles.revenueValue}>${financialData.totalRevenue.toLocaleString()}</Text>
-              <Text style={styles.revenueChange}>From {financialData.totalOrders} orders</Text>
-            </Card>
-            <Card style={styles.revenueCard}>
-              <Text style={styles.revenueLabel}>Monthly Income</Text>
-              <Text style={styles.revenueValue}>${financialData.monthlyIncome.toLocaleString()}</Text>
-              <Text style={styles.revenueChange}>Current month</Text>
-            </Card>
-            <Card style={styles.revenueCard}>
-              <Text style={styles.revenueLabel}>Average Order</Text>
-              <Text style={styles.revenueValue}>${financialData.averageOrderValue}</Text>
-              <Text style={styles.revenueChange}>Per transaction</Text>
-            </Card>
-          </View>
-          <View style={styles.revenueCards}>
-            <Card style={styles.revenueCard}>
-              <Text style={styles.revenueLabel}>Weekly Income</Text>
-              <Text style={styles.revenueValue}>${financialData.weeklyIncome.toLocaleString()}</Text>
-              <Text style={styles.revenueChange}>Estimated weekly</Text>
-            </Card>
-            <Card style={styles.revenueCard}>
-              <Text style={styles.revenueLabel}>Pending Payouts</Text>
-              <Text style={styles.revenueValue}>${financialData.pendingPayouts.toLocaleString()}</Text>
-              <Text style={styles.revenueChange}>To artists</Text>
-            </Card>
-            <Card style={styles.revenueCard}>
-              <Text style={styles.revenueLabel}>Total Orders</Text>
-              <Text style={styles.revenueValue}>{financialData.totalOrders}</Text>
-              <Text style={styles.revenueChange}>All time</Text>
-            </Card>
-          </View>
-          {financialData.topEarners.length > 0 && (
-            <Card style={{ marginTop: 20 }}>
-              <Text style={[styles.sectionTitle, { fontSize: 18, marginBottom: 15 }]}>Top Earners</Text>
-              {financialData.topEarners.map((earner: { artistId: string; name: string; revenue: number }, index: number) => (
-                <View key={earner.artistId} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: index < financialData.topEarners.length - 1 ? 1 : 0, borderBottomColor: Theme.colors.border }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: Theme.colors.primary, justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
-                      <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>{index + 1}</Text>
-                    </View>
-                    <Text style={{ fontSize: 16, fontWeight: '500' }}>{earner.name}</Text>
-                  </View>
-                  <Text style={{ fontSize: 16, fontWeight: 'bold', color: Theme.colors.success }}>${earner.revenue.toLocaleString()}</Text>
+          <View style={{ marginBottom: 20 }}>
+            <View style={{ flexDirection: 'row', marginBottom: 12 }}>
+              <View style={{ flex: 1, backgroundColor: 'white', borderRadius: 16, padding: 16, marginRight: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 }}>
+                <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: '#eef2ff', justifyContent: 'center', alignItems: 'center', marginBottom: 10 }}>
+                  <DollarSign size={20} color={Theme.colors.primary} />
                 </View>
-              ))}
-            </Card>
-          )}
-          <View style={{ marginTop: 24, alignItems: 'center' }}>
-            <TouchableOpacity style={{ backgroundColor: Theme.colors.primary, paddingHorizontal: Theme.spacing.lg, paddingVertical: Theme.spacing.md, borderRadius: Theme.borderRadius.md, marginBottom: 10 }} onPress={fetchFinancialData}>
-              <Text style={{ color: 'white', fontWeight: '600' }}>🔄 Refresh Financial Data</Text>
-            </TouchableOpacity>
-            <Text style={{ fontSize: 16, color: Theme.colors.textLight, textAlign: 'center' }}>
-              Track your platform's financial health at a glance. Data updates automatically from Firebase orders.
-            </Text>
+                <Text style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>Services Revenue</Text>
+                <Text style={{ fontSize: 22, fontWeight: '800', color: '#111' }}>${financialData.servicesRevenue.toLocaleString()}</Text>
+                <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{financialData.serviceOrders} orders · {svcPct}%</Text>
+              </View>
+              <View style={{ flex: 1, backgroundColor: 'white', borderRadius: 16, padding: 16, marginLeft: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 }}>
+                <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: '#fef3e8', justifyContent: 'center', alignItems: 'center', marginBottom: 10 }}>
+                  <BarChart3 size={20} color="#f59e0b" />
+                </View>
+                <Text style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>Tickets Revenue</Text>
+                <Text style={{ fontSize: 22, fontWeight: '800', color: '#111' }}>${financialData.ticketsRevenue.toLocaleString()}</Text>
+                <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{financialData.ticketOrders} orders · {100 - svcPct}%</Text>
+              </View>
+            </View>
+            <View style={{ backgroundColor: 'white', borderRadius: 16, padding: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View>
+                  <Text style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>Total Revenue</Text>
+                  <Text style={{ fontSize: 28, fontWeight: '800', color: '#111' }}>${totalRev.toLocaleString()}</Text>
+                </View>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: momGrowth >= 0 ? '#ecfdf5' : '#fef2f2', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 }}>
+                    {momGrowth >= 0 ? <ArrowUp size={14} color={Theme.colors.success} /> : <ArrowDown size={14} color={Theme.colors.error} />}
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: momGrowth >= 0 ? Theme.colors.success : Theme.colors.error, marginLeft: 4 }}>
+                      {Math.abs(momGrowth).toFixed(1)}%
+                    </Text>
+                  </View>
+                  <Text style={{ fontSize: 11, color: '#888', marginTop: 4 }}>vs last month</Text>
+                </View>
+              </View>
+            </View>
           </View>
+
+          <View style={{ flexDirection: 'row', marginBottom: 20 }}>
+            <View style={{ flex: 1, backgroundColor: 'white', borderRadius: 16, padding: 14, marginRight: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2, alignItems: 'center' }}>
+              <Text style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>Avg Order</Text>
+              <Text style={{ fontSize: 18, fontWeight: '800', color: '#111' }}>${financialData.averageOrderValue.toLocaleString()}</Text>
+              <Text style={{ fontSize: 10, color: '#bbb', marginTop: 2 }}>Per transaction</Text>
+            </View>
+            <View style={{ flex: 1, backgroundColor: 'white', borderRadius: 16, padding: 14, marginHorizontal: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2, alignItems: 'center' }}>
+              <Text style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>Monthly</Text>
+              <Text style={{ fontSize: 18, fontWeight: '800', color: '#111' }}>${financialData.monthlyIncome.toLocaleString()}</Text>
+              <Text style={{ fontSize: 10, color: '#bbb', marginTop: 2 }}>Current month</Text>
+            </View>
+            <View style={{ flex: 1, backgroundColor: 'white', borderRadius: 16, padding: 14, marginLeft: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2, alignItems: 'center' }}>
+              <Text style={{ fontSize: 11, color: '#888', marginBottom: 6 }}>Payouts</Text>
+              <Text style={{ fontSize: 18, fontWeight: '800', color: '#111' }}>${financialData.pendingPayouts.toLocaleString()}</Text>
+              <Text style={{ fontSize: 10, color: '#bbb', marginTop: 2 }}>To artists</Text>
+            </View>
+          </View>
+
+          <Card style={{ marginBottom: 20, padding: 20, borderRadius: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <View>
+                <Text style={{ fontSize: 17, fontWeight: '700', color: '#111' }}>Revenue by {financePeriod}</Text>
+                <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{periodLabels.length} periods tracked</Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: Theme.colors.primary, marginRight: 6 }} />
+                <Text style={{ fontSize: 11, color: '#888' }}>Revenue</Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: 150, justifyContent: 'space-between', marginBottom: 12 }}>
+              {periodLabels.map((label: string, i: number) => {
+                const value = periodRevenue[i] || 0;
+                const height = (value / maxRev) * 130;
+                return (
+                  <View key={label} style={{ flex: 1, alignItems: 'center', marginHorizontal: 2 }}>
+                    <Text style={{ fontSize: 9, fontWeight: '600', color: '#bbb', marginBottom: 4 }}>${(value / 1000).toFixed(value >= 1000 ? 0 : 1)}{value >= 1000 ? 'k' : ''}</Text>
+                    <View style={{
+                      width: '85%', height: Math.max(height, 3),
+                      backgroundColor: Theme.colors.primary,
+                      borderTopLeftRadius: 6, borderTopRightRadius: 6,
+                      opacity: 0.85,
+                    }} />
+                  </View>
+                );
+              })}
+            </View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 2 }}>
+              {periodLabels.map((label: string) => (
+                <Text key={label} style={{ flex: 1, textAlign: 'center', fontSize: 10, color: '#999' }}>{label}</Text>
+              ))}
+            </View>
+          </Card>
+
+          <Card style={{ marginBottom: 20, padding: 20, borderRadius: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 }}>
+            <Text style={{ fontSize: 17, fontWeight: '700', color: '#111', marginBottom: 20 }}>Revenue Breakdown</Text>
+            <View style={{ flexDirection: 'row', height: 28, borderRadius: 14, overflow: 'hidden', marginBottom: 20 }}>
+              <View style={{ flex: svcPct, backgroundColor: Theme.colors.primary }} />
+              <View style={{ flex: 100 - svcPct, backgroundColor: '#f59e0b' }} />
+            </View>
+            <View style={{ flexDirection: 'row' }}>
+              <View style={{ flex: 1, backgroundColor: '#eef2ff', borderRadius: 12, padding: 14, marginRight: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                  <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: Theme.colors.primary, marginRight: 8 }} />
+                  <Text style={{ fontSize: 15, fontWeight: '700', color: '#111' }}>Services</Text>
+                </View>
+                <Text style={{ fontSize: 24, fontWeight: '800', color: '#111', marginBottom: 4 }}>${(financialData.servicesRevenue / 1000).toFixed(1)}k</Text>
+                <Text style={{ fontSize: 12, color: '#888' }}>{svcPct}% · {financialData.serviceOrders} orders</Text>
+              </View>
+              <View style={{ flex: 1, backgroundColor: '#fef3e8', borderRadius: 12, padding: 14, marginLeft: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                  <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: '#f59e0b', marginRight: 8 }} />
+                  <Text style={{ fontSize: 15, fontWeight: '700', color: '#111' }}>Tickets</Text>
+                </View>
+                <Text style={{ fontSize: 24, fontWeight: '800', color: '#111', marginBottom: 4 }}>${(financialData.ticketsRevenue / 1000).toFixed(1)}k</Text>
+                <Text style={{ fontSize: 12, color: '#888' }}>{100 - svcPct}% · {financialData.ticketOrders} orders</Text>
+              </View>
+            </View>
+          </Card>
+
+          <Card style={{ marginBottom: 20, padding: 20, borderRadius: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 }}>
+            <Text style={{ fontSize: 17, fontWeight: '700', color: '#111', marginBottom: 20 }}>Top Earners</Text>
+            {financialData.topEarners.length > 0 ? (
+              financialData.topEarners.map((earner: { artistId: string; name: string; revenue: number }, index: number) => {
+                const maxRevenue = financialData.topEarners[0]?.revenue || 1;
+                const earnPct = (earner.revenue / maxRevenue) * 100;
+                return (
+                  <View key={earner.artistId} style={{ marginBottom: index < financialData.topEarners.length - 1 ? 16 : 0 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: index === 0 ? '#fbbf24' : index === 1 ? '#e5e7eb' : index === 2 ? '#d97706' : '#eef2ff', justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
+                          <Text style={{ color: index <= 2 ? 'white' : Theme.colors.primary, fontSize: 13, fontWeight: '800' }}>{index + 1}</Text>
+                        </View>
+                        <Text style={{ fontSize: 15, fontWeight: '600', color: '#333' }}>{earner.name}</Text>
+                      </View>
+                      <Text style={{ fontSize: 16, fontWeight: '800', color: '#111' }}>${earner.revenue.toLocaleString()}</Text>
+                    </View>
+                    <View style={{ height: 8, backgroundColor: '#f0f0f0', borderRadius: 4, overflow: 'hidden', marginLeft: 44 }}>
+                      <View style={{ width: `${earnPct}%`, height: '100%', backgroundColor: index === 0 ? '#fbbf24' : Theme.colors.primary, borderRadius: 4 }} />
+                    </View>
+                  </View>
+                );
+              })
+            ) : (
+              <View style={{ padding: 20, alignItems: 'center' }}>
+                <Text style={{ fontSize: 14, color: '#bbb' }}>No earner data yet</Text>
+              </View>
+            )}
+          </Card>
+
+          <TouchableOpacity onPress={fetchFinancialData} style={{ backgroundColor: Theme.colors.primary, paddingVertical: 14, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 12, shadowColor: Theme.colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 }}>
+            <Activity size={18} color="white" style={{ marginRight: 8 }} />
+            <Text style={{ color: 'white', fontWeight: '700', fontSize: 15 }}>Refresh Data</Text>
+          </TouchableOpacity>
+          <Text style={{ fontSize: 12, color: '#bbb', textAlign: 'center', marginBottom: 24 }}>
+            Data syncs from orders, transactions, and payments collections
+          </Text>
         </>
       )}
-    </View>
-  );
+    </ScrollView>
+    );
+  };
 
   const resetNewCouponForm = () => {
     setNewCoupon({
@@ -2117,16 +2575,14 @@ service cloud.firestore {
       type: 'percentage',
       expirationDate: '',
       maxUsage: '',
-      status: 'active',
-      description: '',
       minOrderAmount: '',
       scope: 'all',
-      targetType: 'all',
-      targetIds: [],
+      selectedServiceId: '',
+      selectedServiceName: '',
     });
   };
 
-  const handleCreateCoupon = () => {
+  const handleCreateCoupon = async () => {
     const name = newCoupon.name.trim();
     const code = newCoupon.code.trim().toUpperCase();
     const discount = Number(newCoupon.discount);
@@ -2154,27 +2610,13 @@ service cloud.firestore {
       return;
     }
 
-    if (newCoupon.scope === 'selected' && (newCoupon.targetIds || []).length === 0) {
-      Alert.alert('Validation Error', 'Please select at least one service or ticket.');
+    if (newCoupon.scope === 'specific' && !newCoupon.selectedServiceId) {
+      Alert.alert('Validation Error', 'Please select a service.');
       return;
     }
 
-    const couponToCreate: Coupon = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name,
-      code,
-      discount,
-      type: newCoupon.type,
-      expirationDate,
-      usageCount: 0,
-      maxUsage: Number.isFinite(maxUsage) && maxUsage > 0 ? maxUsage : 0,
-      status: 'active',
-      description: newCoupon.description?.trim() || undefined,
-      minOrderAmount: Number.isFinite(minOrderAmount) && minOrderAmount > 0 ? minOrderAmount : 0,
-      scope: newCoupon.scope,
-      targetType: newCoupon.scope === 'services' ? 'service' : newCoupon.scope === 'tickets' ? 'ticket' : newCoupon.targetType,
-      targetIds: newCoupon.scope === 'selected' ? (newCoupon.targetIds || []) : [],
-    };
+    const serviceId = newCoupon.scope === 'all' ? 'all' : newCoupon.selectedServiceId;
+    const serviceName = newCoupon.scope === 'all' ? 'All Services' : newCoupon.selectedServiceName;
 
     const duplicateCodeExists = coupons.some(
       coupon => (coupon.code || '').toString().trim().toUpperCase() === code
@@ -2185,27 +2627,87 @@ service cloud.firestore {
       return;
     }
 
-    setCoupons(prev => [couponToCreate, ...prev]);
-    setShowCreateCouponModal(false);
-    resetNewCouponForm();
-    Alert.alert('Success', 'Coupon created successfully.');
+    try {
+      const couponData = {
+        code,
+        serviceId,
+        serviceName,
+        artistId: 'admin',
+        artistName: 'Admin',
+        discountType: newCoupon.type,
+        discountValue: discount,
+        maxUses: Number.isFinite(maxUsage) && maxUsage > 0 ? maxUsage : 999999,
+        currentUses: 0,
+        isActive: true,
+        expiryDate: Timestamp.fromDate(expirationDate),
+        createdAt: Timestamp.fromDate(new Date()),
+        description: name,
+        minOrderValue: minOrderAmount,
+      };
+
+      const docRef = await addDoc(collection(db, 'coupons'), couponData);
+
+      const newCouponEntry: Coupon = {
+        id: docRef.id,
+        name,
+        code,
+        discount,
+        type: newCoupon.type,
+        expirationDate,
+        usageCount: 0,
+        maxUsage: Number.isFinite(maxUsage) && maxUsage > 0 ? maxUsage : 999999,
+        status: 'active',
+        description: name,
+        minOrderAmount,
+        scope: newCoupon.scope === 'all' ? 'all' : 'selected',
+        targetType: 'service',
+        targetIds: serviceId !== 'all' ? [serviceId] : [],
+      };
+
+      setCoupons(prev => [newCouponEntry, ...prev]);
+      setShowCreateCouponModal(false);
+      resetNewCouponForm();
+      Alert.alert('Success', 'Coupon created successfully.');
+    } catch (err) {
+      console.error('Error creating coupon:', err);
+      Alert.alert('Error', 'Failed to create coupon.');
+    }
   };
 
-  const handleToggleCouponStatus = (coupon: Coupon) => {
-    setCoupons(prev =>
-      prev.map(item => {
-        if (item.id !== coupon.id) {
-          return item;
+  const handleToggleCouponStatus = async (coupon: Coupon) => {
+    const newStatus = coupon.status === 'stopped' ? 'active' : 'stopped';
+    const newIsActive = newStatus === 'active';
+    try {
+      if (coupon.id) {
+        await updateDoc(doc(db, 'coupons', coupon.id), { isActive: newIsActive });
+      }
+      setCoupons(prev =>
+        prev.map(item =>
+          item.id === coupon.id ? { ...item, status: newStatus } : item
+        )
+      );
+    } catch (err) {
+      console.error('Error toggling coupon status:', err);
+    }
+  };
+
+  const handleDeleteCoupon = (coupon: Coupon) => {
+    Alert.alert('Delete Coupon', `Are you sure you want to delete "${coupon.code}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        try {
+          if (coupon.id) {
+            await deleteDoc(doc(db, 'coupons', coupon.id));
+          }
+          setCoupons(prev => prev.filter(c => c.id !== coupon.id));
+        } catch (err) {
+          console.error('Error deleting coupon:', err);
         }
-        return {
-          ...item,
-          status: item.status === 'stopped' ? 'active' : 'stopped',
-        };
-      })
-    );
+      }},
+    ]);
   };
 
-  const handleUseCoupon = (coupon: Coupon) => {
+  const handleUseCoupon = async (coupon: Coupon) => {
     const expirationDate = coupon.expirationDate instanceof Date
       ? coupon.expirationDate
       : new Date(coupon.expirationDate);
@@ -2228,29 +2730,94 @@ service cloud.firestore {
       return;
     }
 
-    setCoupons(prev =>
-      prev.map(item => {
-        if (item.id !== coupon.id) {
-          return item;
-        }
-        return {
-          ...item,
-          usageCount: (item.usageCount ?? 0) + 1,
-        };
-      })
-    );
+    try {
+      if (coupon.id) {
+        await updateDoc(doc(db, 'coupons', coupon.id), { currentUses: usageCount + 1 });
+      }
+      setCoupons(prev =>
+        prev.map(item =>
+          item.id === coupon.id ? { ...item, usageCount: (item.usageCount ?? 0) + 1 } : item
+        )
+      );
+    } catch (err) {
+      console.error('Error using coupon:', err);
+    }
   };
 
-  const renderCouponsTab = () => (
+  const renderCouponsTab = () => {
+    const statusOptions = ['all', 'active', 'stopped', 'expired'] as const;
+    const totalCoupons = coupons.length;
+    const activeCoupons = coupons.filter(c => {
+      const exp = c.expirationDate instanceof Date ? c.expirationDate : new Date(c.expirationDate);
+      return c.status === 'active' && (!isNaN(exp.getTime()) ? exp >= new Date() : true);
+    }).length;
+    const totalUsage = coupons.reduce((sum, c) => sum + (c.usageCount ?? 0), 0);
+
+    return (
     <View style={styles.tabContent}>
-      <View style={styles.couponsHeader}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: Theme.spacing.md }}>
+        <View style={styles.searchContainer}>
+          <Search size={16} color={Theme.colors.textLight} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search coupons..."
+            placeholderTextColor={Theme.colors.textLight}
+            value={couponSearchQuery}
+            onChangeText={setCouponSearchQuery}
+          />
+        </View>
         <TouchableOpacity style={styles.createButton} onPress={() => setShowCreateCouponModal(true)}>
           <Plus size={16} color="white" />
-          <Text style={styles.createButtonText}>Create Coupon</Text>
+          <Text style={styles.createButtonText}>New</Text>
         </TouchableOpacity>
       </View>
+
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: Theme.spacing.sm }}>
+        <View style={{ flex: 1, backgroundColor: '#f0f4ff', borderRadius: 10, padding: 10, marginRight: 6, alignItems: 'center' }}>
+          <Text style={{ fontSize: 18, fontWeight: 'bold', color: Theme.colors.primary }}>{totalCoupons}</Text>
+          <Text style={{ fontSize: 11, color: Theme.colors.textLight }}>Total</Text>
+        </View>
+        <View style={{ flex: 1, backgroundColor: '#f0fdf4', borderRadius: 10, padding: 10, marginHorizontal: 6, alignItems: 'center' }}>
+          <Text style={{ fontSize: 18, fontWeight: 'bold', color: Theme.colors.success }}>{activeCoupons}</Text>
+          <Text style={{ fontSize: 11, color: Theme.colors.textLight }}>Active</Text>
+        </View>
+        <View style={{ flex: 1, backgroundColor: '#fef2f2', borderRadius: 10, padding: 10, marginLeft: 6, alignItems: 'center' }}>
+          <Text style={{ fontSize: 18, fontWeight: 'bold', color: Theme.colors.error }}>{totalUsage}</Text>
+          <Text style={{ fontSize: 11, color: Theme.colors.textLight }}>Used</Text>
+        </View>
+      </View>
+
+      <View style={{ flexDirection: 'row', marginBottom: Theme.spacing.md }}>
+        {statusOptions.map(opt => (
+          <TouchableOpacity
+            key={opt}
+            onPress={() => setCouponStatusFilter(opt)}
+            style={{
+              paddingHorizontal: 14, paddingVertical: 5, borderRadius: 14, marginRight: 6,
+              backgroundColor: couponStatusFilter === opt ? Theme.colors.primary : '#f0f0f0',
+            }}
+          >
+            <Text style={{ fontSize: 12, fontWeight: couponStatusFilter === opt ? '600' : '400', color: couponStatusFilter === opt ? 'white' : '#666', textTransform: 'capitalize' }}>{opt}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {couponsLoading && filteredCoupons.length === 0 ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={Theme.colors.primary} />
+        </View>
+      ) : filteredCoupons.length === 0 ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <Gift size={48} color="#ddd" />
+          <Text style={{ marginTop: 12, fontSize: 16, color: Theme.colors.textLight }}>No coupons found</Text>
+          <TouchableOpacity style={[styles.createButton, { marginTop: 16 }]} onPress={() => setShowCreateCouponModal(true)}>
+            <Plus size={16} color="white" />
+            <Text style={styles.createButtonText}>Create One</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
       <FlatList
-        data={coupons}
+        data={filteredCoupons}
         keyExtractor={(item, index) => (item.id ? String(item.id) : String(index))}
         renderItem={({ item }) => {
           const expirationDate = item.expirationDate instanceof Date
@@ -2264,65 +2831,96 @@ service cloud.firestore {
           const isMaxed = maxUsage > 0 && usageCount >= maxUsage;
           const usagePercent = maxUsage > 0 ? Math.min(100, Math.round((usageCount / maxUsage) * 100)) : 0;
           let statusColor = Theme.colors.success;
+          let statusBg = '#f0fdf4';
           let statusText = 'Active';
           if (isExpired) {
             statusColor = Theme.colors.error;
+            statusBg = '#fef2f2';
             statusText = 'Expired';
           } else if (isStopped) {
             statusColor = Theme.colors.warning;
+            statusBg = '#fffbeb';
             statusText = 'Stopped';
           }
           return (
-            <Card style={[styles.couponItem, { shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8, elevation: 2 }]}>
-              <View style={styles.couponHeader}>
-                <Text style={styles.couponName}>{item.name}</Text>
-                <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
-                  <Text style={styles.statusText}>{statusText}</Text>
+            <Card style={[styles.couponItem, { borderLeftWidth: 0, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 8, elevation: 1 }]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.couponName, { marginBottom: 2 }]}>{item.name}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={[styles.couponCode, { marginBottom: 0, marginRight: 8 }]}>{item.code}</Text>
+                    <View style={{ backgroundColor: statusBg, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: statusColor }}>{statusText}</Text>
+                    </View>
+                  </View>
+                </View>
+                <View style={{ backgroundColor: item.type === 'percentage' ? '#eef2ff' : '#ecfdf5', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 10, alignItems: 'center', minWidth: 60 }}>
+                  <Text style={{ fontWeight: 'bold', fontSize: 16, color: item.type === 'percentage' ? Theme.colors.primary : Theme.colors.success }}>
+                    {item.type === 'percentage' ? `${item.discount}%` : `$${item.discount}`}
+                  </Text>
+                  <Text style={{ fontSize: 9, color: Theme.colors.textLight }}>OFF</Text>
                 </View>
               </View>
-              <Text style={styles.couponCode}>{item.code}</Text>
-              <Text style={styles.couponDiscount}>{item.type === 'percentage' ? `${item.discount}%` : `$${item.discount}`} off</Text>
-              <View style={styles.couponStats}>
-                <Text style={styles.couponStat}>Used: {usageCount}/{maxUsage}</Text>
-                <Text style={styles.couponStat}>Expires: {hasValidExpirationDate ? expirationDate.toLocaleDateString() : 'N/A'}</Text>
+
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <View style={{ backgroundColor: '#f5f5f5', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+                  <Text style={{ fontSize: 11, color: '#666' }}>{item.scope === 'all' ? 'All services' : '1 service'}</Text>
+                </View>
+                {Number(item.minOrderAmount) > 0 && (
+                  <View style={{ backgroundColor: '#f5f5f5', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, marginLeft: 6 }}>
+                    <Text style={{ fontSize: 11, color: '#666' }}>Min ${Number(item.minOrderAmount)}</Text>
+                  </View>
+                )}
+                <View style={{ marginLeft: 'auto' }}>
+                  <Text style={{ fontSize: 11, color: Theme.colors.textLight }}>
+                    {hasValidExpirationDate ? `Exp ${expirationDate.toLocaleDateString()}` : 'No expiry'}
+                  </Text>
+                </View>
               </View>
-              <View style={{ height: 8, backgroundColor: '#eee', borderRadius: 4, marginBottom: 8 }}>
-                <View style={{ width: `${usagePercent}%`, height: 8, backgroundColor: statusColor, borderRadius: 4 }} />
+
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                <Text style={{ fontSize: 12, color: '#888', marginRight: 8 }}>{usageCount}/{maxUsage === 999999 ? '∞' : maxUsage} used</Text>
+                <View style={{ flex: 1, height: 5, backgroundColor: '#eee', borderRadius: 3, overflow: 'hidden' }}>
+                  <View style={{ width: `${usagePercent}%`, height: 5, backgroundColor: statusColor, borderRadius: 3 }} />
+                </View>
               </View>
-              <View style={styles.couponActions}>
-                <TouchableOpacity style={[styles.editButton, { opacity: isExpired ? 0.5 : 1 }]} disabled={isExpired} onPress={() => {
-                  Alert.alert(
-                    isStopped ? 'Continue Coupon?' : 'Stop Coupon?',
-                    `Are you sure you want to ${isStopped ? 'continue' : 'stop'} this coupon?`,
-                    [
+
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', borderTopWidth: 1, borderTopColor: '#f5f5f5', paddingTop: 8, marginTop: 2 }}>
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6, backgroundColor: isStopped ? '#f0fdf4' : '#fffbeb', marginRight: 8, opacity: isExpired ? 0.4 : 1 }}
+                  disabled={isExpired}
+                  onPress={() => {
+                    Alert.alert(isStopped ? 'Resume Coupon?' : 'Pause Coupon?', `"${item.code}" will be ${isStopped ? 'activated' : 'deactivated'}.`, [
                       { text: 'Cancel', style: 'cancel' },
-                      { text: isStopped ? 'Continue' : 'Stop', style: 'destructive', onPress: () => handleToggleCouponStatus(item) },
-                    ]
-                  );
-                }}>
-                  <Text style={{ color: Theme.colors.primary, marginRight: 8 }}>{isStopped ? 'Continue' : 'Stop'}</Text>
+                      { text: isStopped ? 'Resume' : 'Pause', style: 'destructive', onPress: () => handleToggleCouponStatus(item) },
+                    ]);
+                  }}
+                >
+                  <Play size={12} color={isStopped ? Theme.colors.success : Theme.colors.warning} />
+                  <Text style={{ fontSize: 11, color: isStopped ? Theme.colors.success : Theme.colors.warning, marginLeft: 4, fontWeight: '500' }}>{isStopped ? 'Resume' : 'Pause'}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={[styles.editButton, { opacity: isMaxed || isStopped || isExpired ? 0.5 : 1 }]} disabled={isMaxed || isStopped || isExpired} onPress={() => handleUseCoupon(item)}>
-                  <Text style={{ color: Theme.colors.info, marginRight: 8 }}>Use</Text>
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6, backgroundColor: '#eff6ff', marginRight: 8, opacity: isMaxed || isExpired || isStopped ? 0.4 : 1 }}
+                  disabled={isMaxed || isExpired || isStopped}
+                  onPress={() => handleUseCoupon(item)}
+                >
+                  <ShoppingBag size={12} color={Theme.colors.info} />
+                  <Text style={{ fontSize: 11, color: Theme.colors.info, marginLeft: 4, fontWeight: '500' }}>Use</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.editButton}>
-                  <Edit size={16} color={Theme.colors.primary} />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.deleteButton}>
+                <TouchableOpacity style={{ padding: 4 }} onPress={() => handleDeleteCoupon(item)}>
                   <Trash2 size={16} color={Theme.colors.error} />
                 </TouchableOpacity>
               </View>
-              {(isMaxed || isExpired) && (
-                <Text style={{ color: Theme.colors.error, fontSize: 12, marginTop: 4 }}>{isExpired ? 'This coupon is expired.' : 'Max usage reached.'}</Text>
-              )}
             </Card>
           );
         }}
         contentContainerStyle={{ paddingBottom: 32 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       />
+      )}
     </View>
-  );
+    );
+  };
 
   const renderUserModal = () => (
     <Modal visible={showUserModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowUserModal(false)}>
@@ -2375,70 +2973,109 @@ service cloud.firestore {
     </Modal>
   );
 
-  const renderCreateCouponModal = () => (
-    <Modal visible={showCreateCouponModal} animationType="slide" onRequestClose={() => setShowCreateCouponModal(false)} transparent>
-      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' }}>
-        <View style={{ backgroundColor: 'white', borderRadius: 12, padding: 24, width: '85%' }}>
-          <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 12 }}>Create Coupon</Text>
-          <TextInput placeholder="Name" value={newCoupon.name} onChangeText={text => setNewCoupon(prev => ({ ...prev, name: text }))} style={{ borderWidth: 1, borderColor: '#eee', padding: 8, borderRadius: 6, marginBottom: 8 }} />
-          <TextInput placeholder="Code" value={newCoupon.code} onChangeText={text => setNewCoupon(prev => ({ ...prev, code: text }))} style={{ borderWidth: 1, borderColor: '#eee', padding: 8, borderRadius: 6, marginBottom: 8 }} />
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-            <TextInput placeholder="Discount" keyboardType="numeric" value={String(newCoupon.discount)} onChangeText={text => setNewCoupon(prev => ({ ...prev, discount: text }))} style={{ flex: 1, borderWidth: 1, borderColor: '#eee', padding: 8, borderRadius: 6, marginBottom: 8, marginRight: 6 }} />
-            <TouchableOpacity onPress={() => setNewCoupon(prev => ({ ...prev, type: prev.type === 'percentage' ? 'fixed' : 'percentage' }))} style={{ width: 140, borderWidth: 1, borderColor: '#eee', padding: 8, borderRadius: 6, marginBottom: 8, alignItems: 'center' }}>
-              <Text>{newCoupon.type === 'percentage' ? 'Type: %' : 'Type: $'}</Text>
+  const renderCreateCouponModal = () => {
+    const previewDiscount = newCoupon.discount ? `${newCoupon.discount}${newCoupon.type === 'percentage' ? '%' : '$'}` : '—';
+    return (
+    <Modal visible={showCreateCouponModal} animationType="slide" onRequestClose={() => { setShowCreateCouponModal(false); resetNewCouponForm(); }} transparent>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' }}>
+        <View style={{ backgroundColor: 'white', borderRadius: 16, width: '88%', maxHeight: '92%', overflow: 'hidden' }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' }}>
+            <Text style={{ fontWeight: 'bold', fontSize: 18 }}>Create Coupon</Text>
+            <TouchableOpacity onPress={() => { setShowCreateCouponModal(false); resetNewCouponForm(); }} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: '#f5f5f5', justifyContent: 'center', alignItems: 'center' }}>
+              <X size={16} color="#666" />
             </TouchableOpacity>
           </View>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-            <TextInput placeholder="Max Usage" keyboardType="numeric" value={String(newCoupon.maxUsage)} onChangeText={text => setNewCoupon(prev => ({ ...prev, maxUsage: text }))} style={{ flex: 1, borderWidth: 1, borderColor: '#eee', padding: 8, borderRadius: 6, marginBottom: 8, marginRight: 6 }} />
-            <TextInput placeholder="Expires (YYYY-MM-DD)" value={newCoupon.expirationDate} onChangeText={text => setNewCoupon(prev => ({ ...prev, expirationDate: text }))} style={{ flex: 1, borderWidth: 1, borderColor: '#eee', padding: 8, borderRadius: 6, marginBottom: 8 }} />
-          </View>
-          <Text style={{ fontWeight: '600', marginTop: 8, marginBottom: 6 }}>Apply To</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 8 }}>
-            {(['all','services','tickets','selected'] as const).map(option => (
-              <TouchableOpacity key={option} onPress={() => setNewCoupon(prev => ({ ...prev, scope: option }))} style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: newCoupon.scope === option ? Theme.colors.primary : '#ddd', backgroundColor: newCoupon.scope === option ? 'rgba(67,97,238,0.08)' : 'white', marginRight: 8, marginBottom: 8 }}>
-                <Text style={{ color: newCoupon.scope === option ? Theme.colors.primary : Theme.colors.text }}>{option}</Text>
+          <ScrollView style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 }}>
+            <Text style={{ fontSize: 12, fontWeight: '600', color: '#888', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Coupon Details</Text>
+            <Text style={{ fontSize: 12, color: Theme.colors.textLight, marginBottom: 4 }}>Name</Text>
+            <TextInput placeholder="e.g. Summer Sale" value={newCoupon.name} onChangeText={text => setNewCoupon(prev => ({ ...prev, name: text }))} style={{ borderWidth: 1, borderColor: '#e0e0e0', padding: 10, borderRadius: 10, marginBottom: 12, fontSize: 14, backgroundColor: '#fafafa' }} />
+            <Text style={{ fontSize: 12, color: Theme.colors.textLight, marginBottom: 4 }}>Code</Text>
+            <View style={{ flexDirection: 'row', marginBottom: 12 }}>
+              <TextInput placeholder="e.g. SUMMER20" value={newCoupon.code} onChangeText={text => setNewCoupon(prev => ({ ...prev, code: text.toUpperCase() }))} style={{ flex: 1, borderWidth: 1, borderColor: '#e0e0e0', padding: 10, borderRadius: 10, marginRight: 8, fontSize: 14, backgroundColor: '#fafafa', fontFamily: 'monospace' }} autoCapitalize="characters" />
+              <TouchableOpacity onPress={() => { const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'; let code = ''; for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)]; setNewCoupon(prev => ({ ...prev, code })); }} style={{ backgroundColor: Theme.colors.primary, paddingHorizontal: 14, borderRadius: 10, justifyContent: 'center' }}>
+                <Text style={{ fontSize: 12, color: 'white', fontWeight: '600' }}>Generate</Text>
               </TouchableOpacity>
-            ))}
-          </View>
-          {newCoupon.scope !== 'all' && (
-            <View style={{ flexDirection: 'row', marginBottom: 8 }}>
-              {(['service','ticket'] as const).map(t => (
-                <TouchableOpacity key={t} onPress={() => setNewCoupon(prev => ({ ...prev, targetType: t }))} style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: newCoupon.targetType === t ? Theme.colors.primary : '#ddd', backgroundColor: newCoupon.targetType === t ? 'rgba(67,97,238,0.08)' : 'white', marginRight: 8 }}>
-                  <Text style={{ color: newCoupon.targetType === t ? Theme.colors.primary : Theme.colors.text }}>{t === 'service' ? 'Services' : 'Tickets'}</Text>
+            </View>
+            <View style={{ height: 1, backgroundColor: '#f0f0f0', marginVertical: 8 }} />
+            <Text style={{ fontSize: 12, fontWeight: '600', color: '#888', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Discount</Text>
+            <View style={{ flexDirection: 'row', marginBottom: 12 }}>
+              <TextInput placeholder="0" keyboardType="numeric" value={String(newCoupon.discount)} onChangeText={text => setNewCoupon(prev => ({ ...prev, discount: text }))} style={{ flex: 1, borderWidth: 1, borderColor: '#e0e0e0', padding: 10, borderRadius: 10, marginRight: 8, fontSize: 14, backgroundColor: '#fafafa' }} />
+              <View style={{ flexDirection: 'row', borderRadius: 10, overflow: 'hidden', borderWidth: 1, borderColor: '#e0e0e0' }}>
+                <TouchableOpacity onPress={() => setNewCoupon(prev => ({ ...prev, type: 'percentage' }))} style={{ paddingHorizontal: 16, paddingVertical: 10, backgroundColor: newCoupon.type === 'percentage' ? Theme.colors.primary : '#fafafa' }}>
+                  <Text style={{ fontWeight: '600', fontSize: 14, color: newCoupon.type === 'percentage' ? 'white' : '#666' }}>%</Text>
                 </TouchableOpacity>
-              ))}
+                <TouchableOpacity onPress={() => setNewCoupon(prev => ({ ...prev, type: 'fixed' }))} style={{ paddingHorizontal: 16, paddingVertical: 10, backgroundColor: newCoupon.type === 'fixed' ? Theme.colors.primary : '#fafafa' }}>
+                  <Text style={{ fontWeight: '600', fontSize: 14, color: newCoupon.type === 'fixed' ? 'white' : '#666' }}>$</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          )}
-          {newCoupon.scope === 'selected' && (
-            <View style={{ maxHeight: 180, borderWidth: 1, borderColor: '#eee', borderRadius: 8, padding: 8, marginBottom: 8 }}>
-              <Text style={{ marginBottom: 6, color: Theme.colors.textLight }}>Select {newCoupon.targetType === 'service' ? 'Services' : 'Tickets'}</Text>
-              <ScrollView>
-                {services.filter(s => (newCoupon.targetType === 'service' ? s.type === 'service' : s.type === 'ticket')).slice(0, 50).map(item => {
-                  const selected = (newCoupon.targetIds || []).includes(item.id);
-                  return (
-                    <TouchableOpacity key={item.id} onPress={() => {
-                      setNewCoupon(prev => ({
-                        ...prev,
-                        targetIds: selected ? (prev.targetIds || []).filter(id => id !== item.id) : ([...(prev.targetIds || []), item.id])
-                      }));
-                    }} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6 }}>
-                      <View style={{ width: 18, height: 18, borderRadius: 9, borderWidth: 1, borderColor: selected ? Theme.colors.primary : '#ccc', backgroundColor: selected ? Theme.colors.primary : 'white', marginRight: 8 }} />
-                      <Text style={{ flex: 1 }}>{item.name || item.title || 'Untitled'}</Text>
-                      <Text style={{ color: Theme.colors.textLight, fontSize: 12 }}>{item.category}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
+            <View style={{ flexDirection: 'row', marginBottom: 12 }}>
+              <View style={{ flex: 1, marginRight: 8 }}>
+                <Text style={{ fontSize: 12, color: Theme.colors.textLight, marginBottom: 4 }}>Max Uses</Text>
+                <TextInput placeholder="Unlimited" keyboardType="numeric" value={String(newCoupon.maxUsage)} onChangeText={text => setNewCoupon(prev => ({ ...prev, maxUsage: text }))} style={{ borderWidth: 1, borderColor: '#e0e0e0', padding: 10, borderRadius: 10, fontSize: 14, backgroundColor: '#fafafa' }} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 12, color: Theme.colors.textLight, marginBottom: 4 }}>Expires</Text>
+                <TextInput placeholder="YYYY-MM-DD" value={newCoupon.expirationDate} onChangeText={text => setNewCoupon(prev => ({ ...prev, expirationDate: text }))} style={{ borderWidth: 1, borderColor: '#e0e0e0', padding: 10, borderRadius: 10, fontSize: 14, backgroundColor: '#fafafa' }} />
+              </View>
             </View>
-          )}
-          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 16 }}>
-            <TouchableOpacity onPress={() => setShowCreateCouponModal(false)} style={{ marginRight: 12 }}><Text style={{ color: Theme.colors.text }}>Cancel</Text></TouchableOpacity>
-            <TouchableOpacity onPress={handleCreateCoupon} style={{ backgroundColor: Theme.colors.primary, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 }}><Text style={{ color: 'white', fontWeight: '600' }}>Create</Text></TouchableOpacity>
+            <View style={{ marginBottom: 12 }}>
+              <Text style={{ fontSize: 12, color: Theme.colors.textLight, marginBottom: 4 }}>Min Order Amount (optional)</Text>
+              <TextInput placeholder="0" keyboardType="numeric" value={String(newCoupon.minOrderAmount)} onChangeText={text => setNewCoupon(prev => ({ ...prev, minOrderAmount: text }))} style={{ borderWidth: 1, borderColor: '#e0e0e0', padding: 10, borderRadius: 10, fontSize: 14, backgroundColor: '#fafafa' }} />
+            </View>
+            <View style={{ height: 1, backgroundColor: '#f0f0f0', marginVertical: 8 }} />
+            <Text style={{ fontSize: 12, fontWeight: '600', color: '#888', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Apply To</Text>
+            <View style={{ flexDirection: 'row', marginBottom: 12 }}>
+              <TouchableOpacity onPress={() => setNewCoupon(prev => ({ ...prev, scope: 'all', selectedServiceId: '', selectedServiceName: '' }))} style={{ flex: 1, paddingVertical: 12, borderRadius: 10, borderWidth: 2, borderColor: newCoupon.scope === 'all' ? Theme.colors.primary : '#e0e0e0', backgroundColor: newCoupon.scope === 'all' ? 'rgba(67,97,238,0.06)' : '#fafafa', marginRight: 8, alignItems: 'center' }}>
+                <Text style={{ fontSize: 20, marginBottom: 2 }}>🌐</Text>
+                <Text style={{ fontWeight: '600', fontSize: 13, color: newCoupon.scope === 'all' ? Theme.colors.primary : '#666' }}>All</Text>
+                <Text style={{ fontSize: 11, color: newCoupon.scope === 'all' ? Theme.colors.primary : '#999' }}>Services</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setNewCoupon(prev => ({ ...prev, scope: 'specific' }))} style={{ flex: 1, paddingVertical: 12, borderRadius: 10, borderWidth: 2, borderColor: newCoupon.scope === 'specific' ? Theme.colors.primary : '#e0e0e0', backgroundColor: newCoupon.scope === 'specific' ? 'rgba(67,97,238,0.06)' : '#fafafa', alignItems: 'center' }}>
+                <Text style={{ fontSize: 20, marginBottom: 2 }}>🎯</Text>
+                <Text style={{ fontWeight: '600', fontSize: 13, color: newCoupon.scope === 'specific' ? Theme.colors.primary : '#666' }}>Specific</Text>
+                <Text style={{ fontSize: 11, color: newCoupon.scope === 'specific' ? Theme.colors.primary : '#999' }}>Service</Text>
+              </TouchableOpacity>
+            </View>
+            {newCoupon.scope === 'specific' && (
+              <View style={{ maxHeight: 160, borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 10, padding: 10, marginBottom: 12, backgroundColor: '#fafafa' }}>
+                {newCoupon.selectedServiceName ? (
+                  <View style={{ backgroundColor: 'rgba(67,97,238,0.08)', padding: 8, borderRadius: 8, marginBottom: 8, flexDirection: 'row', alignItems: 'center' }}>
+                    <Check size={14} color={Theme.colors.primary} />
+                    <Text style={{ fontSize: 13, color: Theme.colors.primary, fontWeight: '500', marginLeft: 6, flex: 1 }}>{newCoupon.selectedServiceName}</Text>
+                  </View>
+                ) : (
+                  <Text style={{ marginBottom: 6, color: Theme.colors.textLight, fontSize: 12 }}>Tap a service to select</Text>
+                )}
+                <ScrollView>
+                  {services.filter(s => s.type === 'service').map(item => {
+                    const selected = newCoupon.selectedServiceId === item.id;
+                    return (
+                      <TouchableOpacity key={item.id} onPress={() => setNewCoupon(prev => ({ ...prev, selectedServiceId: item.id, selectedServiceName: item.name || item.title || '' }))} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6, backgroundColor: selected ? 'rgba(67,97,238,0.05)' : 'transparent', borderRadius: 8, paddingHorizontal: 6 }}>
+                        <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: selected ? Theme.colors.primary : '#ccc', backgroundColor: selected ? Theme.colors.primary : 'white', marginRight: 10, justifyContent: 'center', alignItems: 'center' }}>
+                          {selected && <Check size={12} color="white" />}
+                        </View>
+                        <Text style={{ flex: 1, fontSize: 13 }}>{item.name || item.title || 'Untitled'}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            )}
+          </ScrollView>
+          <View style={{ flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 12, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
+            <TouchableOpacity onPress={() => { setShowCreateCouponModal(false); resetNewCouponForm(); }} style={{ flex: 1, paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: '#e0e0e0', alignItems: 'center', marginRight: 10 }}>
+              <Text style={{ color: '#666', fontWeight: '500' }}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleCreateCoupon} style={{ flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: Theme.colors.primary, alignItems: 'center' }}>
+              <Text style={{ color: 'white', fontWeight: '600', fontSize: 15 }}>Create Coupon</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </View>
     </Modal>
-  );
+    );
+  };
 
   const renderBulkNotificationModal = () => (
     <Modal visible={showBulkNotificationModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowBulkNotificationModal(false)}>
@@ -2529,6 +3166,7 @@ service cloud.firestore {
       )}
       {renderUserModal()}
       {renderEditUserModal()}
+      {renderServiceModal()}
       {renderCreateCouponModal()}
       {renderBulkNotificationModal()}
     </SafeAreaView>

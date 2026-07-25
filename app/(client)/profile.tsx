@@ -14,6 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { Card } from '@/src/components/common/Card';
 import { ProfileEditModal } from '@/src/components/profile/ProfileEditModal';
@@ -25,6 +26,7 @@ import {
   onSnapshot,
   db,
 } from '@/src/firebase/firebaseConfig';
+import { AUTH_PENDING_REDIRECT_KEY } from '@/src/utils/requireAuth';
 import { recalculateUserStatistics, UserStats } from '@/src/firebase/userStatsService';
 
 export default function ProfileScreen() {
@@ -83,12 +85,22 @@ export default function ProfileScreen() {
   };
 
   // ── auth redirect ─────────────────────────────────────────────────────────
+  const [needsLogin, setNeedsLogin] = useState(false);
+
   useEffect(() => {
-    if (authLoading) return;
-    if (!user || !user.uid || user.uid.trim() === '') {
-      router.replace('/auth');
+    console.log('Profile auth guard:', { authLoading, user });
+    if (authLoading) {
+      setNeedsLogin(false);
       return;
     }
+
+    if (!user || !user.uid || user.uid.trim() === '') {
+      console.warn('Unauthorized access to profile — showing login prompt', { user });
+      setNeedsLogin(true);
+      return;
+    }
+
+    setNeedsLogin(false);
   }, [authLoading, user]);
 
   // ── live data sync (runs once per mount for this user) ────────────────────
@@ -153,9 +165,13 @@ export default function ProfileScreen() {
               if (typeof window !== 'undefined' && window.localStorage) {
                 window.localStorage.clear();
               }
+              console.warn('AUTH REDIRECT', 'FILE: app/(client)/profile.tsx', 'USER:', user);
+              console.trace('AUTH REDIRECT TRACE');
               router.replace('/auth');
             } catch (error) {
               console.error('Logout error:', error);
+              console.warn('AUTH REDIRECT (logout-error)', 'FILE: app/(client)/profile.tsx', 'ERROR:', error, 'USER:', user);
+              console.trace('AUTH REDIRECT TRACE (logout-error)');
               router.replace('/auth');
             }
           },
@@ -222,7 +238,35 @@ export default function ProfileScreen() {
     );
   }
 
-  if (!user || !user.uid || user.uid.trim() === '') return null;
+  const handleLoginRedirect = async () => {
+    try {
+      await AsyncStorage.setItem(
+        AUTH_PENDING_REDIRECT_KEY,
+        JSON.stringify({ pathname: '/profile' }),
+      );
+    } catch (error) {
+      console.warn('Failed to save pending profile redirect:', error);
+    }
+
+    router.push('/auth');
+  };
+
+  if (needsLogin) {
+    return (
+      <View style={styles.unauthenticatedContainer}>
+        <Text style={styles.unauthenticatedTitle}>Connexion requise</Text>
+        <Text style={styles.unauthenticatedText}>
+          Vous devez être connecté pour accéder à votre profil.
+        </Text>
+        <TouchableOpacity
+          style={styles.loginNowButton}
+          onPress={handleLoginRedirect}
+        >
+          <Text style={styles.loginNowText}>Se connecter / S'inscrire</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
@@ -880,5 +924,37 @@ const styles = StyleSheet.create({
     fontFamily: Theme.typography.fontFamily.medium,
     fontSize: Theme.typography.fontSize.md,
     color: Theme.colors.textLight,
+  },
+
+  unauthenticatedContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Theme.spacing.lg,
+    backgroundColor: Theme.colors.background,
+  },
+  unauthenticatedTitle: {
+    fontFamily: Theme.typography.fontFamily.bold,
+    fontSize: Theme.typography.fontSize.lg,
+    color: Theme.colors.textDark,
+    marginBottom: Theme.spacing.sm,
+  },
+  unauthenticatedText: {
+    fontFamily: Theme.typography.fontFamily.regular,
+    fontSize: Theme.typography.fontSize.md,
+    color: Theme.colors.textLight,
+    textAlign: 'center',
+    marginBottom: Theme.spacing.md,
+  },
+  loginNowButton: {
+    backgroundColor: Theme.colors.primary,
+    paddingHorizontal: Theme.spacing.xl,
+    paddingVertical: Theme.spacing.md,
+    borderRadius: Theme.borderRadius.md,
+  },
+  loginNowText: {
+    color: '#fff',
+    fontFamily: Theme.typography.fontFamily.medium,
+    fontSize: Theme.typography.fontSize.md,
   },
 });

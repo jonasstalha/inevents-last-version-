@@ -26,6 +26,8 @@ export interface OrderForInvoice {
   ticketName?: string;
   serviceName?: string;
   totalPrice: number;
+  price?: number;
+  clientPrice?: number;
   status: string;
   createdAt: string;
   clientInfo?: {
@@ -473,6 +475,16 @@ function generateHTMLInvoice(
                 <span>Subtotal:</span>
                 <span>${formatMoney(subtotal)}</span>
               </div>
+              ${order.price != null && Number(order.price) !== total ? `
+              <div class="total-row">
+                <span>Service Price:</span>
+                <span>${formatMoney(Number(order.price))}</span>
+              </div>` : ''}
+              ${order.clientPrice != null && Number(order.clientPrice) !== total && Number(order.clientPrice) !== Number(order.price) ? `
+              <div class="total-row">
+                <span>Your Budget:</span>
+                <span>${formatMoney(Number(order.clientPrice))}</span>
+              </div>` : ''}
               <div class="total-row grand-total">
                 <span>Total:</span>
                 <span>${formatMoney(total)}</span>
@@ -573,6 +585,8 @@ export async function saveInvoiceToStorage(
       artistName: artist.name,
       title: order.serviceName || order.ticketName || order.gigTitle || '',
       amount: order.totalPrice,
+      price: order.price ?? null,
+      clientPrice: order.clientPrice ?? null,
       currency: 'MAD',
       status: 'issued',
       downloadURL,

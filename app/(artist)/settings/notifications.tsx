@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, SafeAreaView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, SafeAreaView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useArtistStore } from '../../../src/components/artist/ArtistStore';
@@ -27,7 +27,7 @@ const NotificationsPage = () => {
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Notification Settings</Text>
       </View>
-      <ScrollView style={styles.container}>
+      <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: Platform.OS === 'ios' ? 180 : 160 }}>
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>General Notifications</Text>
           <View style={styles.settingItem}>

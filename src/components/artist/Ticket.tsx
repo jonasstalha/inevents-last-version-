@@ -4,6 +4,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import React, { useEffect, useState } from 'react';
+import { useLocalSearchParams } from 'expo-router';
+import { fetchServiceByIdFromFirebase } from '../../firebase/fetchAllServices';
 import {
     ActivityIndicator,
     Alert,
@@ -22,6 +24,7 @@ import {
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { addServiceToFirebase, addTicketToFirebase } from '../../firebase/artistsService';
+import { updateServiceWithImages } from '../../firebase/artistServices';
 import { useArtistStore } from './ArtistStore';
 
 // Map components - loaded lazily to avoid initialization errors
@@ -95,6 +98,9 @@ const MOROCCAN_CITIES: { [key: string]: string[] } = {
 export default function Ticket() {
   const { gigs, addTicketToGig, addGig } = useArtistStore();
   const { user, loading } = useAuth();
+  const params = useLocalSearchParams();
+  const [serviceLoading, setServiceLoading] = useState(false);
+  const [loadedServiceId, setLoadedServiceId] = useState<string | null>(null);
 
   // --- FORM STATE ---
   const [form, setForm] = useState({
@@ -137,6 +143,8 @@ export default function Ticket() {
   });
   const [serviceImages, setServiceImages] = useState<string[]>([]);
   const [serviceVideos, setServiceVideos] = useState<string[]>([]);
+  const [originalServiceImages, setOriginalServiceImages] = useState<string[]>([]);
+  const [originalServiceVideo, setOriginalServiceVideo] = useState<string | undefined>(undefined);
   
   const [submitting, setSubmitting] = useState(false);
   const [serviceSubmitting, setServiceSubmitting] = useState(false);
@@ -222,6 +230,58 @@ export default function Ticket() {
 
     fetchCategories();
   }, [activeTab]);
+
+  // If navigation includes a serviceId, prefill the service form and switch to createService
+  useEffect(() => {
+    const tryPrefill = async () => {
+      const serviceId = params?.serviceId as string | undefined;
+      const editMode = String(params?.editMode || '') === 'true';
+      if (!serviceId || !editMode || serviceId === loadedServiceId) {
+        return;
+      }
+
+      setServiceLoading(true);
+      setActiveTab('createService');
+
+      try {
+        const service = await fetchServiceByIdFromFirebase(serviceId);
+        if (service) {
+          const resolvedLocation = service.locationName || service.location || service.city || '';
+          setServiceForm((prev) => ({
+            ...prev,
+            title: service.title || prev.title,
+            description: service.description || prev.description,
+            category: service.category || prev.category,
+            locationName: resolvedLocation || prev.locationName,
+            region: service.region || prev.region,
+            images: service.images || prev.images,
+            videos: service.videos || (service.video ? [service.video].filter(Boolean) : prev.videos),
+            items: Array.isArray(service.items) && service.items.length > 0
+              ? service.items.map((it: any) => ({ title: it.title || it.name || '', price: (it.price || '').toString(), maxQuantity: (it.maxQuantity || '').toString() }))
+              : prev.items,
+            extraServices: Array.isArray(service.extras) && service.extras.length > 0
+              ? service.extras.map((e: any) => ({ title: e.title || e.name || '', price: (e.price || '').toString(), maxQuantity: (e.maxQuantity || '').toString() }))
+              : prev.extraServices,
+          }));
+
+          const resolvedImages = service.images || [];
+          const resolvedVideos = (service.videos && Array.isArray(service.videos) ? service.videos : service.video ? [service.video] : []) || [];
+
+          setServiceImages(resolvedImages);
+          setOriginalServiceImages(resolvedImages);
+          setServiceVideos(resolvedVideos);
+          setOriginalServiceVideo(resolvedVideos.length > 0 ? resolvedVideos[0] : undefined);
+          setLoadedServiceId(serviceId);
+        }
+      } catch (err) {
+        console.warn('Could not prefill service form from serviceId:', err);
+      } finally {
+        setServiceLoading(false);
+      }
+    };
+
+    tryPrefill();
+  }, [params, loadedServiceId]);
 
   // --- IMAGE PICKER ---
   const pickImage = async (forService = false) => {
@@ -589,6 +649,10 @@ export default function Ticket() {
     console.log('[handleServiceSubmit] Service form data:', serviceForm);
     console.log('[handleServiceSubmit] Service images:', serviceImages);
     setServiceSubmitting(true);
+    const serviceId = params?.serviceId as string | undefined;
+    const editMode = String(params?.editMode || '') === 'true';
+    const isEditing = !!serviceId && editMode;
+
     try {
       const serviceDataWithPrice = {
         ...serviceForm,
@@ -600,36 +664,66 @@ export default function Ticket() {
           mapLatitude: pickedLocation.latitude,
           mapLongitude: pickedLocation.longitude,
         } : {}),
-      
       };
       
       console.log('[handleServiceSubmit] Service data with price:', serviceDataWithPrice);
-      const serviceResult = await addServiceToFirebase(user.uid, serviceDataWithPrice);
-      const serviceId = serviceResult.id;
-      
-      setServiceForm({
-        title: '',
-        locationName: '',
-        region: '',
-        category: '',
-        description: '',
-        images: [],
-        videos: [],
-        serviceRadius: 5,
-        items: [{ title: '', price: '', maxQuantity: '' }],
-        extraServices: [{ title: '', price: '', maxQuantity: '' }],
-      });
-      setServiceImages([]);
-      setServiceVideos([]);
+      let serviceResult: any;
+      if (isEditing && serviceId) {
+        const imagesToDelete = originalServiceImages.filter(url => !serviceImages.includes(url));
+        const newImageAssets = serviceImages
+          .filter(uri => typeof uri === 'string' && !uri.startsWith('http://') && !uri.startsWith('https://'))
+          .map((uri, idx) => ({ uri, width: 0, height: 0, type: 'image' as const, fileName: `service_image_${idx}.jpg` }));
+
+        const currentVideo = serviceVideos[0];
+        const currentVideoIsLocal = !!currentVideo && !currentVideo.startsWith('http://') && !currentVideo.startsWith('https://');
+        const newVideoAsset = currentVideoIsLocal
+          ? { uri: currentVideo, width: 0, height: 0, type: 'video' as const, fileName: 'service_video.mp4' }
+          : null;
+        const deleteVideo = !currentVideo && !!originalServiceVideo;
+
+        console.log('[handleServiceSubmit] Editing service', { serviceId, imagesToDelete, newImageAssets, currentVideo, deleteVideo });
+
+        serviceResult = await updateServiceWithImages(
+          user.uid,
+          serviceId,
+          serviceDataWithPrice,
+          newImageAssets,
+          imagesToDelete,
+          newVideoAsset,
+          deleteVideo
+        );
+      } else {
+        serviceResult = await addServiceToFirebase(user.uid, serviceDataWithPrice);
+      }
+
+      console.log('[handleServiceSubmit] Service saved:', serviceResult);
+
+      if (!isEditing) {
+        setServiceForm({
+          title: '',
+          locationName: '',
+          region: '',
+          category: '',
+          description: '',
+          images: [],
+          videos: [],
+          serviceRadius: 5,
+          items: [{ title: '', price: '', maxQuantity: '' }],
+          extraServices: [{ title: '', price: '', maxQuantity: '' }],
+        });
+        setServiceImages([]);
+        setServiceVideos([]);
+      }
+
       setServiceError('');
-      Alert.alert('Success', 'Service created!', [
+      Alert.alert('Success', isEditing ? 'Service updated!' : 'Service created!', [
         { text: 'OK', style: 'default' }
       ]);
     } catch (err: any) {
       console.error('[handleServiceSubmit] Error:', err);
       let errorMessage = 'Failed to save service. ';
       
-      if (err.message) {
+      if (err?.message) {
         if (err.message.includes('User not authenticated')) {
           errorMessage += 'Please log in again.';
         } else if (err.message.includes('Invalid artist ID')) {
@@ -644,8 +738,9 @@ export default function Ticket() {
       }
       
       setServiceError(errorMessage);
+    } finally {
+      setServiceSubmitting(false);
     }
-    setServiceSubmitting(false);
   };
 
   const renderHeader = () => (
@@ -701,10 +796,18 @@ export default function Ticket() {
     </View>
   );
 
+  const isEditMode = String(params?.editMode || '') === 'true' && !!params?.serviceId;
+
   const renderCreateServiceForm = () => (
     <View style={styles.formContainer}>
       <View style={styles.formCard}>
-        <Text style={styles.formTitle}>Create New Service</Text>
+        <Text style={styles.formTitle}>{isEditMode ? 'Update Service' : 'Create New Service'}</Text>
+        {serviceLoading && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
+            <ActivityIndicator size="small" color="#667eea" />
+            <Text style={{ marginLeft: 8, color: '#666' }}>Loading service details…</Text>
+          </View>
+        )}
         {/* Service Title */}
         <View style={styles.inputGroup}>
           <Text style={styles.inputLabel}>Service Title *</Text>
@@ -1023,7 +1126,7 @@ export default function Ticket() {
               <Ionicons name="add-circle" size={20} color="#fff" />
             )}
             <Text style={styles.submitButtonText}>
-              {serviceSubmitting ? 'Creating Service...' : 'Create Service'}
+              {serviceSubmitting ? (isEditMode ? 'Updating Service...' : 'Creating Service...') : (isEditMode ? 'Update Service' : 'Create Service')}
             </Text>
           </LinearGradient>
         </TouchableOpacity>

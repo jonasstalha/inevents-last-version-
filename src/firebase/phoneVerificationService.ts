@@ -6,8 +6,10 @@ import {
   RecaptchaVerifier,
   signOut as jsSignOut,
 } from 'firebase/auth';
-import { auth } from './firebaseConfig';
+import { auth, firebaseConfigObject } from './firebaseConfig';
 import { storeCode, verifyCode as verifyStoredCode } from './verificationCodesDB';
+
+const CLOUD_FUNCTION_BASE = `https://us-central1-${firebaseConfigObject.projectId}.cloudfunctions.net`;
 
 const confirmationResults: Record<string, ConfirmationResult> = {};
 const verificationSessions: Record<string, string> = {};
@@ -87,6 +89,12 @@ export const initiatePhoneVerification = async (phoneNumber: string): Promise<{f
       const code = generateVerificationCode();
       await storeCode(formattedPhone, code);
       storeVerificationSession(formattedPhone, `local-${Date.now()}`);
+
+      // Send code automatically via WhatsApp Cloud API (fire-and-forget)
+      sendWhatsAppVerification(formattedPhone, code).catch((err) => {
+        console.warn('WhatsApp auto-send failed, code still available:', err);
+      });
+
       return {
         formattedPhone,
         verificationId: 'local-fallback',
@@ -141,7 +149,21 @@ export const verifyCode = async (phoneNumber: string, code: string): Promise<boo
 export const sendWhatsAppVerification = async (
   phoneNumber: string,
   code: string
-): Promise<{success: boolean, code: string}> => {
-  console.log(`Send verification code ${code} to ${phoneNumber} via WhatsApp is not supported by default.`);
-  return { success: false, code };
+): Promise<{success: boolean}> => {
+  try {
+    const response = await fetch(`${CLOUD_FUNCTION_BASE}/sendWhatsAppVerification`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phoneNumber, code }),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`WhatsApp function error: ${response.status} ${text}`);
+    }
+    const result = await response.json();
+    return { success: result.result?.success ?? true };
+  } catch (error) {
+    console.error('Failed to send WhatsApp verification via cloud function:', error);
+    throw error;
+  }
 };

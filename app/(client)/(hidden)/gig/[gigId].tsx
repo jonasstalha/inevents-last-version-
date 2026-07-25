@@ -19,6 +19,7 @@ import {
   Animated,
   Dimensions,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -28,9 +29,10 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
-import MapView, { Marker } from "react-native-maps";
+import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
@@ -113,7 +115,7 @@ export default function ServiceDetailScreen() {
   const [reviewRating, setReviewRating] = useState(5);
 
   const [clientBudget, setClientBudget] = useState("");
-  const [personalInfo, setPersonalInfo] = useState({
+  const [personalInfo, setPersonalInfo] = useState<any>({
     fullName: "",
     email: "",
     phone: "",
@@ -122,12 +124,11 @@ export default function ServiceDetailScreen() {
     country: "",
     eventDate: "",
     eventLocation: "",
+    eventCoordinates: null,
     additionalNotes: "",
   });
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [tempEventDate, setTempEventDate] = useState(new Date());
-  const [selectedLocation, setSelectedLocation] = useState<any>(null);
-  const [showLocationPicker, setShowLocationPicker] = useState(false);
 
   const [reviews, setReviews] = useState<
     Array<{
@@ -178,7 +179,6 @@ export default function ServiceDetailScreen() {
         customMessage,
         clientBudget,
         personalInfo,
-        selectedLocation,
         coupon,
         couponApplied,
         discount,
@@ -221,13 +221,11 @@ export default function ServiceDetailScreen() {
         if (typeof parsedDraft?.clientBudget === "string")
           setClientBudget(parsedDraft.clientBudget);
         if (parsedDraft?.personalInfo) {
-          setPersonalInfo((current) => ({
-            ...current,
+          setPersonalInfo({
+            ...personalInfo,
             ...parsedDraft.personalInfo,
-          }));
+          });
         }
-        if (parsedDraft?.selectedLocation)
-          setSelectedLocation(parsedDraft.selectedLocation);
         if (typeof parsedDraft?.coupon === "string")
           setCoupon(parsedDraft.coupon);
         if (typeof parsedDraft?.couponApplied === "boolean")
@@ -652,6 +650,8 @@ export default function ServiceDetailScreen() {
 
   const handleFinalSubmit = async () => {
     try {
+      Keyboard.dismiss();
+
       if (
         !personalInfo.fullName.trim() ||
         !personalInfo.email.trim() ||
@@ -691,21 +691,38 @@ export default function ServiceDetailScreen() {
 
       const items = Object.entries(serviceQuantities)
         .map(([key, quantity]) => {
+          if (quantity <= 0) return null;
+
           if (key.startsWith("item_")) {
             const index = parseInt(key.replace("item_", ""), 10);
             const item = serviceData?.items?.[index];
-            if (item && quantity > 0) {
+            if (item) {
+              const price =
+                typeof item.price === "number"
+                  ? item.price
+                  : parseFloat(String(item.price || 0));
               return {
                 id: item.id || key,
-                title: item.title,
+                title: item.title || item.name || `Item ${index + 1}`,
                 quantity,
-                price:
-                  typeof item.price === "number"
-                    ? item.price
-                    : parseFloat(String(item.price)),
+                price,
               };
             }
           }
+
+          if (key.startsWith("extra_")) {
+            const index = parseInt(key.replace("extra_", ""), 10);
+            const extra = extrasList[index];
+            if (extra) {
+              return {
+                id: extra.id || key,
+                title: extra.title || extra.name || `Extra ${index + 1}`,
+                quantity,
+                price: getExtraPrice(extra),
+              };
+            }
+          }
+
           return null;
         })
         .filter(Boolean) as Array<{
@@ -733,6 +750,7 @@ export default function ServiceDetailScreen() {
         type: "service" as const,
         totalPrice: calculatePrice(),
         budget: Number(clientBudget) || undefined,
+        clientPrice: Number(clientBudget) || undefined,
         currency: "MAD",
         paymentStatus: "unpaid" as const,
         selectedOptions: [],
@@ -749,6 +767,12 @@ export default function ServiceDetailScreen() {
         customization: {
           eventDate: personalInfo.eventDate,
           location: personalInfo.eventLocation,
+          coordinates: personalInfo.eventCoordinates
+            ? {
+                latitude: personalInfo.eventCoordinates.latitude,
+                longitude: personalInfo.eventCoordinates.longitude,
+              }
+            : undefined,
         },
       };
 
@@ -757,6 +781,9 @@ export default function ServiceDetailScreen() {
 
       setCustomMessage("");
       setClientBudget("");
+      setCoupon("");
+      setCouponApplied(false);
+      setDiscount(0);
       setPersonalInfo({
         fullName: "",
         email: "",
@@ -766,6 +793,7 @@ export default function ServiceDetailScreen() {
         country: "",
         eventDate: "",
         eventLocation: "",
+        eventCoordinates: null,
         additionalNotes: "",
       });
 
@@ -796,6 +824,7 @@ export default function ServiceDetailScreen() {
   };
 
   const handleContinuePress = () => {
+    Keyboard.dismiss();
     const auth = getAuth();
     const currentUser = auth.currentUser;
 
@@ -956,6 +985,8 @@ export default function ServiceDetailScreen() {
         type: "service",
         totalPrice: calculatePrice(),
         currency: "MAD",
+        budget: Number(clientBudget) || undefined,
+        clientPrice: Number(clientBudget) || undefined,
         paymentStatus: "unpaid",
         selectedOptions: [],
         items: items,
@@ -1017,11 +1048,11 @@ export default function ServiceDetailScreen() {
       return;
     }
     try {
-      const basePrice = defaultServiceData.basePrice || 0;
+      const orderValue = calculatePrice();
       const discountValue = await validatePromoCode(
         code,
         String(gigId),
-        basePrice,
+        orderValue,
       );
       if (discountValue > 0) {
         setDiscount(discountValue);
@@ -1166,6 +1197,8 @@ export default function ServiceDetailScreen() {
           )}
           scrollEventThrottle={16}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
         >
           <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
             {/* Hero Media Gallery */}
@@ -1451,8 +1484,7 @@ export default function ServiceDetailScreen() {
                               activeOpacity={0.7}
                               style={[
                                 styles.quantityButton,
-                                item?.maxQuantity &&
-                                  quantity >= Number(item.maxQuantity) &&
+                                (item?.maxQuantity != null && quantity >= Number(item.maxQuantity)) &&
                                   styles.quantityButtonDisabled,
                               ]}
                               onPress={() =>
@@ -1463,16 +1495,16 @@ export default function ServiceDetailScreen() {
                                 )
                               }
                               disabled={
-                                item?.maxQuantity &&
-                                quantity >= Number(item.maxQuantity)
+                                item?.maxQuantity != null
+                                  ? quantity >= Number(item.maxQuantity)
+                                  : false
                               }
                             >
                               <Ionicons
                                 name="add"
                                 size={18}
                                 color={
-                                  item?.maxQuantity &&
-                                  quantity >= Number(item.maxQuantity)
+                                  item?.maxQuantity != null && quantity >= Number(item.maxQuantity)
                                     ? COLORS.textSubtle
                                     : COLORS.primary
                                 }
@@ -1565,8 +1597,7 @@ export default function ServiceDetailScreen() {
                                 activeOpacity={0.7}
                                 style={[
                                   styles.quantityButton,
-                                  extra?.maxQuantity &&
-                                    quantity >= Number(extra.maxQuantity) &&
+                                  (extra?.maxQuantity != null && quantity >= Number(extra.maxQuantity)) &&
                                     styles.quantityButtonDisabled,
                                 ]}
                                 onPress={() =>
@@ -1577,7 +1608,7 @@ export default function ServiceDetailScreen() {
                                   )
                                 }
                                 disabled={
-                                  extra?.maxQuantity
+                                  extra?.maxQuantity != null
                                     ? quantity >= Number(extra.maxQuantity)
                                     : false
                                 }
@@ -1586,8 +1617,7 @@ export default function ServiceDetailScreen() {
                                   name="add"
                                   size={18}
                                   color={
-                                    extra?.maxQuantity &&
-                                    quantity >= Number(extra.maxQuantity)
+                                    extra?.maxQuantity != null && quantity >= Number(extra.maxQuantity)
                                       ? COLORS.textSubtle
                                       : COLORS.primary
                                   }
@@ -1728,324 +1758,354 @@ export default function ServiceDetailScreen() {
         </View>
 
         {/* Multi-Step Custom Order Modal */}
-        <Modal visible={showOfferForm} animationType="slide" transparent>
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHandle} />
-              <View style={styles.modalHeader}>
-                <View>
-                  <Text style={styles.modalTitle}>Custom Order</Text>
-                  <Text style={styles.modalSubtitle}>
-                    Tell {defaultServiceData.provider.name} about your event
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  activeOpacity={0.7}
-                  style={styles.modalCloseButton}
-                  onPress={() => setShowOfferForm(false)}
-                >
-                  <Ionicons name="close" size={22} color={COLORS.textMuted} />
-                </TouchableOpacity>
-              </View>
-
-              <ScrollView
-                style={styles.modalScrollContent}
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
-              >
-                <View style={styles.formGroup}>
-                  <Text style={styles.formLabel}>Describe your event</Text>
-                  <TextInput
-                    multiline
-                    numberOfLines={4}
-                    placeholder="Tell the provider what you need…"
-                    placeholderTextColor={COLORS.textSubtle}
-                    value={customMessage}
-                    onChangeText={setCustomMessage}
-                    style={styles.textArea}
-                  />
-                </View>
-
-                <View style={styles.formGroup}>
-                  <Text style={styles.formLabel}>Your budget *</Text>
-                  <View style={styles.budgetInputContainer}>
-                    <TextInput
-                      placeholder="0"
-                      placeholderTextColor={COLORS.textSubtle}
-                      value={clientBudget}
-                      onChangeText={setClientBudget}
-                      keyboardType="numeric"
-                      style={styles.budgetInput}
-                    />
-                    <Text style={styles.currencyLabel}>MAD</Text>
-                  </View>
-                </View>
-
-                <View style={styles.formGroup}>
-                  <Text style={styles.formLabel}>Full name *</Text>
-                  <TextInput
-                    value={personalInfo.fullName}
-                    onChangeText={(text) =>
-                      setPersonalInfo((prev) => ({ ...prev, fullName: text }))
-                    }
-                    placeholder="Enter your full name"
-                    placeholderTextColor={COLORS.textSubtle}
-                    style={styles.formInput}
-                  />
-                </View>
-
-                <View style={styles.formGroup}>
-                  <Text style={styles.formLabel}>Email *</Text>
-                  <TextInput
-                    value={personalInfo.email}
-                    onChangeText={(text) =>
-                      setPersonalInfo((prev) => ({ ...prev, email: text }))
-                    }
-                    placeholder="your.email@example.com"
-                    placeholderTextColor={COLORS.textSubtle}
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                    style={styles.formInput}
-                  />
-                </View>
-
-                <View style={styles.formGroup}>
-                  <Text style={styles.formLabel}>Phone number *</Text>
-                  <TextInput
-                    value={personalInfo.phone}
-                    onChangeText={(text) =>
-                      setPersonalInfo((prev) => ({ ...prev, phone: text }))
-                    }
-                    placeholder="+212 xxx xxx xxx"
-                    placeholderTextColor={COLORS.textSubtle}
-                    keyboardType="phone-pad"
-                    style={styles.formInput}
-                  />
-                </View>
-
-                <View style={styles.formGroup}>
-                  <Text style={styles.formLabel}>Event date</Text>
-                  <TouchableOpacity
-                    activeOpacity={0.7}
-                    style={styles.formInputPressable}
-                    onPress={() => {
-                      setTempEventDate(
-                        personalInfo.eventDate
-                          ? new Date(personalInfo.eventDate)
-                          : new Date(),
-                      );
-                      setShowDatePicker(true);
-                    }}
-                  >
-                    <Ionicons
-                      name="calendar-outline"
-                      size={18}
-                      color={COLORS.textMuted}
-                    />
-                    <Text
-                      style={
-                        personalInfo.eventDate
-                          ? styles.formInputText
-                          : styles.formInputPlaceholder
-                      }
-                    >
-                      {personalInfo.eventDate || "Select event date"}
-                    </Text>
-                  </TouchableOpacity>
-                  {showDatePicker && (
-                    <DateTimePicker
-                      value={tempEventDate}
-                      mode="date"
-                      display="default"
-                      onChange={(event, selectedDate) => {
-                        setShowDatePicker(false);
-                        if (selectedDate) {
-                          const dateStr = selectedDate
-                            .toISOString()
-                            .split("T")[0];
-                          setPersonalInfo((prev) => ({
-                            ...prev,
-                            eventDate: dateStr,
-                          }));
-                        }
-                      }}
-                    />
-                  )}
-                </View>
-
-                <View style={styles.formGroup}>
-                  <Text style={styles.formLabel}>Event location</Text>
-                  <TouchableOpacity
-                    activeOpacity={0.7}
-                    style={styles.formInputPressable}
-                    onPress={() => setShowLocationPicker(true)}
-                  >
-                    <Ionicons
-                      name="location-outline"
-                      size={18}
-                      color={COLORS.textMuted}
-                    />
-                    <Text
-                      style={
-                        selectedLocation
-                          ? styles.formInputText
-                          : styles.formInputPlaceholder
-                      }
-                      numberOfLines={1}
-                    >
-                      {selectedLocation?.address ||
-                        "Tap to select location on map"}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Promo Code */}
-                <View style={styles.couponSection}>
-                  <Text style={styles.formLabel}>Promo code</Text>
-                  <View style={styles.couponRow}>
-                    <TextInput
-                      style={[
-                        styles.couponInput,
-                        couponApplied && styles.couponInputDisabled,
-                      ]}
-                      placeholder="Enter promo code"
-                      placeholderTextColor={COLORS.textSubtle}
-                      value={coupon}
-                      onChangeText={setCoupon}
-                      editable={!couponApplied}
-                      autoCapitalize="characters"
-                    />
-                    <TouchableOpacity
-                      activeOpacity={0.85}
-                      style={[
-                        styles.couponButton,
-                        couponApplied && styles.couponButtonApplied,
-                      ]}
-                      onPress={handleApplyCoupon}
-                      disabled={couponApplied}
-                    >
-                      <Text
-                        style={[
-                          styles.couponButtonText,
-                          couponApplied && styles.couponButtonTextApplied,
-                        ]}
-                      >
-                        {couponApplied ? "Applied" : "Apply"}
+        <Modal
+          visible={showOfferForm}
+          animationType="slide"
+          transparent
+          presentationStyle="overFullScreen"
+        >
+          <KeyboardAvoidingView
+            style={{ flex: 1, backgroundColor: COLORS.overlay }}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 110 : 0}
+          >
+            <View style={styles.modalOverlay}>
+              <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+                <View style={styles.modalOverlayBackground} />
+              </TouchableWithoutFeedback>
+              <View style={styles.modalContent}>
+                  <View style={styles.modalHandle} />
+                  <View style={styles.modalHeader}>
+                    <View>
+                      <Text style={styles.modalTitle}>Custom Order</Text>
+                      <Text style={styles.modalSubtitle}>
+                        Tell {defaultServiceData.provider.name} about your event
                       </Text>
+                    </View>
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      style={styles.modalCloseButton}
+                      onPress={() => setShowOfferForm(false)}
+                    >
+                      <Ionicons name="close" size={22} color={COLORS.textMuted} />
                     </TouchableOpacity>
                   </View>
-                  {promoError && (
-                    <View style={styles.discountRow}>
-                      <Ionicons
-                        name="alert-circle"
-                        size={14}
-                        color={COLORS.danger}
+
+                  <KeyboardAwareScrollView
+                    style={styles.modalScrollContent}
+                    contentContainerStyle={{ flexGrow: 1, paddingBottom: 48 }}
+                    enableOnAndroid={true}
+                    extraScrollHeight={Platform.OS === "ios" ? 90 : 100}
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
+                    resetScrollToCoords={{ x: 0, y: 0 }}
+                    enableAutomaticScroll={true}
+                  >
+                    <View style={styles.formGroup}>
+                      <Text style={styles.formLabel}>Describe your event</Text>
+                      <TextInput
+                        multiline
+                        numberOfLines={4}
+                        placeholder="Tell the provider what you need…"
+                        placeholderTextColor={COLORS.textSubtle}
+                        value={customMessage}
+                        onChangeText={setCustomMessage}
+                    style={styles.textArea}
+                  />
+                    </View>
+
+                    <View style={styles.formGroup}>
+                      <Text style={styles.formLabel}>Your budget *</Text>
+                      <View style={styles.budgetInputContainer}>
+                        <TextInput
+                          placeholder="0"
+                          placeholderTextColor={COLORS.textSubtle}
+                          value={clientBudget}
+                          onChangeText={setClientBudget}
+                          keyboardType="numeric"
+                          style={styles.budgetInput}
+                        />
+                        <Text style={styles.currencyLabel}>MAD</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.formGroup}>
+                      <Text style={styles.formLabel}>Full name *</Text>
+                      <TextInput
+                        value={personalInfo.fullName}
+                        onChangeText={(text) =>
+                              setPersonalInfo({ ...personalInfo, fullName: text })
+                        }
+                        placeholder="Enter your full name"
+                        placeholderTextColor={COLORS.textSubtle}
+                        style={styles.formInput}
                       />
-                      <Text
-                        style={[styles.discountText, { color: COLORS.danger }]}
-                      >
-                        {promoError}
-                      </Text>
                     </View>
-                  )}
-                  {couponApplied && !promoError && (
-                    <View style={styles.discountRow}>
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={14}
-                        color={COLORS.success}
+
+                    <View style={styles.formGroup}>
+                      <Text style={styles.formLabel}>Email *</Text>
+                      <TextInput
+                        value={personalInfo.email}
+                        onChangeText={(text) =>
+                          setPersonalInfo({ ...personalInfo, email: text })
+                        }
+                        placeholder="your.email@example.com"
+                        placeholderTextColor={COLORS.textSubtle}
+                        keyboardType="email-address"
+                        autoCapitalize="none"
+                        style={styles.formInput}
                       />
-                      <Text style={styles.discountText}>
-                        Discount applied: -{discount} MAD
-                      </Text>
                     </View>
-                  )}
-                </View>
 
-                {/* Inline order summary */}
-                <View style={styles.orderSummary}>
-                  <Text style={styles.summaryTitle}>Order summary</Text>
-                  <View style={styles.summaryRow}>
-                    <Text style={styles.summaryLabel}>Subtotal</Text>
-                    <Text style={styles.summaryValue}>
-                      {calculatePrice() + (couponApplied ? discount : 0)} MAD
-                    </Text>
-                  </View>
-                  {couponApplied && (
-                    <View style={styles.summaryRow}>
-                      <Text style={styles.summaryLabel}>Discount</Text>
-                      <Text
-                        style={[styles.summaryValue, { color: COLORS.success }]}
+                    <View style={styles.formGroup}>
+                      <Text style={styles.formLabel}>Phone number *</Text>
+                      <TextInput
+                        value={personalInfo.phone}
+                        onChangeText={(text) =>
+                          setPersonalInfo({ ...personalInfo, phone: text })
+                        }
+                        placeholder="+212 xxx xxx xxx"
+                        placeholderTextColor={COLORS.textSubtle}
+                        keyboardType="phone-pad"
+                        style={styles.formInput}
+                      />
+                        </View>
+
+                    <View style={styles.formGroup}>
+                      <Text style={styles.formLabel}>Event date</Text>
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        style={styles.formInputPressable}
+                        onPress={() => {
+                          Keyboard.dismiss();
+                          setTempEventDate(
+                            personalInfo.eventDate
+                              ? new Date(personalInfo.eventDate)
+                              : new Date(),
+                          );
+                          setShowDatePicker(true);
+                        }}
                       >
-                        -{discount} MAD
-                      </Text>
+                        <Ionicons
+                          name="calendar-outline"
+                          size={18}
+                          color={COLORS.textMuted}
+                        />
+                        <Text
+                          style={
+                            personalInfo.eventDate
+                              ? styles.formInputText
+                              : styles.formInputPlaceholder
+                          }
+                        >
+                          {personalInfo.eventDate || "Select event date"}
+                        </Text>
+                      </TouchableOpacity>
+                      {showDatePicker && (
+                        <DateTimePicker
+                          value={tempEventDate}
+                          mode="date"
+                          display="default"
+                          onChange={(event, selectedDate) => {
+                            setShowDatePicker(false);
+                            if (selectedDate) {
+                              const dateStr = selectedDate
+                                .toISOString()
+                                .split("T")[0];
+                              setPersonalInfo({
+                                ...personalInfo,
+                                eventDate: dateStr,
+                              });
+                            }
+                          }}
+                        />
+                      )}
                     </View>
-                  )}
-                  <View style={[styles.summaryRow, { marginTop: 8 }]}>
-                    <Text
-                      style={[
-                        styles.summaryLabel,
-                        { color: COLORS.text, fontWeight: "700" },
-                      ]}
+
+                    <View style={styles.formGroup}>
+                      <Text style={styles.formLabel}>Event location</Text>
+                      <TextInput
+                        value={personalInfo.eventLocation}
+                        onChangeText={(text) =>
+                          setPersonalInfo({ ...personalInfo, eventLocation: text })
+                        }
+                        placeholder="Enter event location"
+                        placeholderTextColor={COLORS.textSubtle}
+                        style={styles.formInput}
+                        autoCorrect={false}
+                        autoComplete="off"
+                        textContentType="none"
+                      />
+                    </View>
+
+                    {/* Promo Code */}
+                    <View style={styles.couponSection}>
+                      <Text style={styles.formLabel}>Promo code</Text>
+                      <View style={styles.couponRow}>
+                        <TextInput
+                          style={[
+                            styles.couponInput,
+                            couponApplied && styles.couponInputDisabled,
+                          ]}
+                          placeholder="Enter promo code"
+                          placeholderTextColor={COLORS.textSubtle}
+                          value={coupon}
+                          onChangeText={setCoupon}
+                          editable={!couponApplied}
+                          autoCapitalize="characters"
+                        />
+                        <TouchableOpacity
+                          activeOpacity={0.85}
+                          style={[
+                            styles.couponButton,
+                            couponApplied && styles.couponButtonApplied,
+                          ]}
+                          onPress={handleApplyCoupon}
+                          disabled={couponApplied}
+                        >
+                          <Text
+                            style={[
+                              styles.couponButtonText,
+                              couponApplied && styles.couponButtonTextApplied,
+                            ]}
+                          >
+                            {couponApplied ? "Applied" : "Apply"}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                      {promoError && (
+                        <View style={styles.discountRow}>
+                          <Ionicons
+                            name="alert-circle"
+                            size={14}
+                            color={COLORS.danger}
+                          />
+                          <Text
+                            style={[styles.discountText, { color: COLORS.danger }]}
+                          >
+                            {promoError}
+                          </Text>
+                        </View>
+                      )}
+                      {couponApplied && !promoError && (
+                        <View style={styles.discountRow}>
+                          <Ionicons
+                            name="checkmark-circle"
+                            size={14}
+                            color={COLORS.success}
+                          />
+                          <Text style={styles.discountText}>
+                            Discount applied: -{discount} MAD
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+
+                    {/* Inline order summary */}
+                    <View style={styles.orderSummary}>
+                      <Text style={styles.summaryTitle}>Order summary</Text>
+                      <View style={styles.summaryRow}>
+                        <Text style={styles.summaryLabel}>Subtotal</Text>
+                        <Text style={styles.summaryValue}>
+                          {calculatePrice() + (couponApplied ? discount : 0)} MAD
+                        </Text>
+                      </View>
+                      {clientBudget ? (
+                        <View style={styles.summaryRow}>
+                          <Text style={styles.summaryLabel}>Your budget</Text>
+                          <Text style={[styles.summaryValue, { color: '#6366f1' }]}>
+                            {Number(clientBudget)} MAD
+                          </Text>
+                        </View>
+                      ) : null}
+                      {couponApplied && (
+                        <View style={styles.summaryRow}>
+                          <Text style={styles.summaryLabel}>Discount</Text>
+                          <Text
+                            style={[styles.summaryValue, { color: COLORS.success }]}
+                          >
+                            -{discount} MAD
+                          </Text>
+                        </View>
+                      )}
+                      <View style={[styles.summaryRow, { marginTop: 8 }]}>
+                        <Text
+                          style={[
+                            styles.summaryLabel,
+                            { color: COLORS.text, fontWeight: "700" },
+                          ]}
+                        >
+                          Total
+                        </Text>
+                        <Text
+                          style={[
+                            styles.summaryValue,
+                            { color: COLORS.text, fontSize: 18 },
+                          ]}
+                        >
+                          {calculatePrice()} MAD
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={{ height: 8 }} />
+                  </KeyboardAwareScrollView>
+
+                  <View style={styles.modalActions}>
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        setShowOfferForm(false);
+                      }}
+                      style={styles.modalCancel}
                     >
-                      Total
-                    </Text>
-                    <Text
-                      style={[
-                        styles.summaryValue,
-                        { color: COLORS.text, fontSize: 18 },
-                      ]}
+                      <Text style={styles.modalCancelText}>Cancel</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      activeOpacity={0.9}
+                      onPress={handleFinalSubmit}
+                      style={styles.modalSend}
                     >
-                      {calculatePrice()} MAD
-                    </Text>
+                      <Text style={styles.modalSendText}>Send order</Text>
+                      <Ionicons name="send" size={15} color="#fff" />
+                    </TouchableOpacity>
                   </View>
                 </View>
-
-                <View style={{ height: 8 }} />
-              </ScrollView>
-
-              <View style={styles.modalActions}>
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => setShowOfferForm(false)}
-                  style={styles.modalCancel}
-                >
-                  <Text style={styles.modalCancelText}>Cancel</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  onPress={handleFinalSubmit}
-                  style={styles.modalSend}
-                >
-                  <Text style={styles.modalSendText}>Send order</Text>
-                  <Ionicons name="send" size={15} color="#fff" />
-                </TouchableOpacity>
-              </View>
             </View>
-          </View>
+            </KeyboardAvoidingView>
         </Modal>
 
         {/* Review Modal */}
         <Modal visible={showReviewForm} animationType="fade" transparent>
-          <View style={styles.modalOverlay}>
-            <View style={[styles.modalContent, styles.modalContentCompact]}>
-              <View style={styles.modalHandle} />
-              <View style={styles.modalHeader}>
-                <View>
-                  <Text style={styles.modalTitle}>Write a review</Text>
-                  <Text style={styles.modalSubtitle}>Rate your experience</Text>
-                </View>
-                <TouchableOpacity
-                  activeOpacity={0.7}
-                  style={styles.modalCloseButton}
-                  onPress={() => setShowReviewForm(false)}
-                >
-                  <Ionicons name="close" size={22} color={COLORS.textMuted} />
-                </TouchableOpacity>
-              </View>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 80 : 0}
+          >
+            <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+              <View style={styles.modalOverlay}>
+                <View style={[styles.modalContent, styles.modalContentCompact]}>
+                  <View style={styles.modalHandle} />
+                  <View style={styles.modalHeader}>
+                    <View>
+                      <Text style={styles.modalTitle}>Write a review</Text>
+                      <Text style={styles.modalSubtitle}>Rate your experience</Text>
+                    </View>
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      style={styles.modalCloseButton}
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        setShowReviewForm(false);
+                      }}
+                    >
+                      <Ionicons name="close" size={22} color={COLORS.textMuted} />
+                    </TouchableOpacity>
+                  </View>
 
-              <View style={{ paddingHorizontal: 20 }}>
+                  <View style={{ paddingHorizontal: 20 }}>
                 <View style={styles.ratingSelector}>
                   {[1, 2, 3, 4, 5].map((star) => (
                     <TouchableOpacity
@@ -2094,7 +2154,10 @@ export default function ServiceDetailScreen() {
               <View style={styles.modalActions}>
                 <TouchableOpacity
                   activeOpacity={0.85}
-                  onPress={() => setShowReviewForm(false)}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setShowReviewForm(false);
+                  }}
                   style={styles.modalCancel}
                 >
                   <Text style={styles.modalCancelText}>Cancel</Text>
@@ -2141,6 +2204,7 @@ export default function ServiceDetailScreen() {
                       ]);
                       setReviewText("");
                       setReviewRating(5);
+                      Keyboard.dismiss();
                       setShowReviewForm(false);
                     } catch (err) {
                       setReviewError("Failed to submit review.");
@@ -2167,83 +2231,9 @@ export default function ServiceDetailScreen() {
               </View>
             </View>
           </View>
-        </Modal>
-
-        {/* Location Picker Modal */}
-        <Modal visible={showLocationPicker} animationType="slide">
-          <View style={styles.locationPickerContainer}>
-            <View style={styles.locationPickerHeader}>
-              <TouchableOpacity
-                activeOpacity={0.7}
-                onPress={() => setShowLocationPicker(false)}
-              >
-                <Text style={styles.locationCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <Text style={styles.locationPickerTitle}>Select location</Text>
-              <TouchableOpacity
-                activeOpacity={0.7}
-                onPress={async () => {
-                  if (selectedLocation) {
-                    setPersonalInfo((prev) => ({
-                      ...prev,
-                      eventLocation: selectedLocation.address,
-                    }));
-                    setShowLocationPicker(false);
-                  }
-                }}
-                disabled={!selectedLocation}
-              >
-                <Text
-                  style={[
-                    styles.locationDoneText,
-                    !selectedLocation && styles.locationDoneTextDisabled,
-                  ]}
-                >
-                  Done
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            <MapView
-              style={styles.map}
-              initialRegion={{
-                latitude: 33.5731,
-                longitude: -7.5898,
-                latitudeDelta: 0.0922,
-                longitudeDelta: 0.0421,
-              }}
-              onPress={(event) => {
-                const { latitude, longitude } = event.nativeEvent.coordinate;
-                setSelectedLocation({
-                  latitude,
-                  longitude,
-                  address: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
-                });
-              }}
-            >
-              {selectedLocation && (
-                <Marker
-                  coordinate={{
-                    latitude: selectedLocation.latitude,
-                    longitude: selectedLocation.longitude,
-                  }}
-                  title="Selected Location"
-                />
-              )}
-            </MapView>
-
-            <View style={styles.locationInfo}>
-              <View style={styles.locationInfoIcon}>
-                <Ionicons name="location" size={16} color={COLORS.primary} />
-              </View>
-              <Text style={styles.locationCoordinates}>
-                {selectedLocation
-                  ? `${selectedLocation.latitude.toFixed(6)}, ${selectedLocation.longitude.toFixed(6)}`
-                  : "Tap on map to drop a pin"}
-              </Text>
-            </View>
-          </View>
-        </Modal>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
+    </Modal>
 
         {/* Full Screen Media Preview Modal */}
         <Modal visible={showFullScreenPreview} animationType="fade" transparent>
@@ -3081,9 +3071,14 @@ const styles = StyleSheet.create({
 
   // ─── Modal ───────────────────────────────────────────────
   modalOverlay: {
-    flex: 1,
-    backgroundColor: COLORS.overlay,
+    ...StyleSheet.absoluteFillObject,
     justifyContent: "flex-end",
+    zIndex: 1,
+  },
+  modalOverlayBackground: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: COLORS.overlay,
+    zIndex: 1,
   },
   modalContent: {
     backgroundColor: COLORS.surface,
@@ -3091,7 +3086,9 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     width: "100%",
     maxHeight: screenHeight * 0.96,
-    paddingBottom: Platform.OS === "ios" ? 10 : 0,
+    paddingBottom: Platform.OS === "ios" ? 20 : 12,
+    zIndex: 2,
+    elevation: 8,
   },
   modalContentCompact: {
     paddingBottom: Platform.OS === "ios" ? 20 : 12,
@@ -3138,6 +3135,7 @@ const styles = StyleSheet.create({
   modalScrollContent: {
     paddingHorizontal: 20,
     paddingTop: 16,
+    flexGrow: 1,
   },
   textArea: {
     borderWidth: 1,

@@ -279,6 +279,7 @@ const styles = StyleSheet.create({
   messagesContainer: {
     paddingHorizontal: 16,
     paddingVertical: 8,
+    paddingBottom: Platform.OS === 'ios' ? 180 : 160,
   },
   messageContainer: {
     marginVertical: 4,

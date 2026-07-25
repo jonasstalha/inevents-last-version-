@@ -1,11 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View, Linking } from 'react-native';
 import { ArrowLeft } from 'lucide-react-native';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, updateDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/src/firebase/firebaseConfig';
 import { Order } from '@/src/models/types';
 import { OrderStatusBadge } from '@/src/components/orders/OrderStatusBadge';
+
+const normalizeTimestamp = (ts: any): string | undefined => {
+  if (!ts) return undefined;
+  if (ts instanceof Timestamp) return ts.toDate().toISOString();
+  if (typeof ts === 'string') return ts;
+  if (ts?.toDate) return ts.toDate().toISOString();
+  return String(ts);
+};
 
 export default function ClientOrderDetails() {
   const router = useRouter();
@@ -53,6 +61,36 @@ export default function ClientOrderDetails() {
     return () => unsubscribe();
   }, [params.orderId]);
 
+  const handleAcceptCounter = useCallback(async () => {
+    if (!order) return;
+    try {
+      const orderRef = doc(db, 'orders', order.id);
+      const snap = await getDoc(orderRef);
+      const counterPrice = snap.data()?.counterOfferPrice;
+      await updateDoc(orderRef, {
+        status: 'confirmed',
+        ...(counterPrice != null ? { price: counterPrice } : {}),
+        updatedAt: Timestamp.now(),
+      });
+      Alert.alert('Accepted', 'You have accepted the artist\'s counter offer.');
+    } catch (e) {
+      Alert.alert('Error', 'Failed to accept counter offer');
+    }
+  }, [order]);
+
+  const handleRejectCounter = useCallback(async () => {
+    if (!order) return;
+    try {
+      await updateDoc(doc(db, 'orders', order.id), {
+        status: 'rejected',
+        updatedAt: Timestamp.now(),
+      });
+      Alert.alert('Declined', 'You have declined the artist\'s counter offer.');
+    } catch (e) {
+      Alert.alert('Error', 'Failed to decline counter offer');
+    }
+  }, [order]);
+
   const openInvoice = async () => {
     if (!order?.invoiceUrl) {
       Alert.alert('Invoice not available yet');
@@ -97,11 +135,18 @@ export default function ClientOrderDetails() {
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.card}>
+        <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: order.status === 'confirmed' ? '#34c759' : order.status === 'rejected' ? '#ff3b30' : '#9e9e9e' }]}>
           <Text style={styles.name}>{order.serviceTitle || order.gigTitle || order.ticketName || 'Order'}</Text>
           <OrderStatusBadge status={order.status} />
           <Text style={styles.subtitle}>{order.type === 'service' ? 'Service order' : 'Ticket order'}</Text>
-          <Text style={styles.amount}>{order.totalPrice.toFixed(2)} MAD</Text>
+          {(() => {
+            const finalPrice = order.counterOfferPrice ?? (order.totalPrice != null && order.totalPrice !== (order.clientPrice ?? order.budget) ? order.totalPrice : (order.clientPrice ?? order.budget ?? 0));
+            return (
+              <View style={styles.priceBlock}>
+                <Text style={{ fontSize: 24, fontWeight: '800', color: '#34c759' }}>{finalPrice.toFixed(2)} MAD</Text>
+              </View>
+            );
+          })()}
           <Text style={styles.meta}>Payment: {order.paymentStatus || 'unpaid'}</Text>
           <Text style={styles.meta}>Created: {new Date(order.createdAt).toLocaleString()}</Text>
 
@@ -110,6 +155,21 @@ export default function ClientOrderDetails() {
           {order.clientInfo?.email ? <Text style={styles.fieldText}>{order.clientInfo.email}</Text> : null}
           {order.clientInfo?.phone ? <Text style={styles.fieldText}>{order.clientInfo.phone}</Text> : null}
 
+          {order.status === 'counter_offered' && order.counterOfferPrice != null && (
+            <View style={styles.counterOfferCard}>
+              <Text style={styles.counterOfferTitle}>Artist Counter Offer</Text>
+              <Text style={styles.counterOfferPrice}>{order.counterOfferPrice.toFixed(2)} MAD</Text>
+              <Text style={styles.counterOfferDesc}>The artist has proposed a new price. Would you like to accept or decline?</Text>
+              <View style={styles.counterOfferActions}>
+                <TouchableOpacity style={styles.acceptBtn} onPress={handleAcceptCounter}>
+                  <Text style={styles.acceptBtnText}>Accept</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.declineBtn} onPress={handleRejectCounter}>
+                  <Text style={styles.declineBtnText}>Decline</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
           <Text style={styles.sectionTitle}>Notes</Text>
           <Text style={styles.fieldText}>{order.notes || order.description || 'No notes provided.'}</Text>
 
@@ -181,6 +241,14 @@ const styles = StyleSheet.create({
   amount: {
     fontSize: 18,
     fontWeight: '700',
+    marginBottom: 2,
+  },
+  priceBlock: {
+    marginBottom: 4,
+  },
+  priceLabel: {
+    fontSize: 12,
+    color: '#6b7280',
     marginBottom: 8,
   },
   meta: {
@@ -234,5 +302,60 @@ const styles = StyleSheet.create({
   backButtonText: {
     color: '#4338ca',
     fontWeight: '700',
+  },
+  counterOfferCard: {
+    marginTop: 16,
+    padding: 16,
+    backgroundColor: '#eef2ff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#c7d2fe',
+  },
+  counterOfferTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#3730a3',
+    marginBottom: 4,
+  },
+  counterOfferPrice: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#4338ca',
+    marginBottom: 8,
+  },
+  counterOfferDesc: {
+    fontSize: 13,
+    color: '#4b5563',
+    marginBottom: 14,
+  },
+  counterOfferActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  acceptBtn: {
+    flex: 1,
+    backgroundColor: '#059669',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  acceptBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  declineBtn: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#dc2626',
+  },
+  declineBtnText: {
+    color: '#dc2626',
+    fontWeight: '700',
+    fontSize: 15,
   },
 });

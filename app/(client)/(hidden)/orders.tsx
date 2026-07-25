@@ -7,6 +7,7 @@ import { OrderStatusBadge } from '@/src/components/orders/OrderStatusBadge';
 
 const orderTabs = [
   { id: 'all', label: 'All' },
+  { id: 'counter_offered', label: 'Counter Offers' },
   { id: 'pending', label: 'Pending' },
   { id: 'confirmed', label: 'Confirmed' },
   { id: 'completed', label: 'Completed' },
@@ -16,7 +17,7 @@ const orderTabs = [
 export default function ClientOrdersScreen() {
   const router = useRouter();
   const { orders, loading, error } = useOrders();
-  const [activeTab, setActiveTab] = useState<'all' | 'pending' | 'confirmed' | 'completed' | 'rejected'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'pending' | 'confirmed' | 'completed' | 'rejected' | 'counter_offered'>('all');
 
   const filteredOrders = useMemo(() => {
     if (activeTab === 'all') return orders;
@@ -36,9 +37,26 @@ export default function ClientOrdersScreen() {
     }
   };
 
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'confirmed': return '#34c759';
+      case 'rejected': return '#ff3b30';
+      case 'pending':
+      case 'counter_offered': return '#9e9e9e';
+      default: return '#e5e7eb';
+    }
+  };
+
+  const getFinalPrice = (item: Order) => {
+    if (item.counterOfferPrice != null) return item.counterOfferPrice;
+    if (item.totalPrice != null && item.totalPrice !== (item.clientPrice ?? item.budget)) return item.totalPrice;
+    return item.clientPrice ?? item.budget ?? 0;
+  };
+
   const renderItem = ({ item }: { item: Order }) => {
+    const finalPrice = getFinalPrice(item);
     return (
-      <View style={styles.card}>
+      <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: getStatusColor(item.status) }]}>
         <View style={styles.cardHeader}>
           <View>
             <Text style={styles.cardTitle}>{item.serviceTitle || item.gigTitle || item.ticketName || 'Order'}</Text>
@@ -48,7 +66,7 @@ export default function ClientOrdersScreen() {
         </View>
 
         <Text style={styles.descriptionText}>{item.notes || item.description || 'No additional notes'}</Text>
-        <Text style={styles.priceText}>{item.totalPrice?.toFixed(2)} MAD</Text>
+        <Text style={[styles.priceText, { color: '#34c759', fontSize: 20 }]}>{finalPrice.toFixed(2)} MAD</Text>
         <Text style={styles.metaText}>Payment: {item.paymentStatus || 'unpaid'}</Text>
 
         <View style={styles.actionRow}>

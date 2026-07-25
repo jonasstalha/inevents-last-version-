@@ -128,7 +128,7 @@ export default function ArtistLayout() {
           headerShown: true,
           header: () => <Header title={getPageTitle(route.name)} />,
           tabBarStyle: { display: 'none' },
-          contentStyle: { backgroundColor: colors.background, paddingBottom: Platform.OS === 'ios' ? 100 : 90 },
+          contentStyle: { backgroundColor: colors.background, paddingBottom: Platform.OS === 'ios' ? 180 : 160 },
         })}
         tabBar={(props) => <ArtistTabBar {...props} />}
       >

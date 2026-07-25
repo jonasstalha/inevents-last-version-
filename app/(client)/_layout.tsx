@@ -3,6 +3,7 @@ import { FontAwesome5 } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { Tabs, useRouter } from 'expo-router';
 import { Bell, LogIn } from 'lucide-react-native';
+import { collection, getDocs, getFirestore, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { Animated, Easing, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -64,17 +65,39 @@ function Header({ title }) {
   const navigation = useNavigation();
   const router = useRouter();
   const { user } = useAuth();
+  const [unreadCount, setUnreadCount] = useState(0);
 
-  // Clean simple handler for auth navigation
+  useEffect(() => {
+    if (!user?.uid) return;
+    const db = getFirestore();
+    const notifsRef = collection(db, 'users', user.uid, 'notifications');
+    const q = query(notifsRef, where('isRead', '==', false));
+    const unsub = onSnapshot(q, (snap) => {
+      setUnreadCount(snap.size);
+    }, (err) => {
+      console.warn('Failed to fetch unread count:', err);
+    });
+    return () => unsub();
+  }, [user?.uid]);
+
   const handleAuthNavigation = () => {
     console.log('Navigating to auth page for login/registration');
-    
-    // Simple push to auth page
     router.push('/auth');
   };
 
-  const handleNotificationsPress = () => {
+  const handleNotificationsPress = async () => {
     router.push('/invoices');
+    if (!user?.uid) return;
+    try {
+      const db = getFirestore();
+      const notifsRef = collection(db, 'users', user.uid, 'notifications');
+      const q = query(notifsRef, where('isRead', '==', false));
+      const snap = await getDocs(q);
+      const updates = snap.docs.map((d) => updateDoc(d.ref, { isRead: true }));
+      await Promise.all(updates);
+    } catch (err) {
+      console.warn('Failed to mark notifications as read:', err);
+    }
   };
   
   return (
@@ -100,7 +123,15 @@ function Header({ title }) {
           >
             <View style={styles.iconWrapper}>
               <Bell color={Theme.colors.textSecondary} size={22} />
-              <View style={styles.notificationBadge} />
+              {unreadCount > 0 ? (
+                <View style={[styles.notificationBadge, styles.notificationBadgeWithCount]}>
+                  <Text style={styles.notificationBadgeText}>
+                    {unreadCount > 99 ? '+99' : unreadCount}
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.notificationBadgeAllRead} />
+              )}
             </View>
           </TouchableOpacity>
         </View>
@@ -393,6 +424,34 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: Theme.colors.error,
+    borderWidth: 1,
+    borderColor: '#fff',
+  },
+  notificationBadgeWithCount: {
+    top: -6,
+    right: -10,
+    width: 'auto',
+    height: 18,
+    minWidth: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notificationBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+    lineHeight: 12,
+  },
+  notificationBadgeAllRead: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Theme.colors.success,
     borderWidth: 1,
     borderColor: '#fff',
   },

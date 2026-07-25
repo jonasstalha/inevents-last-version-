@@ -8,9 +8,8 @@ import {
   query,
   where,
 } from 'firebase/firestore';
-import { getAuth, initializeAuth, getReactNativePersistence } from 'firebase/auth';
+import { getAuth } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Firebase config for inexvents-2fe56 project
 const firebaseConfig = {
@@ -27,13 +26,7 @@ const hasExistingApp = getApps().length > 0;
 // Initialize app once
 const app = hasExistingApp ? getApp() : initializeApp(firebaseConfig);
 
-// Initialize auth with persistent storage in React Native
-const auth = hasExistingApp
-  ? getAuth(app)
-  : initializeAuth(app, {
-      persistence: getReactNativePersistence(AsyncStorage),
-    })
-  ;
+const auth = getAuth(app);
 
 // Initialize Firestore & Storage
 const db = getFirestore(app);

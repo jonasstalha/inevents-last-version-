@@ -29,6 +29,8 @@ import {
   updateProfileWithImage,
   uploadProfileImage,
 } from '../../../src/firebase/profileService';
+import { SERVICE_CATEGORIES } from '../../../src/components/artist/ServiceCategorySelector';
+import { TICKET_CATEGORIES } from '../../../src/components/artist/TicketCategorySelector';
 
 /* ============================================================================
    DESIGN TOKENS — change one value, restyle the whole screen
@@ -86,11 +88,12 @@ const SPECIALIZATION_OPTIONS = [
   'Other',
 ] as const;
 
-const CATEGORY_OPTIONS = [
-  'Business', 'Corporate', 'Weddings', 'Planning', 'Technology', 'A/V',
-  'Food', 'Catering', 'Photography', 'Visual Arts', 'Music', 'Entertainment',
-  'Performance', 'Decoration', 'Design', 'General Services',
-] as const;
+const CATEGORY_OPTIONS = Array.from(
+  new Set([
+    ...SERVICE_CATEGORIES.map((category) => category.name),
+    ...TICKET_CATEGORIES.map((category) => category.name),
+  ]),
+) as readonly string[];
 
 type ProfileState = {
   name: string;
@@ -455,7 +458,7 @@ const ProfileEditPage = () => {
 
         <ScrollView
           style={styles.scrollView}
-          contentContainerStyle={{ paddingBottom: 120 }}
+          contentContainerStyle={{ paddingBottom: Platform.OS === 'ios' ? 180 : 160 }}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={T.primary} />}
         >

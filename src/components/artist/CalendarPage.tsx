@@ -4,9 +4,9 @@ import { useRouter } from 'expo-router';
 import { getAuth } from 'firebase/auth';
 import { addDoc, collection, getDocs, getFirestore, query, where } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { createInvoiceForOrder } from '../../firebase/invoiceService';
-import { confirmOrder, rejectOrder, sendOrderUpdateNotification, warnClientCancellation } from '../../firebase/orderService';
+import { confirmOrder, rejectOrder, sendCounterOffer, sendOrderUpdateNotification, warnClientCancellation } from '../../firebase/orderService';
 
 interface Order {
   id: string;
@@ -20,6 +20,7 @@ interface Order {
   price?: number;
   totalPrice?: number;
   clientPrice?: number;
+  budget?: number;
   message?: string;
   status: 'pending' | 'confirmed' | 'rejected'  | 'counter_offered' | 'accepted' | 'declined';
   timestamp?: string;
@@ -44,24 +45,12 @@ interface Order {
   clientId?: string;
   artistId?: string;
   gigId?: string;
+  counterOfferPrice?: number;
   items?: any[];
+  serviceImage?: string;
+  cover?: string;
+  image?: string;
 }
-
-interface ReclamationState {
-  selectedReasons: string[];
-  details: string;
-  submitting: boolean;
-  expanded: boolean;
-  saved: boolean;
-}
-
-const reclamationReasons = [
-  'Incorrect date/time',
-  'Missing details',
-  'Price discrepancy',
-  'Client info issue',
-  'Other',
-];
 
 const CalendarPage = () => {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -69,7 +58,6 @@ const CalendarPage = () => {
   const [filter, setFilter] = useState('all');
   const [counterOffer, setCounterOffer] = useState<{ [key: string]: string }>({});
   const [savingIds, setSavingIds] = useState<string[]>([]);
-  const [reclamations, setReclamations] = useState<Record<string, ReclamationState>>({});
   const router = useRouter();
 
   useEffect(() => {
@@ -99,7 +87,6 @@ const CalendarPage = () => {
           const resolvedClientName = data.clientInfo?.fullName || data.clientName || 'Unknown Client';
           const resolvedQuantity = data.quantity || data.totalQuantity || data.ticketQuantities?.reduce((sum: number, ticket: any) => sum + (ticket.quantity || 0), 0);
           const resolvedTicketType = data.ticketType || data.ticketName || (data.ticketQuantities?.length ? data.ticketQuantities.map((ticket: any) => `${ticket.quantity}x ${ticket.type}`).join(', ') : undefined);
-          const resolvedPrice = data.price || data.totalPrice;
           const rawStatus = data.status || 'pending';
           const normalizedStatus = rawStatus === 'accepted' ? 'confirmed' : rawStatus === 'declined' ? 'rejected' : rawStatus;
 
@@ -112,9 +99,10 @@ const CalendarPage = () => {
             gigTitle: data.gigTitle,
             date: data.date,
             time: data.time,
-            price: resolvedPrice,
+            price: data.price,
             totalPrice: data.totalPrice,
             clientPrice: data.clientPrice,
+            budget: data.budget,
             message: data.message,
             status: normalizedStatus,
             timestamp: toTimestampString(data.timestamp) || toTimestampString(data.createdAt),
@@ -128,7 +116,9 @@ const CalendarPage = () => {
             clientId: data.clientId,
             artistId: data.artistId,
             gigId: data.gigId,
+            counterOfferPrice: data.counterOfferPrice,
             items: data.items,
+            serviceImage: data.serviceImage || data.cover || data.image || data.coverImage,
           };
         });
 
@@ -254,107 +244,37 @@ const CalendarPage = () => {
     }
   };
 
-  const handleCounterOffer = (orderId: string) => {
+  const handleCounterOffer = async (orderId: string) => {
     const newPrice = counterOffer[orderId];
-    if (!newPrice) {
-      Alert.alert('Error', 'Please enter a counter offer price');
+    if (!newPrice || isNaN(parseFloat(newPrice))) {
+      Alert.alert('Error', 'Please enter a valid counter offer price');
       return;
     }
-    setOrders(orders.map(order =>
-      order.id === orderId ? { ...order, price: parseFloat(newPrice), status: 'counter_offered' } : order
-    ));
-    setCounterOffer({ ...counterOffer, [orderId]: '' });
-    Alert.alert('Counter Offer Sent', `New price of ${newPrice} MAD has been sent to client`);
-  };
-
-  const toggleReclamationPanel = (orderId: string) => {
-    setReclamations(prev => ({
-      ...prev,
-      [orderId]: {
-        selectedReasons: prev[orderId]?.selectedReasons || [],
-        details: prev[orderId]?.details || '',
-        submitting: prev[orderId]?.submitting || false,
-        expanded: !prev[orderId]?.expanded,
-        saved: prev[orderId]?.saved || false,
-      },
-    }));
-  };
-
-  const toggleReclamationReason = (orderId: string, reason: string) => {
-    setReclamations(prev => {
-      const current = prev[orderId] || { selectedReasons: [], details: '', submitting: false, expanded: true, saved: false };
-      const isSelected = current.selectedReasons.includes(reason);
-      const selectedReasons = isSelected
-        ? current.selectedReasons.filter(item => item !== reason)
-        : [...current.selectedReasons, reason];
-      return {
-        ...prev,
-        [orderId]: { ...current, selectedReasons },
-      };
-    });
-  };
-
-  const updateReclamationDetails = (orderId: string, details: string) => {
-    setReclamations(prev => ({
-      ...prev,
-      [orderId]: {
-        ...(prev[orderId] || { selectedReasons: [], submitting: false, expanded: true, saved: false }),
-        details,
-      },
-    }));
-  };
-
-  const handleSaveReclamation = async (order: Order) => {
-    const reclamation = reclamations[order.id] || { selectedReasons: [], details: '', submitting: false, expanded: true, saved: false };
-    if (!reclamation.selectedReasons.length) {
-      Alert.alert('Select a reason', 'Please choose at least one reclamation reason.');
-      return;
-    }
-
-    const auth = getAuth();
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      Alert.alert('Not signed in', 'Please sign in to submit a reclamation.');
-      return;
-    }
-
-    setReclamations(prev => ({
-      ...prev,
-      [order.id]: { ...reclamation, submitting: true },
-    }));
-
+    const order = orders.find(o => o.id === orderId);
+    if (!order) return;
+    const priceNum = parseFloat(newPrice);
     try {
-      const db = getFirestore();
-      await addDoc(collection(db, 'reclamations'), {
-        orderId: order.id,
-        artistId: currentUser.uid,
-        clientId: order.clientId || null,
-        reasons: reclamation.selectedReasons,
-        details: reclamation.details.trim() || null,
-        status: 'submitted',
-        createdAt: new Date().toISOString(),
-        orderSummary: {
-          type: order.type,
-          status: order.status,
-          price: order.price,
-          date: order.date,
-          time: order.time,
-          clientName: order.clientName,
-        },
-      });
-
-      setReclamations(prev => ({
-        ...prev,
-        [order.id]: { ...reclamation, submitting: false, saved: true, expanded: false },
-      }));
-      Alert.alert('Reclamation submitted', 'Your issue has been saved in Firebase.');
-    } catch (error) {
-      console.error('Failed to save reclamation:', error);
-      setReclamations(prev => ({
-        ...prev,
-        [order.id]: { ...reclamation, submitting: false },
-      }));
-      Alert.alert('Error', 'Unable to save reclamation. Please try again later.');
+      setSavingIds(prev => [...prev, orderId]);
+      await sendCounterOffer(orderId, priceNum);
+      setOrders(orders.map(o =>
+        o.id === orderId ? { ...o, price: priceNum, status: 'counter_offered' as any } : o
+      ));
+      setCounterOffer({ ...counterOffer, [orderId]: '' });
+      await sendOrderUpdateNotification(
+        order.clientId,
+        order.artistId,
+        orderId,
+        order.type as any,
+        'counter_offered' as any,
+        'New Price Offer',
+        `The artist has sent a counter offer of ${priceNum} MAD for your order.`,
+      );
+      Alert.alert('Counter Offer Sent', `New price of ${priceNum} MAD has been sent to client`);
+    } catch (err) {
+      console.error('Counter offer failed:', err);
+      Alert.alert('Error', 'Failed to send counter offer');
+    } finally {
+      setSavingIds(prev => prev.filter(id => id !== orderId));
     }
   };
 
@@ -365,7 +285,8 @@ const CalendarPage = () => {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'pending': return '#ff9500';
+      case 'pending':
+      case 'counter_offered': return '#9e9e9e';
       case 'confirmed': return '#34c759';
       case 'rejected': return '#ff3b30';
       default: return '#666';
@@ -376,13 +297,17 @@ const CalendarPage = () => {
     switch (status) {
       case 'pending': return 'time-outline';
       case 'confirmed': return 'checkmark-circle';
+      case 'counter_offered': return 'pricetag';
       case 'rejected': return 'close-circle';
       default: return 'help-circle';
     }
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={{ paddingBottom: Platform.OS === 'ios' ? 180 : 160 }}
+    >
       {/* Filter Tabs */}
       <View style={styles.filterContainer}>
         {['all', 'pending', 'confirmed', 'rejected'].map(status => (
@@ -432,23 +357,16 @@ const CalendarPage = () => {
         <Text style={styles.orderTime}>{order.timestamp}</Text>
       </View>
       <View style={styles.headerRight}>
-        <TouchableOpacity
-          style={[styles.reportIconButton, reclamations[order.id]?.saved && styles.disabledButton]}
-          onPress={() => toggleReclamationPanel(order.id)}
-          disabled={reclamations[order.id]?.submitting}
-        >
-          <Ionicons
-            name="alert-circle-outline"
-            size={20}
-            color={reclamations[order.id]?.saved ? '#999' : '#ff6b6b'}
-          />
-        </TouchableOpacity>
         <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status) }]}> 
           <Ionicons name={getStatusIcon(order.status)} size={16} color="white" />
           <Text style={styles.statusText}>{order.status.replace('_', ' ')}</Text>
         </View>
       </View>
     </View>
+    {/* Service Image */}
+    {(order.serviceImage || order.cover || order.image) ? (
+      <Image source={{ uri: order.serviceImage || order.cover || order.image }} style={styles.serviceImage} />
+    ) : null}
     {/* Order Details */}
     <View style={styles.orderDetails}>
       <View style={styles.orderType}>
@@ -473,13 +391,17 @@ const CalendarPage = () => {
     {/* Price Information */}
     <View style={styles.priceContainer}>
       <View style={styles.priceRow}>
-        <Text style={styles.priceLabel}>Your Price:</Text>
-        <Text style={styles.yourPrice}>${order.price}</Text>
+        <Text style={styles.priceLabel}>Budget:</Text>
+        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#34c759' }}>
+          ${order.clientPrice ?? order.budget ?? order.totalPrice ?? 0}
+        </Text>
       </View>
-      {order.clientPrice && (
+      {order.counterOfferPrice != null && (
         <View style={styles.priceRow}>
-          <Text style={styles.priceLabel}>Client Offer:</Text>
-          <Text style={styles.clientPrice}>${order.clientPrice}</Text>
+          <Text style={styles.priceLabel}>Your Offer:</Text>
+          <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#6a0dad' }}>
+            ${order.counterOfferPrice}
+          </Text>
         </View>
       )}
     </View>
@@ -490,42 +412,6 @@ const CalendarPage = () => {
         <Text style={styles.messageText}>"{order.message}"</Text>
       </View>
     )}
-    {reclamations[order.id]?.expanded && (
-      <View style={styles.reclamationPanel}>
-          <Text style={styles.reclamationTitle}>Choose issue(s)</Text>
-          <View style={styles.reasonList}>
-            {reclamationReasons.map(reason => {
-              const selected = reclamations[order.id]?.selectedReasons.includes(reason);
-              return (
-                <TouchableOpacity
-                  key={reason}
-                  style={[styles.reasonButton, selected && styles.reasonButtonSelected]}
-                  onPress={() => toggleReclamationReason(order.id, reason)}
-                >
-                  <Text style={[styles.reasonButtonText, selected && styles.reasonButtonTextSelected]}>{reason}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-          <TextInput
-            style={styles.reclamationInput}
-            placeholder="Add optional details"
-            placeholderTextColor="#999"
-            multiline
-            value={reclamations[order.id]?.details || ''}
-            onChangeText={(text) => updateReclamationDetails(order.id, text)}
-          />
-          <TouchableOpacity
-            style={[styles.saveReclamationButton, reclamations[order.id]?.submitting && styles.disabledButton]}
-            onPress={() => handleSaveReclamation(order)}
-            disabled={reclamations[order.id]?.submitting}
-          >
-            <Text style={styles.buttonText}>
-              {reclamations[order.id]?.submitting ? 'Saving...' : 'Submit Reclamation'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
     {/* Action Buttons */}
     {order.status === 'pending' && (
       <View style={styles.actionContainer}>
@@ -548,13 +434,13 @@ const CalendarPage = () => {
       </View>
     )}
     {/* Counter Offer Section */}
-    {order.status === 'pending' && order.clientPrice != null && (order.price ?? 0) < order.clientPrice && (
+    {order.status === 'pending' && (
       <View style={styles.counterOfferContainer}>
-        <Text style={styles.counterOfferLabel}>Counter Offer:</Text>
+        <Text style={styles.counterOfferLabel}>Send Back Price:</Text>
         <View style={styles.counterOfferRow}>
           <TextInput
             style={styles.counterOfferInput}
-            placeholder="Enter price"
+            placeholder="Enter your price"
             keyboardType="numeric"
             value={counterOffer[order.id] || ''}
             onChangeText={(text) => setCounterOffer({...counterOffer, [order.id]: text})}
@@ -646,23 +532,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  reportIconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: '#fff',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#f3f4f6',
-  },
   clientInfo: {
     flex: 1,
   },
   clientName: {
     fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
+  serviceImage: {
+    width: '100%',
+    height: 160,
+    borderRadius: 10,
+    marginBottom: 10,
   },
   orderTime: {
     fontSize: 12,
@@ -721,10 +603,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
   },
-  yourPrice: {
+  servicePrice: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#34c759',
+    color: '#6a0dad',
+  },
+  customerPrice: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#007aff',
   },
   clientPrice: {
     fontSize: 16,
@@ -790,77 +677,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#333',
     marginBottom: 8,
-  },
-  reclaimBox: {
-    marginTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#ececec',
-    paddingTop: 12,
-  },
-  reclaimButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#ff6b6b',
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  reclamationPanel: {
-    marginTop: 12,
-    backgroundColor: '#faf7ff',
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#ede7f6',
-  },
-  reclamationTitle: {
-    fontSize: 14,
-    color: '#4b2995',
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  reasonList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginBottom: 12,
-  },
-  reasonButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    marginBottom: 8,
-    marginRight: 8,
-  },
-  reasonButtonSelected: {
-    backgroundColor: '#6a0dad',
-    borderColor: '#6a0dad',
-  },
-  reasonButtonText: {
-    fontSize: 12,
-    color: '#444',
-  },
-  reasonButtonTextSelected: {
-    color: 'white',
-  },
-  reclamationInput: {
-    minHeight: 64,
-    backgroundColor: 'white',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    padding: 12,
-    fontSize: 14,
-    color: '#333',
-    marginBottom: 12,
-  },
-  saveReclamationButton: {
-    backgroundColor: '#6a0dad',
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: 'center',
   },
   counterOfferRow: {
     flexDirection: 'row',

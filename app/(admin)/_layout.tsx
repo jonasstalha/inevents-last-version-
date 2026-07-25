@@ -1,41 +1,96 @@
-import { Slot, useRouter } from 'expo-router';
-import React from 'react';
-import { SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Slot, useRouter, useSegments } from 'expo-router';
+import { getAuth, signOut } from 'firebase/auth';
+import { LogOut, LayoutDashboard, Users, Briefcase, CreditCard, Ticket } from 'lucide-react-native';
+import React, { useEffect } from 'react';
+import { Alert, BackHandler, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Theme } from '../../src/constants/theme';
 
 const navItems = [
-  { label: 'Dashboard', route: '/(admin)/dashboard' },
-  { label: 'Users', route: '/(admin)/users' },
-  { label: 'Services', route: '/(admin)/services' },
-  { label: 'Financial', route: '/(admin)/financial' },
-  { label: 'Coupons', route: '/(admin)/coupons' },
+  { label: 'Dashboard', route: '/(admin)/dashboard', icon: LayoutDashboard },
+  { label: 'Users', route: '/(admin)/users', icon: Users },
+  { label: 'Services', route: '/(admin)/services', icon: Briefcase },
+  { label: 'Financial', route: '/(admin)/financial', icon: CreditCard },
+  { label: 'Coupons', route: '/(admin)/coupons', icon: Ticket },
 ];
+
+const pageTitleMap: Record<string, string> = {
+  dashboard: 'Dashboard',
+  users: 'Users',
+  services: 'Services',
+  financial: 'Financial',
+  coupons: 'Coupons',
+};
 
 export default function AdminLayout() {
   const router = useRouter();
+  const segments = useSegments();
+  const currentRoute = segments[segments.length - 1] || 'dashboard';
+  const pageTitle = pageTitleMap[currentRoute] || 'Admin';
+
+  useEffect(() => {
+    const onBackPress = () => {
+      BackHandler.exitApp();
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, []);
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Admin Panel</Text>
-        <Text style={styles.subtitle}>Manage users, services, finance and coupons from one place.</Text>
-      </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.navScroll}>
-        {navItems.map((item) => (
-          <TouchableOpacity
-            key={item.route}
-            style={styles.navItem}
-            onPress={() => router.push(item.route)}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.navText}>{item.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+    <View style={styles.container}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.headerSafe}>
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.title}>{pageTitle}</Text>
+            <Text style={styles.subtitle}>Admin Panel</Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={styles.headerBadge}>
+              <Text style={styles.headerBadgeText}>ADMIN</Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => {
+                Alert.alert('Logout', 'Are you sure you want to logout?', [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Logout', style: 'destructive', onPress: () => {
+                    signOut(getAuth());
+                    router.replace('/(auth)');
+                  }},
+                ]);
+              }}
+              style={styles.logoutButton}
+            >
+              <LogOut size={18} color="#e53e3e" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </SafeAreaView>
       <View style={styles.content}>
         <Slot />
       </View>
-    </SafeAreaView>
+      <SafeAreaView edges={['bottom']} style={styles.bottomNavSafe}>
+        <View style={styles.bottomNav}>
+          {navItems.map((item) => {
+            const isActive = currentRoute === item.route.replace('/(admin)/', '');
+            const Icon = item.icon;
+            return (
+              <TouchableOpacity
+                key={item.route}
+                style={styles.navItem}
+                onPress={() => router.replace(item.route)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.navIconWrap, isActive && styles.navIconWrapActive]}>
+                  <Icon size={20} color={isActive ? '#fff' : '#999'} strokeWidth={isActive ? 2.5 : 1.8} />
+                </View>
+                <Text style={[styles.navLabel, isActive && styles.navLabelActive]}>{item.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </SafeAreaView>
+    </View>
   );
 }
 
@@ -44,45 +99,86 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Theme.colors.background,
   },
-  header: {
-    paddingHorizontal: Theme.spacing.lg,
-    paddingTop: Theme.spacing.lg,
-    paddingBottom: Theme.spacing.md,
+  headerSafe: {
+    backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: Theme.colors.border,
-    backgroundColor: Theme.colors.background,
+    borderBottomColor: '#f0f0f0',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
   },
   title: {
     fontFamily: Theme.typography.fontFamily.bold,
-    fontSize: Theme.typography.fontSize.xl,
+    fontSize: 22,
     color: Theme.colors.textDark,
-    marginBottom: Theme.spacing.xs,
   },
   subtitle: {
     fontFamily: Theme.typography.fontFamily.regular,
-    fontSize: Theme.typography.fontSize.sm,
+    fontSize: 13,
     color: Theme.colors.textLight,
+    marginTop: 2,
   },
-  navScroll: {
-    paddingHorizontal: Theme.spacing.lg,
-    paddingVertical: Theme.spacing.sm,
+  headerBadge: {
+    backgroundColor: Theme.colors.primary,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
-  navItem: {
-    backgroundColor: Theme.colors.surface,
-    borderRadius: Theme.borderRadius.xl,
-    paddingVertical: Theme.spacing.sm,
-    paddingHorizontal: Theme.spacing.lg,
-    marginRight: Theme.spacing.sm,
-    borderWidth: 1,
-    borderColor: Theme.colors.border,
+  headerBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontFamily: Theme.typography.fontFamily.bold,
+    letterSpacing: 1,
   },
-  navText: {
-    fontFamily: Theme.typography.fontFamily.medium,
-    color: Theme.colors.textDark,
-    fontSize: Theme.typography.fontSize.sm,
+  logoutButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#fef2f2',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   content: {
     flex: 1,
-    backgroundColor: Theme.colors.background,
+  },
+  bottomNavSafe: {
+    backgroundColor: '#fff',
+  },
+  bottomNav: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    paddingTop: 6,
+    paddingBottom: Platform.OS === 'ios' ? 2 : 6,
+  },
+  navItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+  },
+  navIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  navIconWrapActive: {
+    backgroundColor: Theme.colors.primary,
+  },
+  navLabel: {
+    fontSize: 11,
+    color: '#999',
+    marginTop: 2,
+    fontFamily: Theme.typography.fontFamily.medium,
+  },
+  navLabelActive: {
+    color: Theme.colors.primary,
   },
 });

@@ -5,7 +5,6 @@ import { createInvoicePdf } from './pdfService';
 import { Order, Invoice } from '../models/types';
 import { getOrderById } from './orderService';
 
-const TAX_RATE = 0.20;
 const CURRENCY = 'MAD';
 
 const formatCurrency = (value: number) => Number(value.toFixed(2));
@@ -38,9 +37,7 @@ export async function createInvoiceForOrder(order: Order): Promise<Invoice> {
     return existing;
   }
 
-  const subtotal = formatCurrency(order.totalPrice || 0);
-  const taxes = formatCurrency(subtotal * TAX_RATE);
-  const total = formatCurrency(subtotal + taxes);
+  const total = formatCurrency(order.totalPrice || 0);
   const invoiceNumber = generateInvoiceNumber();
 
   const invoiceRef = doc(db, 'invoices', order.id);
@@ -50,8 +47,8 @@ export async function createInvoiceForOrder(order: Order): Promise<Invoice> {
     clientId: order.clientId,
     artistId: order.artistId,
     invoiceNumber,
-    subtotal,
-    taxes,
+    subtotal: total,
+    taxes: 0,
     total,
     currency: CURRENCY,
     pdfUrl: '',

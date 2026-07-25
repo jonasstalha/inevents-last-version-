@@ -1,6 +1,6 @@
 import { useAuth } from "@/src/context/AuthContext";
 import { auth, db } from "@/src/firebase/firebaseConfig";
-import PhoneVerificationModal from "@/src/components/auth/PhoneVerificationModal";
+import { initiatePhoneVerification, verifyCode } from "@/src/firebase/phoneVerificationService";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as AuthSession from "expo-auth-session";
@@ -15,7 +15,6 @@ import {
   Dimensions,
   Image,
   Keyboard,
-  Linking,
   Modal,
   Platform,
   ScrollView,
@@ -207,10 +206,11 @@ export default function AuthScreen() {
         };
 
         if (parsedRedirect?.pathname) {
-          router.replace({
-            pathname: parsedRedirect.pathname as any,
-            params: parsedRedirect.params,
-          } as any);
+          if (parsedRedirect.params && Object.keys(parsedRedirect.params).length > 0) {
+            router.replace(parsedRedirect.pathname as any, parsedRedirect.params as any);
+          } else {
+            router.replace(parsedRedirect.pathname as any);
+          }
           return;
         }
       }
@@ -233,7 +233,12 @@ export default function AuthScreen() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
   const [phoneError, setPhoneError] = useState("");
-  const [showPhoneVerificationModal, setShowPhoneVerificationModal] = useState(false);
+  const [codeSent, setCodeSent] = useState(false);
+  const [verificationCode, setVerificationCode] = useState('');
+  const [isSendingCode, setIsSendingCode] = useState(false);
+  const [isVerifyingCode, setIsVerifyingCode] = useState(false);
+  const [formattedPhone, setFormattedPhone] = useState('');
+  const [codeCountdown, setCodeCountdown] = useState(0);
   const [city, setCity] = useState("");
   const [userRole, setUserRole] = useState<"client" | "artist">("client");
   const [loading, setLoading] = useState(false);
@@ -248,18 +253,13 @@ export default function AuthScreen() {
   // NOTE: androidClientId MUST match the OAuth 2.0 credential registered in Firebase Console
   // for package: com.jonass7896.InEvent with SHA-1: 5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25
   const [request, response, promptAsync] = Google.useAuthRequest({
-    // After regenerating google-services.json, androidClientId will be auto-populated
-    // from your Firebase Android OAuth client. For now, use the Web Client ID as fallback.
-    androidClientId: "WILL_BE_REPLACED_AFTER_STEP_1_BELOW",
     iosClientId:
       "780609459655-33kqf1801palf7v922atpse13ictumgr.apps.googleusercontent.com",
+    androidClientId:
+      "780609459655-ve5ukpp1ojq7u16huekhh5re7hl6tp5v.apps.googleusercontent.com",
     webClientId:
       "780609459655-33kqf1801palf7v922atpse13ictumgr.apps.googleusercontent.com",
     scopes: ["profile", "email", "openid"],
-    redirectUri: AuthSession.makeRedirectUri({
-      useProxy: true,
-      scheme: "com.jonass7896.InEvent",
-    } as any),
   });
 
   // Error states
@@ -397,13 +397,6 @@ export default function AuthScreen() {
     return true;
   };
 
-  const handlePhoneVerificationSuccess = (verifiedPhone: string) => {
-    setPhoneNumber(verifiedPhone);
-    setIsPhoneVerified(true);
-    setPhoneError("");
-    setShowPhoneVerificationModal(false);
-  };
-
   const getFriendlyAuthErrorMessage = (error: any) => {
     const rawErrorString =
       typeof error?.code === "string"
@@ -447,6 +440,14 @@ export default function AuthScreen() {
   useEffect(() => {
     StatusBar.setBarStyle("dark-content", true);
   }, []);
+
+  // Code resend countdown
+  useEffect(() => {
+    if (codeCountdown > 0) {
+      const timer = setTimeout(() => setCodeCountdown(codeCountdown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [codeCountdown]);
 
   // Handle Google Sign-In response
   useEffect(() => {
@@ -699,11 +700,14 @@ export default function AuthScreen() {
 
         // Check if admin credentials - direct redirect to admin page
         if (email === "admin@inevents.com" && password === "admin123456") {
-          await login(email, password);
+          try {
+            await login(email, password);
+          } catch {
+            // Admin user might not exist in Firebase Auth yet — register silently
+            await register(email, password, 'Admin', '', false, 'admin');
+          }
           setLoading(false);
-          console.log(
-            "✅ Admin login successful! Redirecting to admin page...",
-          );
+          console.log("✅ Admin login successful! Redirecting to admin page...");
           router.replace("/(admin)");
           return;
         }
@@ -800,7 +804,8 @@ export default function AuthScreen() {
     setPhoneError("");
     setPhoneNumber("");
     setIsPhoneVerified(false);
-    setShowPhoneVerificationModal(false);
+    setCodeSent(false);
+    setVerificationCode('');
   };
 
   return (
@@ -877,28 +882,99 @@ export default function AuthScreen() {
                   placeholder="+212 6xx xxx xxx"
                 />
 
-                <TouchableOpacity
-                  style={[
-                    styles.verifyButton,
-                    isPhoneVerified && styles.verifyButtonVerified,
-                  ]}
-                  activeOpacity={0.85}
-                  onPress={() => {
-                    if (!validatePhoneNumber(phoneNumber)) {
-                      return;
-                    }
-                    setShowPhoneVerificationModal(true);
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.verifyButtonText,
-                      isPhoneVerified && styles.verifyButtonTextVerified,
-                    ]}
+                {!isPhoneVerified && !codeSent ? (
+                  <TouchableOpacity
+                    style={[styles.verifyButton, isSendingCode && styles.verifyButtonDisabled]}
+                    activeOpacity={0.85}
+                    onPress={async () => {
+                      if (!validatePhoneNumber(phoneNumber)) return;
+                      setIsSendingCode(true);
+                      try {
+                        const { formattedPhone: normPhone } = await initiatePhoneVerification(phoneNumber);
+                        setFormattedPhone(normPhone);
+                        setCodeSent(true);
+                        setCodeCountdown(60);
+                      } catch (error: any) {
+                        Alert.alert('Error', error?.message || 'Failed to send code');
+                      } finally {
+                        setIsSendingCode(false);
+                      }
+                    }}
+                    disabled={isSendingCode}
                   >
-                    {isPhoneVerified ? "Phone verified" : "Verify via WhatsApp"}
-                  </Text>
-                </TouchableOpacity>
+                    <Text style={styles.verifyButtonText}>
+                      {isSendingCode ? 'Sending...' : 'Verify via WhatsApp'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : isPhoneVerified ? (
+                  <View style={[styles.verifyButton, styles.verifyButtonVerified]}>
+                    <Text style={[styles.verifyButtonText, styles.verifyButtonTextVerified]}>
+                      Phone verified
+                    </Text>
+                  </View>
+                ) : null}
+
+                {codeSent && !isPhoneVerified && (
+                  <View style={styles.inlineCodeContainer}>
+                    <TextInput
+                      style={styles.inlineCodeInput}
+                      value={verificationCode}
+                      onChangeText={setVerificationCode}
+                      placeholder="Enter 6-digit code"
+                      keyboardType="number-pad"
+                      maxLength={6}
+                    />
+                    <TouchableOpacity
+                      style={[styles.verifyButton, styles.verifyCodeButton, (isVerifyingCode || verificationCode.length !== 6) && styles.verifyButtonDisabled]}
+                      onPress={async () => {
+                        if (!verificationCode.trim() || verificationCode.length !== 6) {
+                          Alert.alert('Error', 'Please enter a valid 6-digit code');
+                          return;
+                        }
+                        setIsVerifyingCode(true);
+                        try {
+                          const verified = await verifyCode(formattedPhone || phoneNumber, verificationCode);
+                          if (verified) {
+                            setIsPhoneVerified(true);
+                            setPhoneError('');
+                          } else {
+                            Alert.alert('Invalid Code', 'The code is incorrect. Try again.');
+                          }
+                        } catch (error: any) {
+                          Alert.alert('Error', error?.message || 'Failed to verify code');
+                        } finally {
+                          setIsVerifyingCode(false);
+                        }
+                      }}
+                      disabled={isVerifyingCode || verificationCode.length !== 6}
+                    >
+                      <Text style={styles.verifyButtonText}>
+                        {isVerifyingCode ? 'Verifying...' : 'Verify Code'}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.resendLink}
+                      onPress={async () => {
+                        if (codeCountdown > 0) return;
+                        setIsSendingCode(true);
+                        try {
+                          const { formattedPhone: normPhone } = await initiatePhoneVerification(phoneNumber);
+                          setFormattedPhone(normPhone);
+                          setCodeCountdown(60);
+                        } catch (error: any) {
+                          Alert.alert('Error', error?.message || 'Failed to resend code');
+                        } finally {
+                          setIsSendingCode(false);
+                        }
+                      }}
+                      disabled={codeCountdown > 0}
+                    >
+                      <Text style={[styles.resendLinkText, codeCountdown > 0 && styles.resendLinkTextDisabled]}>
+                        {codeCountdown > 0 ? `Resend in ${codeCountdown}s` : 'Resend code'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
               </>
             )}
 
@@ -939,16 +1015,16 @@ export default function AuthScreen() {
                 <View style={styles.roleContainer}>
                   <RoleCard
                     role="client"
-                    title="Find Events"
-                    description="Discover and book amazing experiences"
+                    title="Book a Service"
+                    description="Hire artists and professionals for your event"
                     icon="bullseye"
                     active={userRole === "client"}
                     onPress={() => setUserRole("client")}
                   />
                   <RoleCard
                     role="artist"
-                    title="Create Events"
-                    description="Share your talent with the world"
+                    title="Offer My Service"
+                    description="Get hired and showcase your talent"
                     icon="palette"
                     active={userRole === "artist"}
                     onPress={() => setUserRole("artist")}
@@ -1080,13 +1156,6 @@ export default function AuthScreen() {
               </View>
             </Modal>
 
-            <PhoneVerificationModal
-              visible={showPhoneVerificationModal}
-              onClose={() => setShowPhoneVerificationModal(false)}
-              phoneNumber={phoneNumber}
-              onVerificationSuccess={handlePhoneVerificationSuccess}
-            />
-
             {/* Padding spacer before submit button */}
             <View style={styles.submitButtonSpacer} />
 
@@ -1106,6 +1175,7 @@ export default function AuthScreen() {
             </View>
 
             {/* Google Sign-In — card style with arrow */}
+            {/*
             <TouchableOpacity
               style={styles.socialButton}
               onPress={() => promptAsync()}
@@ -1134,6 +1204,7 @@ export default function AuthScreen() {
                 </>
               )}
             </TouchableOpacity>
+            */}
 
             {/* Bottom toggle */}
             <View style={styles.toggleContainer}>
@@ -1393,6 +1464,47 @@ const styles = StyleSheet.create({
 
   verifyButtonTextVerified: {
     color: "#10B981",
+  },
+
+  verifyButtonDisabled: {
+    opacity: 0.6,
+  },
+
+  verifyCodeButton: {
+    backgroundColor: "#6366f1",
+    shadowColor: "#6366f1",
+    marginBottom: 4,
+  },
+
+  inlineCodeContainer: {
+    marginBottom: 18,
+  },
+
+  inlineCodeInput: {
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 18,
+    textAlign: "center",
+    letterSpacing: 2,
+    backgroundColor: "#f9fafb",
+    marginBottom: 12,
+  },
+
+  resendLink: {
+    alignItems: "center",
+    paddingVertical: 8,
+  },
+
+  resendLinkText: {
+    color: "#6366f1",
+    fontSize: 14,
+    fontWeight: "500",
+  },
+
+  resendLinkTextDisabled: {
+    color: "#9ca3af",
   },
 
   submitButton: {

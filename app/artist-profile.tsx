@@ -3,15 +3,15 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getAuth } from 'firebase/auth';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Animated,
-  FlatList,
-  Image,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Animated,
+    FlatList,
+    Image,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchServicesByArtistId } from '../src/firebase/artistServices';
@@ -158,7 +158,6 @@ const ArtistProfileScreen = () => {
             name: artist.name,
             avatar: artist.profileImage || `https://ui-avatars.com/api/?name=${encodeURIComponent(artist.name || 'A')}&background=EDE8F7&color=3D1A6E&bold=true`,
             description: artist.bio || '',
-            rating: artist.rating || 0,
             location: artist.location || '',
             categories: artist.categories || [],
             specialization: artist.specialization || '',
@@ -227,16 +226,6 @@ const ArtistProfileScreen = () => {
 
           {/* Stats row */}
           <View style={styles.statsRow}>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>
-                {artistProfile?.rating ? artistProfile.rating.toFixed(1) : '—'}
-              </Text>
-              <View style={styles.statLabelRow}>
-                <Ionicons name="star" size={11} color={T.yellow} />
-                <Text style={styles.statLabel}>Rating</Text>
-              </View>
-            </View>
-            <View style={styles.statDivider} />
             <View style={styles.statItem}>
               <Text style={styles.statValue}>{services.length}</Text>
               <Text style={styles.statLabel}>Services</Text>

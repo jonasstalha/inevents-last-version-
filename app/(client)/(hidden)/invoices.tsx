@@ -1,5 +1,5 @@
 import { useAuth } from '@/src/context/AuthContext';
-import { getOrderTraceability } from '@/src/firebase/orderService';
+import { confirmOrder, getOrderTraceability, rejectOrder } from '@/src/firebase/orderService';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
@@ -29,7 +29,6 @@ import {
   Image,
   Modal,
   Platform,
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -66,6 +65,10 @@ interface Order {
   status: OrderStatus;
   orderType: 'ticket' | 'service';
   amount: number;
+  price?: number;
+  clientPrice?: number;
+  budget?: number;
+  counterOfferPrice?: number;
   currency: string;
   clientId: string;
   artistId?: string;
@@ -116,11 +119,12 @@ type OrderStatus =
   | 'declined'
   | 'rejected'
   | 'completed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'counter_offered';
 
 type ServiceOrderWithMeta = Order & Record<string, any>;
 
-type TabType = 'orders' | 'custom' | 'invoices';
+type TabType = 'notifications' | 'orders' | 'custom' | 'invoices';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -134,6 +138,7 @@ const STATUS_LABEL: Record<OrderStatus, string> = {
   rejected: 'Rejected',
   completed: 'Completed',
   cancelled: 'Cancelled',
+  counter_offered: 'Counter offer',
 };
 
 const STATUS_COLOR: Record<OrderStatus, string> = {
@@ -144,6 +149,7 @@ const STATUS_COLOR: Record<OrderStatus, string> = {
   rejected: '#dc2626',
   completed: '#2563eb',
   cancelled: '#6b7280',
+  counter_offered: '#ca8a04',
 };
 
 const STATUS_ICON: Record<OrderStatus, keyof typeof Ionicons.glyphMap> = {
@@ -154,6 +160,7 @@ const STATUS_ICON: Record<OrderStatus, keyof typeof Ionicons.glyphMap> = {
   rejected: 'close-circle-outline',
   completed: 'trophy-outline',
   cancelled: 'ban-outline',
+  counter_offered: 'swap-horizontal-outline',
 };
 
 // Statuses that trigger automatic invoice generation.
@@ -530,24 +537,12 @@ const styles = StyleSheet.create({
 
   listContainer: { paddingBottom: 120 },
 
-  // ── Summary header ───────────────────────────────────────────────────────
-  summaryRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
-  summaryCard: {
-    flex: 1,
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  summaryLabel: { fontSize: 10, color: '#6b7280', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.4 },
-  summaryValue: { fontSize: 20, fontWeight: '800', color: '#111827', marginTop: 4 },
-  summaryUnit: { fontSize: 10, color: '#6b7280', fontWeight: '500', marginTop: 2 },
-
   // ── Tabs ─────────────────────────────────────────────────────────────────
   tabRow: {
-    flexDirection: 'row',
     marginBottom: 14,
+  },
+  tabScroll: {
+    flexDirection: 'row',
     borderRadius: 14,
     borderWidth: 1,
     borderColor: '#e0e7ff',
@@ -560,7 +555,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
-    gap: 6,
+    paddingHorizontal: 6,
+    gap: 4,
     borderRadius: 11,
   },
   tabButtonActive: { backgroundColor: '#6366f1' },
@@ -585,13 +581,13 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 14,
     marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#eef2f7',
+    borderLeftWidth: 4,
     shadowColor: '#0f172a',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 6,
     elevation: 2,
+    overflow: 'hidden',
   },
   cardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   orderCover: {
@@ -614,18 +610,11 @@ const styles = StyleSheet.create({
   cardSub: { fontSize: 13, color: '#475569', marginBottom: 4, lineHeight: 18 },
   cardDate: { fontSize: 11.5, color: '#94a3b8' },
 
-  amountBox: {
+  priceTag: {
     alignItems: 'flex-end',
-    backgroundColor: '#f0f9ff',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#bae6fd',
   },
-  amountText: { fontSize: 15, fontWeight: '800', color: '#0369a1' },
-  amountCurrency: { fontSize: 10, color: '#0369a1', fontWeight: '600' },
-  amountLabel: { marginTop: 4, fontSize: 11, fontWeight: '700', color: '#475569' },
+  priceTagAmount: { fontSize: 20, fontWeight: '800', color: '#16a34a' },
+  priceTagCurrency: { fontSize: 11, color: '#16a34a', fontWeight: '600' },
 
   cardFooter: {
     flexDirection: 'row',
@@ -697,6 +686,28 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   deleteButtonText: { color: '#b91c1c', fontSize: 12, fontWeight: '700' },
+
+  acceptButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#16a34a',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    gap: 6,
+  },
+  acceptButtonText: { color: '#ffffff', fontSize: 13, fontWeight: '700' },
+
+  declineButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#dc2626',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    gap: 6,
+  },
+  declineButtonText: { color: '#ffffff', fontSize: 13, fontWeight: '700' },
 
   // ── Expanded details ─────────────────────────────────────────────────────
   detailsBlock: {
@@ -774,22 +785,63 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
 
-  // ── FIX 3: Prominent price strip ─────────────────────────────────────────
-  priceStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#f0f9ff',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginTop: 10,
-    borderWidth: 1,
-    borderColor: '#bae6fd',
+  // ── Filter chips ─────────────────────────────────────────────────────────
+  filterChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 5,
+    borderRadius: 18,
+    backgroundColor: '#ffffff',
+    marginRight: 10,
+    borderWidth: 1.5,
+    borderColor: '#e2e8f0',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
   },
-  priceStripLabel: { fontSize: 12, color: '#0369a1', fontWeight: '600' },
-  priceStripAmount: { fontSize: 17, fontWeight: '800', color: '#0369a1' },
-  priceStripCurrency: { fontSize: 11, color: '#0369a1', fontWeight: '600', marginLeft: 3 },
+  filterChipActive: {
+    backgroundColor: '#6366f1',
+    borderColor: '#6366f1',
+  },
+  filterChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  filterChipTextActive: {
+    color: '#ffffff',
+  },
+
+  // ── Stats header ─────────────────────────────────────────────────────────
+  statsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 16,
+  },
+  statBox: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    alignItems: 'center',
+  },
+  statValue: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#0f172a',
+    marginBottom: 2,
+  },
+  statLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748b',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -868,32 +920,6 @@ function TraceabilitySection({
   );
 }
 
-function SummaryHeader({
-  totalSpent,
-  pendingCount,
-  completedCount,
-}: { totalSpent: number; pendingCount: number; completedCount: number }) {
-  return (
-    <View style={styles.summaryRow}>
-      <View style={styles.summaryCard}>
-        <Text style={styles.summaryLabel}>Spent</Text>
-        <Text style={styles.summaryValue}>{money(totalSpent)}</Text>
-        <Text style={styles.summaryUnit}>MAD total</Text>
-      </View>
-      <View style={styles.summaryCard}>
-        <Text style={styles.summaryLabel}>Pending</Text>
-        <Text style={[styles.summaryValue, { color: '#ca8a04' }]}>{pendingCount}</Text>
-        <Text style={styles.summaryUnit}>awaiting</Text>
-      </View>
-      <View style={styles.summaryCard}>
-        <Text style={styles.summaryLabel}>Done</Text>
-        <Text style={[styles.summaryValue, { color: '#16a34a' }]}>{completedCount}</Text>
-        <Text style={styles.summaryUnit}>completed</Text>
-      </View>
-    </View>
-  );
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // FIX 3 — CustomOrderCard: shows service title (not ID), prominent price,
 // tappable title that navigates to the service detail page.
@@ -907,6 +933,7 @@ function CustomOrderCard({
   expanded,
   onToggleExpand,
   onPressService,
+  onPress,
 }: {
   item: ServiceOrderWithMeta;
   traceSteps: TraceStep[];
@@ -915,8 +942,8 @@ function CustomOrderCard({
   showTrace: boolean;
   expanded: boolean;
   onToggleExpand: () => void;
-  /** Navigate to the service page. Called with the serviceId (or artistId fallback). */
   onPressService: () => void;
+  onPress?: () => void;
 }) {
   const date = formatShortDate(item.createdAt);
   const status = (((item as any).status || (item as any).orderStatus || 'pending') as OrderStatus);
@@ -930,20 +957,20 @@ function CustomOrderCard({
     item.title ||
     'Service Request';
 
-  // FIX 3b: client-facing price (clientPrice takes priority over generic amount)
   const displayPrice: number =
+    (item as any).price ??
     (item as any).clientPrice ??
+    (item as any).budget ??
     (item as any).amount ??
     0;
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, { borderLeftColor: color }]}>
       {coverImage ? (
         <Image source={{ uri: coverImage }} style={styles.orderCover} />
       ) : null}
 
-      {/* Tapping the top area toggles expand */}
-      <Pressable onPress={onToggleExpand}>
+      <TouchableOpacity activeOpacity={0.7} onPress={onPress}>
         <View style={styles.cardHeader}>
           <View style={[styles.iconCircle, { backgroundColor: `${color}1A` }]}>
             <Ionicons name="construct-outline" size={22} color={color} />
@@ -951,7 +978,6 @@ function CustomOrderCard({
           <View style={{ flex: 1 }}>
             <Text style={styles.cardId}>#{shortId(item.id)}</Text>
 
-            {/* FIX 3c: clickable service title with chevron */}
             <TouchableOpacity
               style={styles.serviceClickArea}
               onPress={onPressService}
@@ -973,14 +999,9 @@ function CustomOrderCard({
             ) : null}
             <Text style={styles.cardDate}>{date}</Text>
           </View>
-        </View>
-
-        {/* FIX 3d: prominent price strip always visible */}
-        <View style={styles.priceStrip}>
-          <Text style={styles.priceStripLabel}>Order total</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-            <Text style={styles.priceStripAmount}>{money(displayPrice)}</Text>
-            <Text style={styles.priceStripCurrency}>MAD</Text>
+          <View style={styles.priceTag}>
+            <Text style={styles.priceTagAmount}>{money(displayPrice)}</Text>
+            <Text style={styles.priceTagCurrency}>MAD</Text>
           </View>
         </View>
 
@@ -989,7 +1010,7 @@ function CustomOrderCard({
             {message}
           </Text>
         ) : null}
-      </Pressable>
+      </TouchableOpacity>
 
       {expanded ? (
         <View style={styles.detailsBlock}>
@@ -1048,18 +1069,21 @@ function CustomOrderCard({
 }
 
 function OrderCard({
-  item, onDelete,
+  item, onDelete, onAccept, onDecline, onPress,
 }: {
-  item: Order; onDelete: () => void;
+  item: Order; onDelete: () => void; onAccept?: () => void; onDecline?: () => void; onPress?: () => void;
 }) {
   const date = formatShortDate(item.createdAt);
   const color = STATUS_COLOR[item.status] ?? STATUS_COLOR.pending;
   const isPaid = item.paymentStatus === 'paid';
   const coverImage = getOrderCover(item);
-  const priceLabel = item.orderType === 'service' ? 'Final price' : 'Amount';
+  const isCounterOffer = item.status === 'counter_offered';
+
+  const finalPrice = item.price ?? item.counterOfferPrice ?? item.clientPrice ?? item.budget ?? item.amount;
 
   return (
-    <View style={styles.card}>
+    <TouchableOpacity activeOpacity={0.9} onPress={onPress} disabled={!onPress}>
+    <View style={[styles.card, { borderLeftColor: color }]}>
       {coverImage ? (
         <Image source={{ uri: coverImage }} style={styles.orderCover} />
       ) : null}
@@ -1075,21 +1099,13 @@ function OrderCard({
             <Text style={styles.cardId}>#{shortId(item.id)}</Text>
             <Text style={styles.cardTitle}>{item.title || 'Untitled order'}</Text>
             {item.artistName ? <Text style={styles.artistName}>{item.artistName}</Text> : null}
-            {item.description ? (
-              <Text style={styles.cardSub} numberOfLines={2}>
-                {item.description}
-              </Text>
-            ) : null}
             <Text style={styles.cardDate}>{date}</Text>
           </View>
-          <View style={{ alignItems: 'flex-end' }}>
-            <View style={styles.amountBox}>
-              <Text style={styles.amountText}>{money(item.amount)}</Text>
-              <Text style={styles.amountCurrency}>{item.currency || 'MAD'}</Text>
-              <Text style={styles.amountLabel}>{priceLabel}</Text>
-            </View>
+          <View style={styles.priceTag}>
+            <Text style={styles.priceTagAmount}>{money(finalPrice)}</Text>
+            <Text style={styles.priceTagCurrency}>{item.currency || 'MAD'}</Text>
             {isPaid ? (
-              <View style={styles.paidBadge}>
+              <View style={[styles.paidBadge, { marginTop: 4 }]}>
                 <Ionicons name="checkmark-circle" size={10} color="#15803d" />
                 <Text style={styles.paidBadgeText}>PAID</Text>
               </View>
@@ -1098,27 +1114,49 @@ function OrderCard({
         </View>
 
       <View style={styles.cardFooter}>
-        <StatusBadge status={item.status} />
+        {isCounterOffer ? (
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity
+              style={[styles.acceptButton]}
+              onPress={onAccept}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="checkmark-outline" size={14} color="#fff" />
+              <Text style={styles.acceptButtonText}>Accept</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.declineButton]}
+              onPress={onDecline}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="close-outline" size={14} color="#fff" />
+              <Text style={styles.declineButtonText}>Decline</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <StatusBadge status={item.status} />
+        )}
         <TouchableOpacity style={styles.deleteButton} onPress={onDelete} activeOpacity={0.7}>
           <Ionicons name="trash-outline" size={14} color="#b91c1c" />
           <Text style={styles.deleteButtonText}>Delete</Text>
         </TouchableOpacity>
       </View>
     </View>
+    </TouchableOpacity>
   );
 }
 
 function InvoiceItem({
-  item, expanded, onToggleExpand,
+  item, expanded, onToggleExpand, onPress,
 }: {
-  item: Invoice; expanded: boolean; onToggleExpand: () => void;
+  item: Invoice; expanded: boolean; onToggleExpand: () => void; onPress?: () => void;
 }) {
   const date = formatShortDate(item.createdAt);
   const isPending = !item.downloadURL;
 
   return (
-    <View style={styles.card}>
-      <Pressable onPress={onToggleExpand}>
+    <View style={[styles.card, { borderLeftColor: isPending ? '#ca8a04' : '#16a34a' }]}>
+      <TouchableOpacity activeOpacity={0.7} onPress={onPress}>
         <View style={styles.cardHeader}>
           <View style={[styles.iconCircle, { backgroundColor: '#e0e7ff' }]}>
             <Ionicons name="document-text-outline" size={22} color="#6366f1" />
@@ -1139,12 +1177,12 @@ function InvoiceItem({
               {item.artistName ? ` · ${item.artistName}` : ''}
             </Text>
           </View>
-          <View style={styles.amountBox}>
-            <Text style={styles.amountText}>{money(item.amount)}</Text>
-            <Text style={styles.amountCurrency}>{item.currency || 'MAD'}</Text>
+          <View style={styles.priceTag}>
+            <Text style={styles.priceTagAmount}>{money(item.amount)}</Text>
+            <Text style={styles.priceTagCurrency}>{item.currency || 'MAD'}</Text>
           </View>
         </View>
-      </Pressable>
+      </TouchableOpacity>
 
       {expanded ? (
         <View style={styles.detailsBlock}>
@@ -1192,6 +1230,64 @@ function InvoiceItem({
   );
 }
 
+// ── Skeleton loading card ────────────────────────────────────────────────────
+function SkeletonCard() {
+  return (
+    <View style={[styles.card, { borderLeftColor: '#e5e7eb', padding: 16 }]}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#f0f0f0' }} />
+        <View style={{ flex: 1, gap: 6 }}>
+          <View style={{ width: '60%', height: 12, borderRadius: 4, backgroundColor: '#f0f0f0' }} />
+          <View style={{ width: '40%', height: 10, borderRadius: 4, backgroundColor: '#f5f5f5' }} />
+          <View style={{ width: '30%', height: 10, borderRadius: 4, backgroundColor: '#f5f5f5' }} />
+        </View>
+        <View style={{ width: 60, height: 30, borderRadius: 8, backgroundColor: '#f0f0f0' }} />
+      </View>
+    </View>
+  );
+}
+
+// ── Notification card ─────────────────────────────────────────────────────────
+const NOTIF_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
+  pending: 'time-outline',
+  accepted: 'checkmark-circle-outline',
+  confirmed: 'checkmark-done-outline',
+  declined: 'close-circle-outline',
+  rejected: 'close-circle-outline',
+  completed: 'trophy-outline',
+  cancelled: 'ban-outline',
+};
+
+function NotificationCard({
+  title, message, icon, color, timeAgoStr, isRead, onPress,
+}: {
+  title: string; message: string; icon: string; color: string; timeAgoStr: string; isRead: boolean; onPress?: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      activeOpacity={0.7}
+      onPress={onPress}
+      disabled={!onPress}
+    >
+      <View style={[styles.card, { borderLeftColor: isRead ? '#e5e7eb' : color, opacity: isRead ? 0.65 : 1 }]}>
+        <View style={styles.cardHeader}>
+          <View style={[styles.iconCircle, { backgroundColor: isRead ? '#f3f4f6' : `${color}1A` }]}>
+            <Ionicons name={icon as any} size={20} color={isRead ? '#9ca3af' : color} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.cardTitle, isRead && { color: '#9ca3af' }]}>{title}</Text>
+            <Text style={[styles.cardSub, { marginBottom: 2 }]} numberOfLines={2}>{message}</Text>
+            <Text style={styles.cardDate}>{timeAgoStr}</Text>
+          </View>
+          {!isRead && (
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color, marginTop: 4 }} />
+          )}
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Main screen
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1202,7 +1298,13 @@ export default function InvoicesScreen() {
   const db = getFirestore();
   const uid = user?.uid;
 
-  const [activeTab, setActiveTab] = useState<TabType>('orders');
+  const [activeTab, setActiveTab] = useState<TabType>('notifications');
+  const [orderFilter, setOrderFilter] = useState<string>('all');
+  const hasSeenRef = useRef(false);
+  const markSeen = useCallback(() => { hasSeenRef.current = true; }, []);
+
+  // Clear badge on mount
+  useEffect(() => { markSeen(); }, [markSeen]);
 
   const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
@@ -1241,7 +1343,11 @@ export default function InvoicesScreen() {
 
   useEffect(() => {
     if (authLoading) return;
-    if (!uid?.trim()) router.replace('/auth');
+    if (!uid?.trim()) {
+      console.warn('AUTH REDIRECT', 'FILE: app/(client)/(hidden)/invoices.tsx', 'USER_UID:', uid);
+      console.trace('AUTH REDIRECT TRACE');
+      router.replace('/auth');
+    }
   }, [authLoading, uid, router]);
 
   const serviceOrders = useMemo(
@@ -1299,6 +1405,10 @@ export default function InvoicesScreen() {
             status: (d.status || d.orderStatus || 'pending') as OrderStatus,
             orderType,
             amount: Number(d.amount ?? d.totalPrice ?? d.clientPrice ?? 0),
+            price: d.price ? Number(d.price) : undefined,
+            counterOfferPrice: d.counterOfferPrice ? Number(d.counterOfferPrice) : undefined,
+            clientPrice: d.clientPrice ? Number(d.clientPrice) : undefined,
+            budget: d.budget ? Number(d.budget) : undefined,
             currency: d.currency || 'MAD',
             clientId: d.clientId,
             artistId: d.artistId,
@@ -1553,30 +1663,98 @@ export default function InvoicesScreen() {
     );
   }, [db]);
 
-  // ── Stats ─────────────────────────────────────────────────────────────────
+  // ── Notifications ──────────────────────────────────────────────────────────
+  const notifications = useMemo(() => {
+    const items: Array<{
+      id: string; orderId?: string; title: string; message: string; icon: string; color: string; createdAt: string; isRead: boolean;
+    }> = [];
+
+    for (const order of allOrders) {
+      const color = STATUS_COLOR[order.status] ?? STATUS_COLOR.pending;
+      const label = STATUS_LABEL[order.status] ?? order.status;
+      const icon = STATUS_ICON[order.status] ?? 'information-circle-outline';
+      items.push({
+        id: `order-${order.id}`,
+        orderId: order.id,
+        title: order.title || 'Order',
+        message: `${label} · ${money(order.price ?? order.counterOfferPrice ?? order.clientPrice ?? order.budget ?? order.amount)} ${order.currency || 'MAD'}${order.artistName ? ` · ${order.artistName}` : ''}`,
+        icon,
+        color,
+        createdAt: order.createdAt,
+        isRead: order.status === 'completed' || order.status === 'cancelled' || order.status === 'rejected' || order.status === 'declined',
+      });
+
+      // Add trace steps for service orders
+      const traceSteps = customOrderTraces[order.id];
+      if (traceSteps?.length) {
+        for (const step of traceSteps) {
+          items.push({
+            id: step.id,
+            orderId: order.id,
+            title: order.title || 'Service',
+            message: step.body || step.displayLabel || step.title,
+            icon: NOTIF_ICONS[step.status] || 'information-circle-outline',
+            color: STATUS_COLOR[step.status as OrderStatus] ?? '#6366f1',
+            createdAt: step.createdAt,
+            isRead: step.isRead,
+          });
+        }
+      }
+    }
+
+    items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return items;
+  }, [allOrders, customOrderTraces]);
+
+  const filteredOrders = useMemo(
+    () => orderFilter === 'all' ? allOrders : allOrders.filter(o => o.status === orderFilter),
+    [allOrders, orderFilter],
+  );
+
   const stats = useMemo(() => {
-    const allItems = allOrders.map(o => ({ amount: o.amount, status: o.status }));
-    const completedOrConfirmed = allItems.filter(i =>
-      i.status === 'completed' || i.status === 'confirmed' || i.status === 'accepted',
-    );
-    return {
-      totalSpent: completedOrConfirmed.reduce((s, i) => s + (i.amount || 0), 0),
-      pendingCount: allItems.filter(i => i.status === 'pending').length,
-      completedCount: completedOrConfirmed.length,
-    };
+    const total = allOrders.length;
+    let spent = 0;
+    let pending = 0;
+    for (const o of allOrders) {
+      const p = o.price ?? o.counterOfferPrice ?? o.clientPrice ?? o.budget ?? o.amount ?? 0;
+      if (o.status === 'confirmed' || o.status === 'accepted' || o.status === 'completed') {
+        spent += Number(p);
+      }
+      if (o.status === 'pending' || o.status === 'counter_offered') {
+        pending++;
+      }
+    }
+    return { total, spent, pending };
   }, [allOrders]);
+
+  const unreadBadge = hasSeenRef.current ? 0 : notifications.filter(n => !n.isRead).length;
 
   // ── FIX 3: Navigate to service page ───────────────────────────────────────
   const handlePressService = useCallback((item: ServiceOrderWithMeta) => {
     const serviceId = (item as any).serviceId || item.id;
     const artistId = item.artistId;
-    // Adjust the route to match your actual routing structure
     if (serviceId && artistId) {
       router.push(`/service/${serviceId}?artistId=${artistId}`);
     } else if (serviceId) {
       router.push(`/service/${serviceId}`);
     }
   }, [router]);
+
+  const handleAcceptCounterOffer = useCallback(async (orderId: string) => {
+    try {
+      await confirmOrder(orderId);
+    } catch (err) {
+      Alert.alert('Error', 'Failed to accept counter offer.');
+    }
+  }, []);
+
+  const handleDeclineCounterOffer = useCallback(async (orderId: string) => {
+    try {
+      await rejectOrder(orderId);
+    } catch (err) {
+      Alert.alert('Error', 'Failed to decline counter offer.');
+    }
+  }, []);
 
   // ── Render ────────────────────────────────────────────────────────────────
   if (authLoading || !uid) {
@@ -1597,27 +1775,23 @@ export default function InvoicesScreen() {
   );
 
   const tabs: Array<{ key: TabType; icon: keyof typeof Ionicons.glyphMap; label: string; count: number }> = [
+    { key: 'notifications', icon: 'notifications-outline', label: 'Alerts', count: unreadBadge },
     { key: 'orders', icon: 'cart-outline', label: 'Orders', count: allOrders.length },
     { key: 'custom', icon: 'construct-outline', label: 'Custom', count: serviceOrders.length },
-    { key: 'invoices', icon: 'document-text-outline', label: 'Invoices', count: invoices.length },
+    // { key: 'invoices', icon: 'document-text-outline', label: 'Invoices', count: invoices.length },
   ];
 
   return (
     <View style={styles.container}>
-      <SummaryHeader
-        totalSpent={stats.totalSpent}
-        pendingCount={stats.pendingCount}
-        completedCount={stats.completedCount}
-      />
-
       <View style={styles.tabRow}>
-        {tabs.map(({ key, icon, label, count }) => {
+        <View style={styles.tabScroll}>
+          {tabs.map(({ key, icon, label, count }) => {
           const focused = activeTab === key;
           return (
             <TouchableOpacity
               key={key}
               style={[styles.tabButton, focused && styles.tabButtonActive]}
-              onPress={() => setActiveTab(key)}
+              onPress={() => { markSeen(); setActiveTab(key); }}
               activeOpacity={0.8}
             >
               <Ionicons name={icon} size={15} color={focused ? '#fff' : '#6366f1'} />
@@ -1634,47 +1808,120 @@ export default function InvoicesScreen() {
             </TouchableOpacity>
           );
         })}
+        </View>
       </View>
+
+      {/* Stats summary */}
+      <View style={styles.statsRow}>
+        <View style={styles.statBox}>
+          <Text style={styles.statValue}>{stats.total}</Text>
+          <Text style={styles.statLabel}>Total Orders</Text>
+        </View>
+        <View style={[styles.statBox, { backgroundColor: '#f0fdf4', borderColor: '#bbf7d0' }]}>
+          <Text style={[styles.statValue, { color: '#16a34a' }]}>{money(stats.spent)}</Text>
+          <Text style={styles.statLabel}>Spent</Text>
+        </View>
+        <View style={[styles.statBox, { backgroundColor: '#fffbeb', borderColor: '#fde68a' }]}>
+          <Text style={[styles.statValue, { color: '#ca8a04' }]}>{stats.pending}</Text>
+          <Text style={styles.statLabel}>Pending</Text>
+        </View>
+      </View>
+
+      {/* TAB: Notifications */}
+      {activeTab === 'notifications' && (
+        <FlatList
+          style={{ flex: 1 }}
+          data={notifications}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <NotificationCard
+              title={item.title}
+              message={item.message}
+              icon={item.icon}
+              color={item.color}
+              timeAgoStr={timeAgo(item.createdAt)}
+              isRead={item.isRead}
+              onPress={item.orderId ? () => router.push(`/order/${item.orderId}`) : undefined}
+            />
+          )}
+          contentContainerStyle={styles.listContainer}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6366f1" />}
+          ListFooterComponent={<View style={{ height: 90 }} />}
+          ListEmptyComponent={emptyState(
+            '🔔',
+            'No Notifications',
+            'Order updates and status changes will appear here.',
+          )}
+        />
+      )}
 
       {/* TAB: Orders */}
       {activeTab === 'orders' && (
         ordersLoading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#6366f1" />
-            <Text style={styles.loadingText}>Loading orders…</Text>
+          <View style={{ flex: 1, paddingTop: 4 }}>
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
           </View>
         ) : (
-          <FlatList
-            data={allOrders}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <OrderCard
-                item={item}
-                onDelete={() => confirmDeleteOrder(item.id)}
-              />
-            )}
-            contentContainerStyle={styles.listContainer}
-            showsVerticalScrollIndicator={false}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6366f1" />}
-            ListFooterComponent={<View style={{ height: 90 }} />}
-            ListEmptyComponent={emptyState(
-              '📭',
-              'No Orders Yet',
-              'Your ticket and service orders will appear here once placed.',
-            )}
-          />
+          <View style={{ flex: 1 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ alignItems: 'center', height: 36 }} style={{ marginBottom: 12, maxHeight: 36 }}>
+              {['all', ...Object.keys(STATUS_LABEL)].map(s => {
+                const active = orderFilter === s;
+                return (
+                  <TouchableOpacity
+                    key={s}
+                    style={[
+                      styles.filterChip,
+                      active && styles.filterChipActive,
+                    ]}
+                    onPress={() => setOrderFilter(s)}
+                  >
+                    <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+                      {s === 'all' ? 'All' : STATUS_LABEL[s as OrderStatus]}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            <FlatList
+              style={{ flex: 1 }}
+              data={filteredOrders}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <OrderCard
+                  item={item}
+                  onDelete={() => confirmDeleteOrder(item.id)}
+                  onAccept={() => handleAcceptCounterOffer(item.id)}
+                  onDecline={() => handleDeclineCounterOffer(item.id)}
+                  onPress={() => router.push(`/order/${item.id}`)}
+                />
+              )}
+              contentContainerStyle={styles.listContainer}
+              showsVerticalScrollIndicator={false}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6366f1" />}
+              ListFooterComponent={<View style={{ height: 90 }} />}
+              ListEmptyComponent={emptyState(
+                '📭',
+                'No Orders Yet',
+                'Browse artists and book a service — your orders will appear here.',
+              )}
+            />
+          </View>
         )
       )}
 
       {/* TAB: Custom Orders — FIX 2: scrollable to end */}
       {activeTab === 'custom' && (
         ordersLoading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#6366f1" />
-            <Text style={styles.loadingText}>Loading custom orders…</Text>
+          <View style={{ flex: 1, paddingTop: 4 }}>
+            <SkeletonCard />
+            <SkeletonCard />
           </View>
         ) : (
           <FlatList
+            style={{ flex: 1 }}
             data={serviceOrders}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
@@ -1687,6 +1934,7 @@ export default function InvoicesScreen() {
                 expanded={expandedCards.has(item.id)}
                 onToggleExpand={() => toggleCard(item.id)}
                 onPressService={() => handlePressService(item)}
+                onPress={() => router.push(`/order/${item.id}`)}
               />
             )}
             // FIX 2: ensure the list scrolls far enough to clear tab bars / safe areas
@@ -1704,15 +1952,16 @@ export default function InvoicesScreen() {
         )
       )}
 
-      {/* TAB: Invoices */}
+      {/* TAB: Invoices — commented out
       {activeTab === 'invoices' && (
         invLoading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#6366f1" />
-            <Text style={styles.loadingText}>Loading invoices…</Text>
+          <View style={{ flex: 1, paddingTop: 4 }}>
+            <SkeletonCard />
+            <SkeletonCard />
           </View>
         ) : (
           <FlatList
+            style={{ flex: 1 }}
             data={invoices}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
@@ -1720,6 +1969,7 @@ export default function InvoicesScreen() {
                 item={item}
                 expanded={expandedCards.has(item.id)}
                 onToggleExpand={() => toggleCard(item.id)}
+                onPress={() => router.push(`/order/${item.orderId}`)}
               />
             )}
             contentContainerStyle={styles.listContainer}
@@ -1729,11 +1979,12 @@ export default function InvoicesScreen() {
             ListEmptyComponent={emptyState(
               '🧾',
               'No Invoices Yet',
-              'Invoices are generated automatically when an order is confirmed or completed.',
+              'Invoices are generated once an order is confirmed. Check back after your next booking.',
             )}
           />
         )
       )}
+      */}
     </View>
   );
 }

@@ -59,7 +59,9 @@ export const createCustomServiceOrder = async (orderData: CustomServiceOrderInpu
     serviceName: orderData.serviceName,
     description: orderData.message,
     type: 'service',
+    price: orderData.realPrice,
     totalPrice: orderData.clientPrice,
+    clientPrice: orderData.clientPrice,
     currency: 'MAD',
     paymentStatus: 'unpaid',
     clientInfo: orderData.clientInfo,
@@ -82,7 +84,8 @@ export const createCustomServiceOrder = async (orderData: CustomServiceOrderInpu
 export const getClientCustomOrders = async () => {
   const auth = getAuth();
   if (!auth.currentUser) {
-    throw new Error('User is not authenticated');
+    // Not authenticated — return empty list so callers in UI can handle gracefully
+    return [] as any;
   }
 
   const clientId = auth.currentUser.uid;
@@ -99,7 +102,8 @@ export const getClientCustomOrders = async () => {
 export const getCustomOrderById = async (orderId: string) => {
   const auth = getAuth();
   if (!auth.currentUser) {
-    throw new Error('User is not authenticated');
+    // Not authenticated — return null so UI can show a friendly message instead of crashing
+    return null;
   }
 
   const orderRef = doc(db, 'orders', orderId);

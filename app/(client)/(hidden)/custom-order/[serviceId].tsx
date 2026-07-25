@@ -5,6 +5,8 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -71,11 +73,19 @@ export default function CustomOrderScreen() {
   
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  console.log('[CustomOrder] render', {
+    serviceId,
+    currentStep,
+    loading,
+    isSubmitting,
+  });
+
   useEffect(() => {
     fetchServiceData();
   }, [serviceId]);
 
   const fetchServiceData = async () => {
+    console.log('[CustomOrder] fetchServiceData start', { serviceId });
     try {
       const services = await fetchAllServices();
       const foundService = services.find((s: any) => s.id === serviceId);
@@ -156,6 +166,7 @@ export default function CustomOrderScreen() {
   };
 
   const handleNext = () => {
+    console.log('[CustomOrder] handleNext', { currentStep });
     if (currentStep === 1 && validateStep1()) {
       nextStep();
     } else if (currentStep === 2 && validateStep2()) {
@@ -164,6 +175,7 @@ export default function CustomOrderScreen() {
   };
 
   const submitCustomOrder = async () => {
+    console.log('[CustomOrder] submitCustomOrder start');
     if (!validateStep3()) return;
     
     setIsSubmitting(true);
@@ -269,12 +281,17 @@ CLIENT INFORMATION:
   }
 
   return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#1E293B" />
-        </TouchableOpacity>
+    <KeyboardAvoidingView
+      style={styles.wrapper}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 120 : 0}
+    >
+      <View style={styles.container}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#1E293B" />
+          </TouchableOpacity>
         <Text style={styles.headerTitle}>Custom Order</Text>
         <View style={styles.placeholder} />
       </View>
@@ -317,7 +334,7 @@ CLIENT INFORMATION:
         { transform: [{ translateX: slideAnim }] }
       ]}>
         {/* Step 1: Service Customization */}
-        <ScrollView style={styles.stepContainer} showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.stepContainer} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="always" keyboardDismissMode="on-drag" contentContainerStyle={styles.stepContent}>
           <Text style={styles.stepTitle}>Customize Your Service</Text>
           
           <View style={styles.formGroup}>
@@ -361,6 +378,10 @@ CLIENT INFORMATION:
               onChangeText={(text) => setCustomization(prev => ({ ...prev, location: text }))}
               placeholder="Venue address or location details"
               placeholderTextColor="#9CA3AF"
+              textContentType="none"
+              autoComplete="off"
+              autoCorrect={false}
+              keyboardType="default"
             />
           </View>
 
@@ -391,7 +412,7 @@ CLIENT INFORMATION:
         </ScrollView>
 
         {/* Step 2: Price Proposal */}
-        <ScrollView style={styles.stepContainer} showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.stepContainer} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.stepContent}>
           <Text style={styles.stepTitle}>Your Price Proposal</Text>
           
           <View style={styles.formGroup}>
@@ -435,7 +456,7 @@ CLIENT INFORMATION:
         </ScrollView>
 
         {/* Step 3: Personal Information */}
-        <ScrollView style={styles.stepContainer} showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.stepContainer} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.stepContent}>
           <Text style={styles.stepTitle}>Your Information</Text>
           
           <View style={styles.formGroup}>
@@ -551,6 +572,7 @@ CLIENT INFORMATION:
         </TouchableOpacity>
       </View>
     </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -661,6 +683,10 @@ const styles = StyleSheet.create({
     width: '33.33%',
     paddingHorizontal: 20,
   },
+  stepContent: {
+    flexGrow: 1,
+    paddingBottom: 220,
+  },
   stepTitle: {
     fontSize: 20,
     fontWeight: '600',
@@ -753,10 +779,123 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8F9FA',
     padding: 24,
   },
+  wrapper: {
+    flex: 1,
+  },
+  stepContent: {
+    paddingBottom: 40,
+  },
   loadingText: {
     fontSize: 16,
     color: '#6C63FF',
     marginTop: 16,
     fontWeight: '500',
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  locationInput: {
+    flex: 1,
+  },
+  locationButton: {
+    backgroundColor: '#6C63FF',
+    borderRadius: 10,
+    padding: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+  },
+  locationButtonPressed: {
+    opacity: 0.85,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
+    paddingBottom: 16,
+    backgroundColor: '#F8F9FA',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  modalBody: {
+    flex: 1,
+    padding: 20,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+    marginBottom: 20,
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: 10,
+    fontSize: 16,
+    color: '#1F2937',
+  },
+  mapPreview: {
+    flex: 1,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#F8FAFC',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  mapPreviewText: {
+    fontSize: 16,
+    color: '#4B5563',
+    textAlign: 'center',
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
+    gap: 12,
+  },
+  cancelButton: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F4F6',
+  },
+  cancelButtonText: {
+    color: '#374151',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  confirmButton: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#6C63FF',
+  },
+  confirmButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

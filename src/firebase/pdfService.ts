@@ -98,7 +98,7 @@ function buildInvoiceHtml(order: Order, invoice: Invoice): string {
               <th>Description</th>
               <th>Quantity</th>
               <th>Unit</th>
-              <th>Total</th>
+              <th>Items Total</th>
             </tr>
           </thead>
           <tbody>
@@ -118,9 +118,11 @@ function buildInvoiceHtml(order: Order, invoice: Invoice): string {
           </div>
           <div class="card" style="flex: 1 1 240px;">
             <h4>Amount summary</h4>
-            <p class="total-row"><span>Subtotal</span><span>${invoice.subtotal.toFixed(2)} ${invoice.currency}</span></p>
-            <p class="total-row"><span>Taxes</span><span>${invoice.taxes.toFixed(2)} ${invoice.currency}</span></p>
-            <p class="total-row" style="margin-top: 12px;"><span class="total-label">Total</span><span>${invoice.total.toFixed(2)} ${invoice.currency}</span></p>
+            ${(order as any).price != null && (order as any).price !== invoice.total ? `<p class="total-row"><span>Service Price</span><span>${Number((order as any).price).toFixed(2)} ${invoice.currency}</span></p>` : ''}
+            ${(order as any).clientPrice != null && (order as any).clientPrice !== invoice.total ? `<p class="total-row"><span>Your Budget</span><span>${Number((order as any).clientPrice).toFixed(2)} ${invoice.currency}</span></p>` : ''}
+            <p class="total-row" style="font-weight: 800; border-top: 2px solid #4f46e5; padding-top: 8px; margin-top: 8px;">
+              <span>Total</span><span>${invoice.total.toFixed(2)} ${invoice.currency}</span>
+            </p>
           </div>
         </div>
       </div>

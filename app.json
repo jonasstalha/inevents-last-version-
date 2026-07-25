@@ -7,9 +7,9 @@
       "policy": "sdkVersion"
     },
     "orientation": "portrait",
-    "icon": "./assets/indexpage/icon.png",
+    "icon": "./assets/indexpage/icon-square.png",
     "splash": {
-      "image": "./assets/indexpage/icon.png",
+      "image": "./assets/indexpage/icon-square.png",
       "backgroundColor": "#5B5BD6",
       "resizeMode": "contain"
     },
@@ -17,7 +17,12 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ios.inevent",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This app requires location access to pick your event venue and service location.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Location access is used to select delivery and service locations for your order."
+      }
     },
     "web": {
       "bundler": "metro",

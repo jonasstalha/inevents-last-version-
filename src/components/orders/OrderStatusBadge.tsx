@@ -2,15 +2,18 @@ import React from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
 import { Theme } from '@/src/constants/theme';
 
+import { OrderStatus } from '@/src/models/types';
+
 interface OrderStatusBadgeProps {
-  status: 'pending' | 'confirmed' | 'rejected' | 'completed';
+  status: OrderStatus;
 }
 
-const STATUS_STYLES: Record<OrderStatusBadgeProps['status'], { background: string; color: string }> = {
+const STATUS_STYLES: Record<OrderStatus, { background: string; color: string }> = {
   pending: { background: '#fef3c7', color: '#92400e' },
   confirmed: { background: '#d1fae5', color: '#0f766e' },
   rejected: { background: '#fee2e2', color: '#991b1b' },
   completed: { background: '#dbeafe', color: '#1e3a8a' },
+  counter_offered: { background: '#e0e7ff', color: '#3730a3' },
 };
 
 export const OrderStatusBadge: React.FC<OrderStatusBadgeProps> = ({ status }) => {

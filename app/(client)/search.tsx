@@ -38,6 +38,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ActivityIndicator,
   Alert,
@@ -755,6 +756,7 @@ export default function SearchScreen() {
   const { saveArtist, unsaveArtist, isArtistSaved } = useApp();
   const { user } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
   const { setServices } = useMarketplaceStore();
 
@@ -1447,7 +1449,10 @@ export default function SearchScreen() {
       {/* ── Filter Modal ──────────────────────────────────────────────────── */}
       {showFilterModal && (
         <View style={styles.modalBackdrop}>
-          <View style={styles.filterModalContent}>
+          <View style={[
+            styles.filterModalContent,
+            { paddingBottom: Math.max(24, 16 + (insets?.bottom || 0)) },
+          ]}>
             <View style={styles.filterModalHandle} />
             <View style={styles.filterModalHeader}>
               <Text style={styles.filterModalTitle}>Filtres</Text>
@@ -1544,7 +1549,10 @@ export default function SearchScreen() {
             </ScrollView>
 
             <TouchableOpacity
-              style={styles.applyFilterButton}
+              style={[
+                styles.applyFilterButton,
+                { marginBottom: 8 + (insets?.bottom || 0) },
+              ]}
               onPress={applyFilters}
             >
               <Text style={styles.applyFilterText}>Appliquer les filtres</Text>

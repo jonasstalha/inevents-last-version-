@@ -1,4 +1,4 @@
-import { Award, Heart, MapPin, Star } from "lucide-react-native";
+import { Award, Heart, MapPin } from "lucide-react-native";
 import React from "react";
 import { Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Artist } from "../../models/types";
@@ -40,15 +40,14 @@ export const ArtistCard: React.FC<ArtistCardProps> = ({
             <Text style={styles.name} numberOfLines={1}>
               {artist.name}
             </Text>
-            <View style={styles.ratingContainer}>
-              <Star size={14} color="#fbbf24" fill="#fbbf24" />
-              <Text style={styles.rating}>{artist.rating.toFixed(1)}</Text>
-              <Text style={styles.ratingCount}>(4.2k)</Text>
-            </View>
           </View>
           <TouchableOpacity
             onPress={() => onSave(artist.id)}
-            style={[styles.saveButton, isSaved && styles.savedButton]}
+            style={[
+              styles.saveButton,
+              isSaved && styles.savedButton,
+              artist.featured && styles.saveButtonFeaturedShift,
+            ]}
             activeOpacity={0.7}
           >
             <Heart
@@ -85,9 +84,11 @@ export const ArtistCard: React.FC<ArtistCardProps> = ({
               {artist.location}
             </Text>
           </View>
-          <View style={styles.stats}>
-            <Text style={styles.statsText}>12 orders</Text>
-          </View>
+          {typeof artist.activeCustomers === 'number' && (
+            <View style={styles.stats}>
+              <Text style={styles.statsText}>{artist.activeCustomers} clients</Text>
+            </View>
+          )}
         </View>
 
         {artist.featured && (
@@ -146,23 +147,6 @@ const styles = StyleSheet.create({
     color: "#1f2937",
     marginBottom: 4,
   },
-  ratingContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  rating: {
-    fontFamily: "System",
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#374151",
-    marginLeft: 4,
-  },
-  ratingCount: {
-    fontFamily: "System",
-    fontSize: 12,
-    color: "#6b7280",
-    marginLeft: 4,
-  },
   saveButton: {
     width: 36,
     height: 36,
@@ -172,6 +156,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "#fecaca",
+  },
+  saveButtonFeaturedShift: {
+    marginTop: 18,
   },
   savedButton: {
     backgroundColor: "#ef4444",

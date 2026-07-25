@@ -1,3 +1,4 @@
+import { useAuth } from '@/src/context/AuthContext';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import {
@@ -14,20 +15,20 @@ const { width, height } = Dimensions.get('window');
 
 export default function WelcomeScreen() {
   const router = useRouter();
+  const { user } = useAuth();
 
   // Animation refs
   const logoAnim = useRef(new Animated.Value(0)).current;
   const sloganAnim = useRef(new Animated.Value(0)).current;
 
-  // Open the local client folder in development: tries browser window.open, then Linking, then fallback to in-app route
+  // Open the appropriate area based on user role
   const openClientFolder = () => {
-    // Directly open the client area inside the app. Use a known client route (search) which exists.
-    try {
+    if (user?.role === 'admin') {
+      router.replace('/(admin)');
+    } else if (user?.role === 'artist') {
+      router.replace('/(artist)');
+    } else {
       router.replace('/(client)/search');
-      return;
-    } catch (e) {
-      // As a final fallback, try the root client route
-      router.replace('/(client)');
     }
   };
 

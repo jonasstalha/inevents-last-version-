@@ -1,4 +1,4 @@
-import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, orderBy, query, setDoc, updateDoc, where, Timestamp, serverTimestamp } from 'firebase/firestore';
 import { Order, OrderStatus, OrderType } from '../models/types';
 import { db, firebaseConfigObject } from './firebaseConfig';
 
@@ -31,6 +31,26 @@ async function sendPhoneNotificationToUser(
   }
 }
 
+async function createInAppNotification(
+  userId: string,
+  title: string,
+  body: string,
+  actorId?: string,
+): Promise<void> {
+  try {
+    const payload: Record<string, any> = {
+      title,
+      body,
+      isRead: false,
+      createdAt: serverTimestamp(),
+    };
+    if (actorId) payload.artistId = actorId;
+    await addDoc(collection(db, 'users', userId, 'notifications'), payload);
+  } catch (error) {
+    console.warn('Failed creating in-app notification:', error);
+  }
+}
+
 export interface CreateOrderInput {
   clientId: string;
   clientName?: string;
@@ -50,7 +70,9 @@ export interface CreateOrderInput {
   notes?: string;
   attachments?: string[];
   type: OrderType;
+  price?: number;
   totalPrice: number;
+  clientPrice?: number;
   currency?: string;
   paymentStatus?: 'unpaid' | 'paid';
   selectedOptions?: string[];
@@ -83,6 +105,10 @@ export interface CreateOrderInput {
     location?: string;
     guestCount?: string;
     specificRequests?: string;
+    coordinates?: {
+      latitude: number;
+      longitude: number;
+    };
   };
   priceProposal?: {
     proposedPrice?: string;
@@ -180,7 +206,7 @@ function mapOrderDoc(docSnapshot: any): Order {
 
 export async function createOrder(input: CreateOrderInput): Promise<string> {
   const orderRef = doc(collection(db, 'orders'));
-  const now = serverTimestamp();
+  const now = Timestamp.now();
   const orderPayload = stripUndefinedDeep({
     id: orderRef.id,
     ...input,
@@ -190,6 +216,21 @@ export async function createOrder(input: CreateOrderInput): Promise<string> {
     updatedAt: now,
   });
   await setDoc(orderRef, orderPayload as any);
+
+  // Notify the artist about the new order
+  const clientName = input.clientName || input.personalInfo?.fullName || 'A client';
+  await createInAppNotification(
+    input.artistId,
+    'New Order Received',
+    `${clientName} placed a new order: ${input.serviceName || input.gigTitle || input.ticketName || 'Order'}`,
+    input.clientId,
+  );
+  await sendPhoneNotificationToUser(
+    input.artistId,
+    'New Order',
+    `You have a new order from ${clientName}!`,
+  );
+
   return orderRef.id;
 }
 
@@ -230,7 +271,32 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
 }
 
 export async function confirmOrder(orderId: string): Promise<void> {
-  return updateOrderStatus(orderId, 'confirmed');
+  const orderRef = doc(db, 'orders', orderId);
+  const snap = await getDoc(orderRef);
+  const data = snap.data() as any;
+  const acceptedPrice = data?.counterOfferPrice ?? data?.price ?? data?.clientPrice ?? data?.budget ?? data?.totalPrice;
+  await updateDoc(orderRef, {
+    status: 'confirmed',
+    price: acceptedPrice,
+    updatedAt: serverTimestamp(),
+  });
+
+  // Notify the artist that the customer accepted
+  const artistId = data?.artistId;
+  const clientId = data?.clientId;
+  if (artistId) {
+    await createInAppNotification(
+      artistId,
+      'Order Confirmed',
+      `${data?.clientName || 'A client'} accepted your offer${data?.serviceName || data?.title ? ` for ${data.serviceName || data.title}` : ''}!`,
+      clientId,
+    );
+    await sendPhoneNotificationToUser(
+      artistId,
+      'Order Confirmed',
+      `A client accepted your offer!`,
+    );
+  }
 }
 
 export async function rejectOrder(orderId: string): Promise<void> {
@@ -268,6 +334,38 @@ export async function warnClientCancellation(clientId: string, orderId?: string)
 
 export async function completeOrder(orderId: string): Promise<void> {
   return updateOrderStatus(orderId, 'completed');
+}
+
+export async function sendCounterOffer(
+  orderId: string,
+  counterPrice: number,
+): Promise<void> {
+  const orderRef = doc(db, 'orders', orderId);
+  await updateDoc(orderRef, {
+    status: 'counter_offered',
+    counterOfferPrice: counterPrice,
+    price: counterPrice,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function acceptCounterOffer(orderId: string): Promise<void> {
+  const orderRef = doc(db, 'orders', orderId);
+  const snap = await getDoc(orderRef);
+  const counterPrice = snap.data()?.counterOfferPrice;
+  await updateDoc(orderRef, {
+    status: 'confirmed',
+    ...(counterPrice != null ? { price: counterPrice } : {}),
+    updatedAt: Timestamp.now(),
+  });
+}
+
+export async function rejectCounterOffer(orderId: string): Promise<void> {
+  const orderRef = doc(db, 'orders', orderId);
+  await updateDoc(orderRef, {
+    status: 'rejected',
+    updatedAt: Timestamp.now(),
+  });
 }
 
 export function listenOrdersByClient(

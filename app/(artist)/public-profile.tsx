@@ -3,9 +3,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getAuth } from 'firebase/auth';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fetchServicesByArtistId } from '../../src/firebase/artistServices';
+import { fetchServicesByArtistId, deleteServiceWithImages } from '../../src/firebase/artistServices';
 import { fetchArtistById } from '../../src/firebase/artistsService';
 
 type ServiceCardProps = {
@@ -14,9 +14,10 @@ type ServiceCardProps = {
   onEdit: (serviceId: string) => void;
   onStats: (serviceId: string) => void;
   onViewDetails: (serviceId: string) => void;
+  onDelete: (serviceId: string) => void;
 };
 
-const ServiceCard = React.memo(({ service, isOwnProfile, onEdit, onStats, onViewDetails }: ServiceCardProps) => {
+const ServiceCard = React.memo(({ service, isOwnProfile, onEdit, onStats, onViewDetails, onDelete }: ServiceCardProps) => {
   const imageUri = service.cover || (Array.isArray(service.images) && service.images.length > 0 ? service.images[0] : null);
   const remainingImages = Array.isArray(service.images) ? Math.max(0, service.images.length - (service.cover ? 0 : 1)) : 0;
 
@@ -65,6 +66,9 @@ const ServiceCard = React.memo(({ service, isOwnProfile, onEdit, onStats, onView
           </TouchableOpacity>
           <TouchableOpacity style={styles.cardButtonSecondary} onPress={() => onStats(service.id)}>
             <Text style={styles.cardButtonSecondaryText}>Stats</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.cardButtonSecondary, { marginLeft: 8, borderColor: '#ef4444' }]} onPress={() => onDelete(service.id)}>
+            <Text style={[styles.cardButtonSecondaryText, { color: '#ef4444' }]}>Delete</Text>
           </TouchableOpacity>
         </View>
       ) : (
@@ -172,6 +176,44 @@ const PublicProfile = () => {
     router.push(`/(client)/(hidden)/gig/${serviceId}`);
   }, [router]);
 
+  const handleDeleteService = async (serviceId: string) => {
+    try {
+      const auth = getAuth();
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        Alert.alert('Error', 'You must be logged in to delete services.');
+        return;
+      }
+
+      Alert.alert(
+        'Delete service',
+        'Are you sure you want to permanently delete this service? This cannot be undone.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await deleteServiceWithImages(currentUser.uid, serviceId);
+                // Refresh services list
+                const gigs = await fetchServicesByArtistId(currentUser.uid);
+                setServices(gigs);
+                Alert.alert('Deleted', 'Service deleted successfully.');
+              } catch (err) {
+                console.error('Failed to delete service:', err);
+                Alert.alert('Error', 'Failed to delete service. Please try again.');
+              }
+            },
+          },
+        ],
+      );
+    } catch (err) {
+      console.error('Error in delete flow:', err);
+      Alert.alert('Error', 'Could not delete service.');
+    }
+  };
+
   const renderServiceItem = useCallback(({ item }: { item: any }) => (
     <ServiceCard
       service={item}
@@ -179,6 +221,7 @@ const PublicProfile = () => {
       onEdit={handleEditService}
       onStats={handleViewServiceStats}
       onViewDetails={handleViewDetails}
+      onDelete={handleDeleteService}
     />
   ), [handleEditService, handleViewDetails, handleViewServiceStats, isOwnProfile]);
 
@@ -247,7 +290,7 @@ const PublicProfile = () => {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.backButtonWrapper, { top: insets.top + 10 }]}> 
+      <View style={[styles.backButtonWrapper, { top: insets.top + 10, paddingBottom: insets.bottom + 24 }]}> 
         <Ionicons
           name="arrow-back"
           size={28}
@@ -263,7 +306,7 @@ const PublicProfile = () => {
         renderItem={renderServiceItem}
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={renderEmpty}
-        contentContainerStyle={[styles.listContent, services.length === 0 && styles.listEmptyContent, { paddingBottom: insets.bottom + 24 }]}
+        contentContainerStyle={[styles.listContent, services.length === 0 && styles.listEmptyContent, { paddingBottom: insets.bottom + 180 }]}
         showsVerticalScrollIndicator={false}
         initialNumToRender={4}
         maxToRenderPerBatch={8}

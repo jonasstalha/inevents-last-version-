@@ -3,11 +3,15 @@ import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getAuth } from 'firebase/auth';
-import React, { useEffect, useState } from 'react';
-import { Alert, Animated, Image, Modal, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { collection, doc, onSnapshot, orderBy, query, updateDoc } from 'firebase/firestore';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Alert, Animated, Image, Modal, Platform, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '../../context/AuthContext';
 import { fetchServicesByArtistId } from '../../firebase/artistServices';
 import { addServiceToFirebase, addTicketToFirebase, fetchArtistById } from '../../firebase/artistsService';
+import { db } from '../../firebase/firebaseConfig';
+import { fetchServiceByIdFromFirebase } from '../../firebase/fetchAllServices';
 import uploadServiceImage from '../../firebase/uploadServiceImage';
 import AnalyticsPage from './AnalyticsPage';
 import { useArtistStore } from './ArtistStore';
@@ -30,9 +34,9 @@ const ArtistMobileApp = () => {
       setActiveTab(params.tab as string);
     }
     
-    if (params.serviceId && params.editMode === 'true') {
-      // Load service data for editing
-      loadServiceForEditing(params.serviceId as string);
+    // If a serviceId is provided in params, attempt to load it for editing
+    if (params.serviceId) {
+      void loadServiceForEditing(String(params.serviceId));
     }
   }, [params]);
 
@@ -54,10 +58,14 @@ const ArtistMobileApp = () => {
     resetStore,
   } = useArtistStore();
 
+  const { logout: authLogout } = useAuth();
+
   const [activeTab, setActiveTab] = useState('home');
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<{ type: string; name: string } | null>(null);
-  const [notifications, setNotifications] = useState(3);
+  const [notificationList, setNotificationList] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [credits, setCredits] = useState(0);
   const [walletBalance, setWalletBalance] = useState(0.00);
   const [showAddFundsModal, setShowAddFundsModal] = useState(false);
@@ -115,14 +123,41 @@ const ArtistMobileApp = () => {
     // Initialize credits and wallet balance to 0
     // In production, this would be handled by a backend system
     if (!hasGivenStarterCredits) {
-      // Start with 0 credits and 0 MAD in wallet
       setCredits(0);
       setWalletBalance(0.00);
       setHasGivenStarterCredits(true);
     }
   }, [hasGivenStarterCredits]);
 
-  // Handle Add Funds button click
+  // Real-time notifications listener
+  const currentUserId = getAuth().currentUser?.uid;
+  useEffect(() => {
+    const uid = getAuth().currentUser?.uid;
+    if (!uid) return;
+    const notifQuery = query(
+      collection(db, 'users', uid, 'notifications'),
+      orderBy('createdAt', 'desc'),
+    );
+    const unsub = onSnapshot(notifQuery, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() as any }));
+      setNotificationList(list);
+      setUnreadCount(list.filter((n: any) => !n.isRead).length);
+    }, (err) => console.warn('[notifications] listen error:', err));
+    return unsub;
+  }, [currentUserId]);
+
+  const handleOpenNotifications = useCallback(() => {
+    setShowNotificationModal(true);
+    // Mark all unread as read
+    const uid = getAuth().currentUser?.uid;
+    if (!uid) return;
+    notificationList.forEach((n: any) => {
+      if (!n.isRead) {
+        updateDoc(doc(db, 'users', uid, 'notifications', n.id), { isRead: true }).catch(() => {});
+      }
+    });
+  }, [notificationList]);
+
   const handleAddFunds = () => {
     setShowAddFundsModal(true);
   };
@@ -150,30 +185,34 @@ const ArtistMobileApp = () => {
       const auth = getAuth();
       const currentUser = auth.currentUser;
       if (!currentUser) return;
+      // Try fetching the specific service doc across users
+      let serviceToEdit: any = null;
+      try {
+        serviceToEdit = await fetchServiceByIdFromFirebase(serviceId);
+      } catch (err) {
+        console.warn('Service not found via fetchServiceByIdFromFirebase, falling back to artist-owned list lookup', err);
+        const services = await fetchServicesByArtistId(currentUser.uid);
+        serviceToEdit = services.find(service => service.id === serviceId) || null;
+      }
 
-      // Fetch the service data
-      const services = await fetchServicesByArtistId(currentUser.uid);
-      const serviceToEdit = services.find(service => service.id === serviceId);
-      
       if (serviceToEdit) {
-        // Populate the form with existing service data
         setNewService({
           title: serviceToEdit.title || '',
           description: serviceToEdit.description || '',
-          basePrice: serviceToEdit.basePrice?.toString() || '',
-          minQuantity: '1',
-          maxQuantity: '10',
+          basePrice: (serviceToEdit.basePrice ?? serviceToEdit.price ?? '')?.toString() || '',
+          minQuantity: serviceToEdit.minQuantity?.toString() || '1',
+          maxQuantity: serviceToEdit.maxQuantity?.toString() || '10',
           category: serviceToEdit.category || '',
           images: serviceToEdit.images || [],
           addOns: serviceToEdit.extras || serviceToEdit.addOns || [{ name: '', price: '', type: 'checkbox' }],
-          providerName: artistProfile.name,
-          providerAvatar: artistProfile.image,
+          providerName: artistProfile.name || '',
+          providerAvatar: artistProfile.image || '',
           rating: serviceToEdit.rating || 0,
           reviewCount: serviceToEdit.reviewCount || 0,
-          isAvailable: true,
-          location: '',
-          defaultMessage: '',
-          tags: '',
+          isAvailable: serviceToEdit.isAvailable ?? true,
+          location: serviceToEdit.city || '',
+          defaultMessage: serviceToEdit.defaultMessage || '',
+          tags: Array.isArray(serviceToEdit.tags) ? serviceToEdit.tags.join(', ') : (serviceToEdit.tags || ''),
         });
 
         // Also populate individual states
@@ -181,10 +220,10 @@ const ArtistMobileApp = () => {
         setServiceLocation({ city: serviceToEdit.city || '' });
         // Load extras/addOns into local state
         setAddOns(serviceToEdit.extras || serviceToEdit.addOns || [{ name: '', price: '', type: 'checkbox' }]);
-        
-        // Set editing mode
+
+        // Set editing mode and switch to add/edit tab
         setEditingServiceId(serviceId);
-        setActiveTab('ticket'); // Switch to the add/edit tab
+        setActiveTab('ticket');
       }
     } catch (error) {
       console.error('Error loading service for editing:', error);
@@ -574,7 +613,10 @@ const ArtistMobileApp = () => {
 
   // Home Page Component
   const HomePage = () => (
-    <ScrollView style={[styles.container, { paddingTop: insets.top }]}> 
+    <ScrollView
+      style={[styles.container, { paddingTop: insets.top }]}
+      contentContainerStyle={{ paddingBottom: Platform.OS === 'ios' ? 180 : 160 }}
+    >
       {/* Profile Preview */}
       <View style={styles.profileCard}>
         <LinearGradient
@@ -586,6 +628,14 @@ const ArtistMobileApp = () => {
               <Text style={{ color: '#fff', fontSize: 18 }}>Loading profile...</Text>
             ) : (
               <>
+                <TouchableOpacity style={styles.notifBell} onPress={handleOpenNotifications}>
+                  <Ionicons name="notifications" size={22} color="#fff" />
+                  {unreadCount > 0 && (
+                    <View style={styles.notifBadge}>
+                      <Text style={styles.notifBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
                 <Image 
                   source={{ uri: artistProfile.image || 'https://ui-avatars.com/api/?name=Artist' }} 
                   style={styles.profileImage}
@@ -714,6 +764,40 @@ const ArtistMobileApp = () => {
           </View>
         </View>
       </Modal>
+
+      {/* Notifications Modal */}
+      <Modal visible={showNotificationModal} animationType="slide" transparent onRequestClose={() => setShowNotificationModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContainer, { maxHeight: '80%' }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' }}>
+              <Text style={{ fontSize: 18, fontWeight: '700', color: '#111' }}>Notifications</Text>
+              <TouchableOpacity onPress={() => setShowNotificationModal(false)}>
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={{ padding: 16 }}>
+              {notificationList.length === 0 ? (
+                <View style={{ padding: 40, alignItems: 'center' }}>
+                  <Ionicons name="notifications-off" size={48} color="#ddd" />
+                  <Text style={{ marginTop: 12, fontSize: 15, color: '#bbb' }}>No notifications yet</Text>
+                </View>
+              ) : notificationList.map((n: any) => (
+                <TouchableOpacity key={n.id} style={{ flexDirection: 'row', paddingVertical: 12, borderBottomWidth: 0.5, borderBottomColor: '#f0f0f0', opacity: n.isRead ? 0.6 : 1 }} onPress={() => setShowNotificationModal(false)}>
+                  <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: n.isRead ? '#f0f0f0' : '#eef2ff', justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
+                    <Ionicons name={n.isRead ? 'notifications-off' : 'notifications'} size={20} color={n.isRead ? '#999' : '#6a0dad'} style={{ marginTop: -5 }} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 14, fontWeight: n.isRead ? '400' : '600', color: '#111' }}>{n.title}</Text>
+                    <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{n.body}</Text>
+                    <Text style={{ fontSize: 10, color: '#bbb', marginTop: 4 }}>{n.createdAt?.toDate?.()?.toLocaleDateString() || ''}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       {/* Create Service Modal (quick form) */}
       <Modal visible={showCreateServiceModal} transparent animationType="slide" onRequestClose={() => setShowCreateServiceModal(false)}>
         <View style={styles.modalOverlay}>
@@ -808,287 +892,6 @@ const ArtistMobileApp = () => {
     </ScrollView>
   );
 
-const OrderManagementPage = () => {
-  const [orders, setOrders] = useState([
-    {
-      id: 1,
-      clientName: "John Smith",
-      type: "service",
-      service: "Live Performance",
-      date: "2024-07-20",
-      time: "8:00 PM",
-      price: 1500,
-      clientPrice: 1200,
-      message: "Looking for acoustic set for wedding reception",
-      status: "pending",
-      timestamp: "2 hours ago"
-    },
-    {
-      id: 2,
-      clientName: "Sarah Johnson",
-      type: "ticket",
-      eventName: "Summer Music Festival",
-      quantity: 5,
-      ticketType: "VIP",
-      price: 250,
-      clientPrice: 200,
-      message: "Can we get group discount?",
-      status: "pending",
-      timestamp: "4 hours ago"
-    },
-    {
-      id: 3,
-      clientName: "Mike Wilson",
-      type: "service",
-      service: "Recording Session",
-      date: "2024-07-15",
-      time: "2:00 PM",
-      price: 800,
-      clientPrice: null,
-      message: "Need vocals for my track, studio session preferred",
-      status: "pending",
-      timestamp: "1 day ago"
-    }
-  ]);
-
-  const [filter, setFilter] = useState('all'); // all, pending, accepted, declined
-  const [counterOffer, setCounterOffer] = useState<{ [key: number]: string }>({});
-
-  const handleAcceptOrder = (orderId: number) => {
-    setOrders(orders.map(order => 
-      order.id === orderId 
-        ? { ...order, status: 'accepted' }
-        : order
-    ));
-    Alert.alert("Success", "Order accepted successfully!");
-  };
-
-  const handleDeclineOrder = (orderId: number) => {
-    setOrders(orders.map(order => 
-      order.id === orderId 
-        ? { ...order, status: 'declined' }
-        : order
-    ));
-    Alert.alert("Order Declined", "Order has been declined.");
-  };
-
-  const handleCounterOffer = (orderId: number) => {
-    const newPrice = counterOffer[orderId];
-    if (!newPrice) {
-      Alert.alert("Error", "Please enter a counter offer price");
-      return;
-    }
-    
-    setOrders(orders.map(order => 
-      order.id === orderId 
-        ? { ...order, price: parseFloat(newPrice), status: 'counter_offered' }
-        : order
-    ));
-    setCounterOffer({ ...counterOffer, [orderId]: '' });
-    Alert.alert("Counter Offer Sent", `New price of $${newPrice} has been sent to client`);
-  };
-
-  const filteredOrders = orders.filter(order => {
-    if (filter === 'all') return true;
-    return order.status === filter;
-  });
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'pending': return '#ff9500';
-      case 'accepted': return '#34c759';
-      case 'declined': return '#ff3b30';
-      case 'counter_offered': return '#007aff';
-      default: return '#666';
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'pending': return 'time-outline';
-      case 'accepted': return 'checkmark-circle';
-      case 'declined': return 'close-circle';
-      case 'counter_offered': return 'swap-horizontal';
-      default: return 'help-circle';
-    }
-  };
-
- const CalendarPage = () => (
-    <ScrollView style={styles.container}>
-      {/* Header Stats */}
-      <View style={styles.statsContainer}>
-        <View style={styles.statCard}>
-          <Ionicons name="mail-unread" size={24} color="#ff9500" />
-          <Text style={styles.statValue}>{orders.filter(o => o.status === 'pending').length}</Text>
-          <Text style={styles.statLabel}>Pending</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Ionicons name="checkmark-circle" size={24} color="#34c759" />
-          <Text style={styles.statValue}>{orders.filter(o => o.status === 'accepted').length}</Text>
-          <Text style={styles.statLabel}>Accepted</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Ionicons name="cash" size={24} color="#6a0dad" />
-          <Text style={styles.statValue}>
-            ${orders.filter(o => o.status === 'accepted').reduce((sum, o) => sum + o.price, 0)}
-          </Text>
-          <Text style={styles.statLabel}>Revenue</Text>
-        </View>
-      </View>
-
-      {/* Filter Tabs */}
-      <View style={styles.filterContainer}>
-        {['all', 'pending', 'accepted', 'declined'].map(status => (
-          <TouchableOpacity 
-            key={status}
-            style={[styles.filterTab, filter === status && styles.activeFilterTab]}
-            onPress={() => setFilter(status)}
-          >
-            <Text style={[styles.filterText, filter === status && styles.activeFilterText]}>
-              {status.charAt(0).toUpperCase() + status.slice(1)}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {/* Orders List */}
-      <View style={styles.ordersContainer}>
-        <Text style={styles.sectionTitle}>
-          {filter === 'all' ? 'All Orders' : `${filter.charAt(0).toUpperCase() + filter.slice(1)} Orders`}
-        </Text>
-        
-        {filteredOrders.map(order => (
-          <TouchableOpacity key={order.id} style={styles.orderCard} onPress={() => router.push(`/(artist)/order-details?orderId=${order.id}&orderType=${order.type}`)} activeOpacity={0.7}>
-            <View style={styles.orderHeader}>
-              <View style={styles.clientInfo}>
-                <Text style={styles.clientName}>{order.clientName}</Text>
-                <Text style={styles.orderTime}>{order.timestamp}</Text>
-              </View>
-              <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status) }]}>
-                <Ionicons name={getStatusIcon(order.status)} size={16} color="white" />
-                <Text style={styles.statusText}>{order.status.replace('_', ' ')}</Text>
-              </View>
-            </View>
-
-            {/* Order Details */}
-            <View style={styles.orderDetails}>
-              <View style={styles.orderType}>
-                <Ionicons 
-                  name={order.type === 'service' ? 'musical-notes' : 'ticket'} 
-                  size={20} 
-                  color="#6a0dad" 
-                />
-                <Text style={styles.orderTypeText}>
-                  {order.type === 'service'
-                    ? (order.service || order.gigTitle || 'Service Order')
-                    : (order.ticketType || order.ticketName || `${order.quantity || 0}x Tickets`)}
-                </Text>
-              </View>
-              
-              {order.date && (
-                <Text style={styles.orderDate}>📅 {order.date} at {order.time}</Text>
-              )}
-              
-              {order.eventName && (
-                <Text style={styles.eventName}>🎵 {order.eventName}</Text>
-              )}
-            </View>
-
-            {/* Price Information */}
-            <View style={styles.priceContainer}>
-              <View style={styles.priceRow}>
-                <Text style={styles.priceLabel}>Your Price:</Text>
-                <Text style={styles.yourPrice}>${order.price}</Text>
-              </View>
-              {order.clientPrice && (
-                <View style={styles.priceRow}>
-                  <Text style={styles.priceLabel}>Client Offer:</Text>
-                  <Text style={styles.clientPrice}>${order.clientPrice}</Text>
-                </View>
-              )}
-            </View>
-
-            {/* Client Message */}
-            {order.message && (
-              <View style={styles.messageContainer}>
-                <Text style={styles.messageLabel}>Message:</Text>
-                <Text style={styles.messageText}>"{order.message}"</Text>
-              </View>
-            )}
-
-            {/* Action Buttons */}
-            {order.status === 'pending' && (
-              <View style={styles.actionContainer}>
-                <TouchableOpacity 
-                  style={styles.acceptButton}
-                  onPress={() => handleAcceptOrder(order.id)}
-                >
-                  <Ionicons name="checkmark" size={20} color="white" />
-                  <Text style={styles.buttonText}>Accept</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity 
-                  style={styles.declineButton}
-                  onPress={() => handleDeclineOrder(order.id)}
-                >
-                  <Ionicons name="close" size={20} color="white" />
-                  <Text style={styles.buttonText}>Decline</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* Counter Offer Section */}
-            {order.status === 'pending' && order.clientPrice && order.clientPrice < order.price && (
-              <View style={styles.counterOfferContainer}>
-                <Text style={styles.counterOfferLabel}>Counter Offer:</Text>
-                <View style={styles.counterOfferRow}>
-                  <TextInput
-                    style={styles.counterOfferInput}
-                    placeholder="Enter price"
-                    keyboardType="numeric"
-                    value={counterOffer[order.id] || ''}
-                    onChangeText={(text) => setCounterOffer({...counterOffer, [order.id]: text})}
-                  />
-                  <TouchableOpacity 
-                    style={styles.counterOfferButton}
-                    onPress={() => handleCounterOffer(order.id)}
-                  >
-                    <Text style={styles.counterOfferButtonText}>Send</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-          </TouchableOpacity>
-        ))}
-
-        {filteredOrders.length === 0 && (
-          <View style={styles.emptyState}>
-            <Ionicons name="mail-open-outline" size={48} color="#ccc" />
-            <Text style={styles.emptyStateText}>No {filter === 'all' ? '' : filter} orders found</Text>
-          </View>
-        )}
-      </View>
-
-      {/* Quick Actions */}
-      <View style={styles.quickActions}>
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <TouchableOpacity style={styles.quickActionButton} onPress={() => setShowCreateServiceModal(true)}>
-          <Ionicons name="add-circle" size={24} color="#6a0dad" />
-          <Text style={styles.quickActionText}>Create Service Package</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.quickActionButton}>
-          <Ionicons name="ticket" size={24} color="#6a0dad" />
-          <Text style={styles.quickActionText}>Add New Event Tickets</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.quickActionButton}>
-          <Ionicons name="settings" size={24} color="#6a0dad" />
-          <Text style={styles.quickActionText}>Pricing Settings</Text>
-        </TouchableOpacity>
-      </View>
-    </ScrollView>
-  );
-} // <-- Add this closing brace to end OrderManagementPage function
-
   // Settings Page Component
   const SettingsPage = () => {
     const router = useRouter();
@@ -1136,36 +939,21 @@ const OrderManagementPage = () => {
                 console.log('🧹 Clearing Artist Store state...');
                 resetStore();
                 
-                // Step 2: Perform complete logout with cache clearing
-                const performCompleteLogout = (await import('../../utils/logoutUtil')).default;
-                const result = await performCompleteLogout({
-                  clearAllStorage: true,
-                  showSuccessMessage: false
-                });
+                // Step 2: Clear AsyncStorage
+                console.log('🗑️ Clearing AsyncStorage...');
+                const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+                await AsyncStorage.clear();
                 
-                if (result.success) {
-                  console.log('✅ Dashboard logout completed successfully - redirecting to client side');
-                  router.replace('/(client)');
-                } else {
-                  console.error('❌ Dashboard logout failed:', result.error);
-                  // Still redirect even if logout had issues
-                  router.replace('/(client)');
-                  Alert.alert("Logout Notice", "You have been logged out, but some data may not have been cleared completely.");
-                }
+                // Step 3: Call Auth logout (this will clear the user state and trigger routing)
+                console.log('🔐 Signing out from Firebase...');
+                await authLogout();
+                
+                console.log('✅ Logout completed successfully');
+                // Auth state change will automatically trigger routing to auth screen
                 
               } catch (error) {
-                console.error('❌ Dashboard logout process failed:', error);
-                
-                // Emergency logout as fallback - always redirect
-                try {
-                  const { emergencyLogout } = await import('../../utils/logoutUtil');
-                  await emergencyLogout();
-                } catch (emergencyError) {
-                  console.error('❌ Emergency dashboard logout failed:', emergencyError);
-                } finally {
-                  // Always redirect regardless of errors
-                  router.replace('/(client)');
-                }
+                console.error('❌ Logout process failed:', error);
+                Alert.alert("Logout Error", "Failed to logout. Please try again.");
               }
             }
           }
@@ -1343,7 +1131,7 @@ const OrderManagementPage = () => {
   };
 
   return (
-    <View style={[styles.mainContainer, { paddingTop: insets.top, backgroundColor: '#f5f5f5' }]}> {/* Remove violet color from safe area */}
+    <View style={[styles.mainContainer, { backgroundColor: '#f5f5f5' }]}> {/* Remove violet color from safe area */}
       <StatusBar barStyle="dark-content" backgroundColor="#f5f5f5" />
       {renderContent()}
       <View style={[styles.tabBar, { paddingBottom: insets.bottom }]}> 
@@ -1431,6 +1219,7 @@ const styles = StyleSheet.create({
   profileInfo: {
     flex: 1,
     marginLeft: 16,
+    paddingRight: 40,
   },
   profileName: {
     fontSize: 24,
@@ -2334,6 +2123,35 @@ const styles = StyleSheet.create({
   modalCloseText: {
     color: '#ffffff',
     fontSize: 16,
+    fontWeight: 'bold',
+  },
+  notifBell: {
+    position: 'absolute',
+    top: 2,
+    right: 8,
+    zIndex: 10,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  notifBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#ef4444',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  notifBadgeText: {
+    color: '#fff',
+    fontSize: 10,
     fontWeight: 'bold',
   },
 
