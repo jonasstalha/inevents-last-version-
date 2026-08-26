@@ -2,6 +2,7 @@ import { useAuth } from '@/src/context/AuthContext';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import { getAuthErrorMessage } from '@/src/utils/authErrors';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -246,28 +247,7 @@ export default function AuthScreen() {
 
   useEffect(() => {
     StatusBar.setBarStyle('light-content', true);
-    createHardcodedAdminAccount();
   }, []);
-
-  // Hardcoded Admin Account Creation
-  const createHardcodedAdminAccount = async () => {
-    try {
-      const adminEmail = 'admin@inevents.com';
-      const adminPassword = 'admin123456';
-      const adminName = 'System Administrator';
-      
-      console.log('Checking admin account...');
-      await register(adminEmail, adminPassword, adminName, '', true, 'admin');
-      console.log('✅ Admin account created successfully');
-      
-    } catch (error: any) {
-      if (error.message && error.message.includes('auth/email-already-in-use')) {
-        console.log('✅ Admin account already exists and ready');
-      } else {
-        console.log('⚠️ Admin account setup issue:', error.message);
-      }
-    }
-  };
 
   // Main Authentication Handler
   const handleAuthentication = async () => {
@@ -281,8 +261,6 @@ export default function AuthScreen() {
         return;
       }
 
-      console.log(`Attempting to ${isLogin ? 'login' : 'register'} with email: ${email}`);
-      
       if (isLogin) {
         // Perform login
         setLoading(true);
@@ -290,7 +268,10 @@ export default function AuthScreen() {
         setLoading(false);
         
          if (userRole) {
-           console.log(`✅ Login successful! User role: ${userRole.role}`);
+           if (!userRole.isEmailVerified) {
+             router.replace('/email-verification');
+             return;
+           }
            
            // Navigate based on role
            if (userRole.role === 'admin') {
@@ -317,21 +298,12 @@ export default function AuthScreen() {
         await register(email, password, name, phone, false, userRole);
         setLoading(false);
         
-        console.log(`✅ Registration successful! User role: ${userRole}`);
-        
-        // Navigate based on role
-        if (userRole === 'admin') {
-          router.replace('/(admin)');
-        } else if (userRole === 'artist') {
-          router.replace('/(artist)');
-        } else {
-          router.replace('/(client)');
-        }
+        router.replace('/email-verification');
       }
     } catch (error: any) {
       setLoading(false);
       console.error('Authentication error:', error);
-      const errorMessage = error.message || 'An unexpected error occurred. Please try again.';
+      const errorMessage = getAuthErrorMessage(error);
       Alert.alert('Authentication Error', errorMessage);
     }
   };

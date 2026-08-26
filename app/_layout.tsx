@@ -61,7 +61,7 @@ function RootLayoutInner() {
         console.warn('Failed to read pending auth redirect:', error);
       }
 
-      if (user) {
+      if (user && user.isEmailVerified) {
         console.log(`🔄 App restarted: User logged in as ${user.role}`);
         if (user.role === 'admin') {
           router.replace('/(admin)');

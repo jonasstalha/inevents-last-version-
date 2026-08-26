@@ -5,6 +5,7 @@ import React, { useEffect } from 'react';
 import { Alert, BackHandler, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Theme } from '../../src/constants/theme';
+import { useAuth } from '../../src/context/AuthContext';
 
 const navItems = [
   { label: 'Dashboard', route: '/(admin)/dashboard', icon: LayoutDashboard },
@@ -24,9 +25,17 @@ const pageTitleMap: Record<string, string> = {
 
 export default function AdminLayout() {
   const router = useRouter();
+  const { user, loading } = useAuth();
   const segments = useSegments();
   const currentRoute = segments[segments.length - 1] || 'dashboard';
   const pageTitle = pageTitleMap[currentRoute] || 'Admin';
+
+  useEffect(() => {
+    if (loading) return;
+    if (!user) router.replace('/auth');
+    else if (!user.isEmailVerified) router.replace('/email-verification');
+    else if (user.role !== 'admin') router.replace(user.role === 'artist' ? '/(artist)' : '/(client)');
+  }, [loading, user, router]);
 
   useEffect(() => {
     const onBackPress = () => {
@@ -55,7 +64,7 @@ export default function AdminLayout() {
                   { text: 'Cancel', style: 'cancel' },
                   { text: 'Logout', style: 'destructive', onPress: () => {
                     signOut(getAuth());
-                    router.replace('/(auth)');
+                    router.replace('/auth');
                   }},
                 ]);
               }}

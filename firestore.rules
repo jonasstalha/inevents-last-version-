@@ -29,7 +29,7 @@ service cloud.firestore {
     // Users collection - Core user profiles
     match /users/{userId} {
       allow read: if true; // Public read for user discovery and profiles
-      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow create: if isAuthenticated();
       allow update: if isOwnerOrAdmin(userId);
       allow delete: if isAdmin();
       
@@ -218,8 +218,9 @@ service cloud.firestore {
         || isAdmin()
       );
 
-      // Delete: only admin
-      allow delete: if isAdmin();
+      // A client may delete only their own order; admins may delete any order.
+      allow delete: if isAdmin() ||
+        (isAuthenticated() && request.auth.uid == resource.data.clientId);
     }
     
     // DEPRECATED: These collections are no longer used

@@ -7,9 +7,9 @@
       "policy": "sdkVersion"
     },
     "orientation": "portrait",
-    "icon": "./assets/indexpage/icon-square.png",
+    "icon": "./assets/indexpage/icon.png",
     "splash": {
-      "image": "./assets/indexpage/icon-square.png",
+      "image": "./assets/indexpage/icon.png",
       "backgroundColor": "#5B5BD6",
       "resizeMode": "contain"
     },
@@ -21,7 +21,8 @@
       "bundleIdentifier": "com.ios.inevent",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "This app requires location access to pick your event venue and service location.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Location access is used to select delivery and service locations for your order."
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Location access is used to select delivery and service locations for your order.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "web": {
@@ -36,7 +37,7 @@
       "router": {},
       "cloudFunctionBaseUrl": "https://us-central1-inevents-2fe56.cloudfunctions.net",
       "eas": {
-        "projectId": "d079d504-69ff-40fc-8cf5-aab12017a523"
+        "projectId": "afeba79f-e762-4cff-9265-0180546f9582"
       }
     },
     "android": {
@@ -49,6 +50,7 @@
       "expo-router",
       "expo-web-browser",
       "@react-native-community/datetimepicker"
-    ]
+    ],
+    "owner": "jsx789666"
   }
 }

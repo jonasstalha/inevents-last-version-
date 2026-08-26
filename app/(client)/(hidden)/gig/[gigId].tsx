@@ -12,12 +12,13 @@ import { ResizeMode, Video } from "expo-av";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getAuth } from "firebase/auth";
 import { getDownloadURL, ref as storageRef } from "firebase/storage";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   ActivityIndicator,
   Alert,
   Animated,
   Dimensions,
+  FlatList,
   Image,
   Keyboard,
   KeyboardAvoidingView,
@@ -98,11 +99,18 @@ const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
 const AUTH_PENDING_REDIRECT_KEY = "@auth_pending_redirect";
 const GIG_DRAFT_STORAGE_PREFIX = "@gig_detail_draft:";
 
+type MediaItem = {
+  type: "image" | "video";
+  uri: string;
+};
+
 export default function ServiceDetailScreen() {
   const { gigId } = useLocalSearchParams();
+  const serviceId = Array.isArray(gigId) ? gigId[0] : gigId;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [selectedImage, setSelectedImage] = useState(0);
+  const mediaListRef = useRef<FlatList<MediaItem>>(null);
   const [serviceQuantities, setServiceQuantities] = useState<{
     [key: string]: number;
   }>({
@@ -161,6 +169,16 @@ export default function ServiceDetailScreen() {
 
   const scrollY = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  const handleImagePress = (media: MediaItem, index: number) => {
+    setPreviewMedia({ type: media.type, uri: media.uri, index });
+    setShowFullScreenPreview(true);
+  };
+
+  const handleClosePreview = () => {
+    setShowFullScreenPreview(false);
+    setPreviewMedia(null);
+  };
 
   const getDraftStorageKey = () =>
     `${GIG_DRAFT_STORAGE_PREFIX}${String(gigId)}`;
@@ -244,22 +262,10 @@ export default function ServiceDetailScreen() {
     restoreDraft();
   }, [gigId]);
 
-  // Handle opening full screen image preview
-  const handleImagePress = (imageUri: string, index: number) => {
-    setPreviewMedia({ type: "image", uri: imageUri, index });
-    setShowFullScreenPreview(true);
-  };
-
-  // Handle closing full screen preview
-  const handleClosePreview = () => {
-    setShowFullScreenPreview(false);
-    setPreviewMedia(null);
-  };
-
   // Fetch service details when component mounts
   useEffect(() => {
     const fetchData = async () => {
-      if (!gigId) {
+      if (!serviceId || serviceId === 'gigId') {
         setError("No service ID provided");
         setIsLoading(false);
         return;
@@ -268,7 +274,7 @@ export default function ServiceDetailScreen() {
       try {
         setIsLoading(true);
         // Fetch service data
-        const service = await fetchServiceByIdFromFirebase(String(gigId));
+        const service = await fetchServiceByIdFromFirebase(serviceId);
 
         const resolveStorageUrl = async (uri?: string | null) => {
           if (!uri) return null;
@@ -427,7 +433,7 @@ export default function ServiceDetailScreen() {
     };
 
     fetchData();
-  }, [gigId]);
+  }, [serviceId]);
 
   // Calculate real average rating from reviews/comments
   const realAvgRating =
@@ -488,7 +494,7 @@ export default function ServiceDetailScreen() {
     },
   };
 
-  const mediaItems =
+  const mediaItems: MediaItem[] =
     actualImageSources.length > 0 || serviceVideos.length > 0
       ? [
           ...actualImageSources.map((uri: string) => ({
@@ -506,6 +512,11 @@ export default function ServiceDetailScreen() {
     if (selectedImage >= mediaItems.length && mediaItems.length > 0) {
       setSelectedImage(0);
     }
+  }, [mediaItems.length, selectedImage]);
+
+  useEffect(() => {
+    if (mediaItems.length <= 1 || selectedImage >= mediaItems.length) return;
+    mediaListRef.current?.scrollToIndex({ index: selectedImage, animated: true });
   }, [mediaItems.length, selectedImage]);
 
   // Set up main service
@@ -825,6 +836,15 @@ export default function ServiceDetailScreen() {
 
   const handleContinuePress = () => {
     Keyboard.dismiss();
+
+    if (calculatePrice() <= 0) {
+      Alert.alert(
+        "Select a service item",
+        "Please select at least one service item with a price before continuing.",
+      );
+      return;
+    }
+
     const auth = getAuth();
     const currentUser = auth.currentUser;
 
@@ -1203,40 +1223,54 @@ export default function ServiceDetailScreen() {
           <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
             {/* Hero Media Gallery */}
             <View style={styles.imageSection}>
-              {mediaItems?.[selectedImage]?.type === "video" ? (
-                <Video
-                  ref={videoRef}
-                  source={{ uri: mediaItems?.[selectedImage]?.uri }}
-                  style={styles.mainImage}
-                  useNativeControls
-                  isLooping={false}
-                  resizeMode={ResizeMode.CONTAIN}
-                  onError={(e) => console.error("Video error:", e)}
-                />
-              ) : (
-                <TouchableOpacity
-                  activeOpacity={0.95}
-                  onPress={() => {
-                    const media = mediaItems?.[selectedImage];
-                    if (media && media.uri) {
-                      setPreviewMedia({
-                        type: "image",
-                        uri: media.uri,
-                        index: selectedImage,
-                      });
-                      setShowFullScreenPreview(true);
-                    }
-                  }}
-                >
-                  {mediaItems?.[selectedImage] &&
-                  mediaItems?.[selectedImage]?.uri ? (
-                    <Image
-                      source={{ uri: mediaItems?.[selectedImage]?.uri }}
-                      style={styles.mainImage}
-                    />
-                  ) : null}
-                </TouchableOpacity>
-              )}
+              <FlatList
+                ref={mediaListRef}
+                data={mediaItems}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                nestedScrollEnabled
+                directionalLockEnabled
+                decelerationRate="fast"
+                bounces={false}
+                removeClippedSubviews={Platform.OS === "android"}
+                keyExtractor={(item) => `${item.type}:${item.uri}`}
+                getItemLayout={(_, index) => ({
+                  length: screenWidth,
+                  offset: screenWidth * index,
+                  index,
+                })}
+                renderItem={({ item, index }) => (
+                  <View style={styles.mediaSlide}>
+                    {item.type === "video" ? (
+                      <Video
+                        ref={item.uri === mediaItems[selectedImage]?.uri ? videoRef : undefined}
+                        source={{ uri: item.uri }}
+                        style={styles.mainImage}
+                        useNativeControls
+                        isLooping={false}
+                        resizeMode={ResizeMode.CONTAIN}
+                        onError={(e) => console.error("Video error:", e)}
+                      />
+                    ) : (
+                      <TouchableOpacity
+                        activeOpacity={0.95}
+                        onPress={() => handleImagePress(item, index)}
+                      >
+                        <Image source={{ uri: item.uri }} style={styles.mainImage} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+                onMomentumScrollEnd={(event) => {
+                  const nextIndex = Math.round(
+                    event.nativeEvent.contentOffset.x / screenWidth,
+                  );
+                  if (nextIndex !== selectedImage && nextIndex >= 0 && nextIndex < mediaItems.length) {
+                    setSelectedImage(nextIndex);
+                  }
+                }}
+              />
 
               {/* Media counter chip */}
               {mediaItems.length > 1 && (
@@ -1245,6 +1279,16 @@ export default function ServiceDetailScreen() {
                   <Text style={styles.mediaCounterChipText}>
                     {selectedImage + 1} / {mediaItems.length}
                   </Text>
+                </View>
+              )}
+              {mediaItems.length > 1 && (
+                <View style={styles.mediaDots} pointerEvents="none">
+                  {mediaItems.map((item, index) => (
+                    <View
+                      key={`${item.type}:${item.uri}:dot`}
+                      style={[styles.mediaDot, index === selectedImage && styles.mediaDotActive]}
+                    />
+                  ))}
                 </View>
               )}
             </View>
@@ -1767,7 +1811,7 @@ export default function ServiceDetailScreen() {
           <KeyboardAvoidingView
             style={{ flex: 1, backgroundColor: COLORS.overlay }}
             behavior={Platform.OS === "ios" ? "padding" : "height"}
-            keyboardVerticalOffset={Platform.OS === "ios" ? 110 : 0}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 24 : 0}
           >
             <View style={styles.modalOverlay}>
               <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
@@ -1793,13 +1837,16 @@ export default function ServiceDetailScreen() {
 
                   <KeyboardAwareScrollView
                     style={styles.modalScrollContent}
-                    contentContainerStyle={{ flexGrow: 1, paddingBottom: 48 }}
+                    contentContainerStyle={{ flexGrow: 1, paddingBottom: 120 }}
                     enableOnAndroid={true}
-                    extraScrollHeight={Platform.OS === "ios" ? 90 : 100}
+                    extraScrollHeight={24}
+                    extraHeight={120}
+                    keyboardOpeningTime={0}
                     keyboardShouldPersistTaps="handled"
                     showsVerticalScrollIndicator={false}
-                    resetScrollToCoords={{ x: 0, y: 0 }}
+                    enableResetScrollToCoords={false}
                     enableAutomaticScroll={true}
+                    automaticallyAdjustKeyboardInsets={true}
                   >
                     <View style={styles.formGroup}>
                       <Text style={styles.formLabel}>Describe your event</Text>
@@ -2236,7 +2283,12 @@ export default function ServiceDetailScreen() {
     </Modal>
 
         {/* Full Screen Media Preview Modal */}
-        <Modal visible={showFullScreenPreview} animationType="fade" transparent>
+        <Modal
+          visible={showFullScreenPreview}
+          animationType="fade"
+          transparent
+          onRequestClose={handleClosePreview}
+        >
           <View style={styles.fullScreenModal}>
             <View style={styles.fullScreenHeader}>
               <TouchableOpacity
@@ -2412,6 +2464,11 @@ const styles = StyleSheet.create({
     position: "relative",
     backgroundColor: "#0F172A",
   },
+  mediaSlide: {
+    width: screenWidth,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   mainImage: {
     width: screenWidth,
     height: screenWidth * 0.78,
@@ -2433,6 +2490,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
     marginLeft: 5,
+  },
+  mediaDots: {
+    position: "absolute",
+    bottom: 14,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 5,
+  },
+  mediaDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "rgba(255,255,255,0.55)",
+  },
+  mediaDotActive: {
+    width: 18,
+    backgroundColor: "#fff",
   },
 
   // ─── Thumbnails ──────────────────────────────────────────

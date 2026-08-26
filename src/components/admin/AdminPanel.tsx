@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, Timestamp, updateDoc, where } from 'firebase/firestore';
 import {
   Activity,
@@ -181,6 +182,8 @@ export default function AdminPanel({ initialTab = 'dashboard', hideTabBar = fals
     selectedServiceId: '',
     selectedServiceName: '',
   });
+  const [couponExpiryDate, setCouponExpiryDate] = useState<Date | null>(null);
+  const [showCouponExpiryPicker, setShowCouponExpiryPicker] = useState(false);
 
   useEffect(() => {
     if (initialTab) {
@@ -2568,6 +2571,8 @@ service cloud.firestore {
   };
 
   const resetNewCouponForm = () => {
+    setCouponExpiryDate(null);
+    setShowCouponExpiryPicker(false);
     setNewCoupon({
       name: '',
       code: '',
@@ -2588,7 +2593,8 @@ service cloud.firestore {
     const discount = Number(newCoupon.discount);
     const maxUsage = Number(newCoupon.maxUsage);
     const minOrderAmount = Number(newCoupon.minOrderAmount || 0);
-    const expirationDate = new Date(newCoupon.expirationDate);
+    const expirationDate = couponExpiryDate ? new Date(couponExpiryDate) : new Date(NaN);
+    expirationDate.setHours(23, 59, 59, 999);
 
     if (!name || !code) {
       Alert.alert('Validation Error', 'Coupon name and code are required.');
@@ -2605,8 +2611,8 @@ service cloud.firestore {
       return;
     }
 
-    if (!newCoupon.expirationDate || Number.isNaN(expirationDate.getTime())) {
-      Alert.alert('Validation Error', 'Please enter a valid expiration date (YYYY-MM-DD).');
+    if (!couponExpiryDate || Number.isNaN(expirationDate.getTime())) {
+      Alert.alert('Validation Error', 'Please select a valid expiration date.');
       return;
     }
 
@@ -3016,7 +3022,32 @@ service cloud.firestore {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 12, color: Theme.colors.textLight, marginBottom: 4 }}>Expires</Text>
-                <TextInput placeholder="YYYY-MM-DD" value={newCoupon.expirationDate} onChangeText={text => setNewCoupon(prev => ({ ...prev, expirationDate: text }))} style={{ borderWidth: 1, borderColor: '#e0e0e0', padding: 10, borderRadius: 10, fontSize: 14, backgroundColor: '#fafafa' }} />
+                <TouchableOpacity
+                  onPress={() => setShowCouponExpiryPicker(true)}
+                  style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: '#e0e0e0', padding: 10, borderRadius: 10, minHeight: 42, backgroundColor: '#fafafa' }}
+                >
+                  <Text style={{ color: newCoupon.expirationDate ? '#333' : '#999', fontSize: 14 }}>
+                    {newCoupon.expirationDate || 'Select expiration date'}
+                  </Text>
+                  <Ionicons name="calendar-outline" size={18} color={Theme.colors.primary} />
+                </TouchableOpacity>
+                {showCouponExpiryPicker && (
+                  <DateTimePicker
+                    value={couponExpiryDate || new Date()}
+                    mode="date"
+                    minimumDate={new Date(new Date().setHours(0, 0, 0, 0))}
+                    onChange={(_, selectedDate) => {
+                      setShowCouponExpiryPicker(false);
+                      if (selectedDate) {
+                        setCouponExpiryDate(selectedDate);
+                        setNewCoupon(prev => ({
+                          ...prev,
+                          expirationDate: selectedDate.toLocaleDateString(),
+                        }));
+                      }
+                    }}
+                  />
+                )}
               </View>
             </View>
             <View style={{ marginBottom: 12 }}>

@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -46,6 +47,8 @@ export default function CouponManagement() {
   const [discountType, setDiscountType] = useState<'percentage' | 'fixed'>('percentage');
   const [maxUses, setMaxUses] = useState('');
   const [expiryDateStr, setExpiryDateStr] = useState('');
+  const [expiryDate, setExpiryDate] = useState<Date | null>(null);
+  const [showExpiryPicker, setShowExpiryPicker] = useState(false);
   const [scope, setScope] = useState<'all' | 'specific'>('all');
   const [selectedServiceId, setSelectedServiceId] = useState('');
 
@@ -74,6 +77,8 @@ export default function CouponManagement() {
     setDiscountType('percentage');
     setMaxUses('');
     setExpiryDateStr('');
+    setExpiryDate(null);
+    setShowExpiryPicker(false);
     setScope('all');
     setSelectedServiceId('');
   };
@@ -85,11 +90,6 @@ export default function CouponManagement() {
     setCode(c);
   };
 
-  const parseDate = (str: string): Date | null => {
-    const d = new Date(str);
-    return isNaN(d.getTime()) ? null : d;
-  };
-
   const handleCreate = async () => {
     if (!authUser) { Alert.alert('Error', 'Not logged in'); return; }
     if (!code.trim()) { Alert.alert('Error', 'Enter a coupon code'); return; }
@@ -97,10 +97,10 @@ export default function CouponManagement() {
     if (!discountValue || isNaN(dv) || dv <= 0) { Alert.alert('Error', 'Enter a valid discount value'); return; }
     const mu = parseInt(maxUses, 10);
     if (!maxUses || isNaN(mu) || mu <= 0) { Alert.alert('Error', 'Enter max uses'); return; }
-    if (!expiryDateStr.trim()) { Alert.alert('Error', 'Enter expiry date (YYYY-MM-DD)'); return; }
-    const expiryDate = parseDate(expiryDateStr.trim());
-    if (!expiryDate) { Alert.alert('Error', 'Invalid date format. Use YYYY-MM-DD'); return; }
-    if (expiryDate <= new Date()) { Alert.alert('Error', 'Expiry date must be in the future'); return; }
+    if (!expiryDate) { Alert.alert('Error', 'Select an expiry date'); return; }
+    const expiryAtEndOfDay = new Date(expiryDate);
+    expiryAtEndOfDay.setHours(23, 59, 59, 999);
+    if (expiryAtEndOfDay <= new Date()) { Alert.alert('Error', 'Expiry date must be in the future'); return; }
     if (scope === 'specific' && !selectedServiceId) { Alert.alert('Error', 'Select a service'); return; }
 
     setSaving(true);
@@ -117,7 +117,7 @@ export default function CouponManagement() {
         discountValue: dv,
         maxUses: mu,
         isActive: true,
-        expiryDate,
+        expiryDate: expiryAtEndOfDay,
         description: '',
         minOrderValue: 0,
       });
@@ -291,14 +291,30 @@ export default function CouponManagement() {
                   />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Expires (YYYY-MM-DD)</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={expiryDateStr}
-                    onChangeText={setExpiryDateStr}
-                    placeholder="2025-12-31"
-                    autoCapitalize="none"
-                  />
+                  <Text style={styles.label}>Expires</Text>
+                  <TouchableOpacity
+                    style={[styles.input, styles.dateInput]}
+                    onPress={() => setShowExpiryPicker(true)}
+                  >
+                    <Text style={expiryDateStr ? styles.dateText : styles.datePlaceholder}>
+                      {expiryDateStr || 'Select expiration date'}
+                    </Text>
+                    <Ionicons name="calendar-outline" size={18} color={PRIMARY} />
+                  </TouchableOpacity>
+                  {showExpiryPicker && (
+                    <DateTimePicker
+                      value={expiryDate || new Date()}
+                      mode="date"
+                      minimumDate={new Date(new Date().setHours(0, 0, 0, 0))}
+                      onChange={(_, selectedDate) => {
+                        setShowExpiryPicker(false);
+                        if (selectedDate) {
+                          setExpiryDate(selectedDate);
+                          setExpiryDateStr(selectedDate.toLocaleDateString());
+                        }
+                      }}
+                    />
+                  )}
                 </View>
               </View>
 
@@ -382,6 +398,9 @@ const styles = StyleSheet.create({
   modalTitle: { fontWeight: 'bold', fontSize: 18, color: '#1a1a2e' },
   label: { fontSize: 12, color: '#888', marginBottom: 4 },
   input: { borderWidth: 1, borderColor: '#ddd', padding: 10, borderRadius: 10, fontSize: 14, backgroundColor: '#fafafa' },
+  dateInput: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  dateText: { color: '#333', fontSize: 14 },
+  datePlaceholder: { color: '#999', fontSize: 14 },
   genBtn: { backgroundColor: PRIMARY, paddingHorizontal: 14, borderRadius: 10, justifyContent: 'center' },
   scopeBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, borderWidth: 2, borderColor: '#ddd', backgroundColor: '#fafafa', alignItems: 'center' },
   scopeBtnActive: { borderColor: PRIMARY, backgroundColor: 'rgba(106,13,173,0.06)' },

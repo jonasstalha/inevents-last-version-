@@ -7,10 +7,15 @@ export async function requireAuthOrRedirect(
   router?: { push?: (path: string) => void },
   redirectPayload?: { pathname: string; params?: Record<string, string> },
 ) {
+  let requiresVerification = false;
   try {
-    const { getAuth } = await import('firebase/auth');
+    const { getAuth, reload } = await import('firebase/auth');
     const auth = getAuth();
-    if (auth.currentUser) return true;
+    if (auth.currentUser) {
+      await reload(auth.currentUser);
+      if (auth.currentUser.emailVerified) return true;
+      requiresVerification = true;
+    }
   } catch (e) {
     // ignore — we'll treat as unauthenticated
   }
@@ -25,15 +30,17 @@ export async function requireAuthOrRedirect(
 
   return new Promise<boolean>((resolve) => {
     Alert.alert(
-      'Login Required',
-      'You need to be logged in to continue. Would you like to login or register?',
+      requiresVerification ? 'Verification Required' : 'Login Required',
+      requiresVerification
+        ? 'Please verify your email before continuing.'
+        : 'You need to be logged in to continue. Would you like to login or register?',
       [
         { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
         {
-          text: 'Login',
+          text: requiresVerification ? 'Verify email' : 'Login',
           onPress: () => {
             try {
-              router?.push?.('/auth');
+              router?.push?.(requiresVerification ? '/email-verification' : '/auth');
             } catch (e) {
               /* noop */
             }

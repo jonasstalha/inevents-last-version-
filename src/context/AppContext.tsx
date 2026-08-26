@@ -336,7 +336,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     orders.filter((o) => o.clientId === clientId);
 
   const getOrdersByArtistId = (artistId: string) =>
-    orders.filter((o) => o.artistId === artistId);
+    orders
+      .filter((o) => o.artistId === artistId)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   const getTicketsByArtistId = (artistId: string) =>
     MOCK_TICKETS.filter((t) => t.artistId === artistId);

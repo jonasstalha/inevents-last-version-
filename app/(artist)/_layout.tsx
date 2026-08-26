@@ -7,6 +7,7 @@ import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { LucideIcon } from '@/components/ui/LucideIcon';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
+import { useAuth } from '@/src/context/AuthContext';
 
 const Theme = {
   spacing: { sm: 8, md: 12, lg: 16 },
@@ -107,8 +108,17 @@ function ArtistTabBar({ state, descriptors, navigation }: any) {
 }
 
 export default function ArtistLayout() {
+  const router = useRouter();
+  const { user, loading } = useAuth();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+
+  useEffect(() => {
+    if (loading) return;
+    if (!user) router.replace('/auth');
+    else if (!user.isEmailVerified) router.replace('/email-verification');
+    else if (user.role !== 'artist' && user.role !== 'admin') router.replace('/(client)');
+  }, [loading, user, router]);
 
   const getPageTitle = (routeName: string) => {
     switch (routeName) {

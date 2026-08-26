@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  Alert,
   Dimensions,
   FlatList,
   Modal,
@@ -653,22 +654,16 @@ export default function EventApp() {
     
     switch (featureTitle) {
       case 'Become Provider':
-        router.push('/(client)/(hidden)/features/become-provider');
+        Alert.alert('Coming Soon', 'The provider program will be available soon.');
         break;
       case 'Services':
         router.push('/(client)/(hidden)/features/services');
-        break;
-      case 'Privacy Policy':
-        router.push('/(client)/(hidden)/features/privacy-policy');
         break;
       case 'Help & Support':
         router.push('/(client)/(hidden)/features/help-support');
         break;
       case 'About Us':
         router.push('/(client)/(hidden)/features/about-us');
-        break;
-      case 'Terms of Service':
-        router.push('/(client)/(hidden)/features/terms-of-service');
         break;
       default:
         break;
@@ -782,10 +777,8 @@ export default function EventApp() {
 
     { id: 7, title: 'Become Provider', icon: 'user' },
     { id: 8, title: 'Services', icon: 'grid' },
-    { id: 9, title: 'Privacy Policy', icon: 'shield' },
     { id: 10, title: 'Help & Support', icon: 'help-circle' },
-    { id: 11, title: 'About Us', icon: 'heart' },
-    { id: 12, title: 'Terms of Service', icon: 'file-text' }
+    { id: 11, title: 'About Us', icon: 'heart' }
   ];
 
   return (

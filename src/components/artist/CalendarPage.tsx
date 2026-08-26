@@ -3,7 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { getAuth } from 'firebase/auth';
 import { addDoc, collection, getDocs, getFirestore, query, where } from 'firebase/firestore';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { createInvoiceForOrder } from '../../firebase/invoiceService';
 import { confirmOrder, rejectOrder, sendCounterOffer, sendOrderUpdateNotification, warnClientCancellation } from '../../firebase/orderService';
@@ -52,10 +52,38 @@ interface Order {
   image?: string;
 }
 
+function getOrderTimestamp(value: unknown): number {
+  if (!value) return Number.NaN;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'number') {
+    return value < 10000000000 ? value * 1000 : value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) && /^\d+$/.test(value)
+      ? getOrderTimestamp(Number(value))
+      : parsed;
+  }
+  if (typeof value === 'object') {
+    const timestamp = value as { toDate?: () => Date; seconds?: number; _seconds?: number };
+    if (typeof timestamp.toDate === 'function') return timestamp.toDate().getTime();
+    const seconds = timestamp.seconds ?? timestamp._seconds;
+    if (typeof seconds === 'number') return seconds * 1000;
+  }
+  return Number.NaN;
+}
+
+function normalizeOrderTimestamp(value: unknown): string | undefined {
+  const timestamp = getOrderTimestamp(value);
+  return Number.isNaN(timestamp) ? undefined : new Date(timestamp).toISOString();
+}
+
 const CalendarPage = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState<'all' | Order['status']>('all');
+  const [orderType, setOrderType] = useState<'all' | Order['type']>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [counterOffer, setCounterOffer] = useState<{ [key: string]: string }>({});
   const [savingIds, setSavingIds] = useState<string[]>([]);
   const router = useRouter();
@@ -105,8 +133,8 @@ const CalendarPage = () => {
             budget: data.budget,
             message: data.message,
             status: normalizedStatus,
-            timestamp: toTimestampString(data.timestamp) || toTimestampString(data.createdAt),
-            createdAt: toTimestampString(data.createdAt),
+            timestamp: normalizeOrderTimestamp(data.timestamp) || normalizeOrderTimestamp(data.createdAt),
+            createdAt: normalizeOrderTimestamp(data.createdAt),
             eventName: data.eventName,
             quantity: resolvedQuantity,
             ticketType: resolvedTicketType,
@@ -278,10 +306,57 @@ const CalendarPage = () => {
     }
   };
 
-  const filteredOrders = orders.filter(order => {
-    if (filter === 'all') return true;
-    return order.status === filter;
-  });
+  const filteredOrders = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+
+    return orders.filter(order => {
+      const matchesStatus = filter === 'all' || order.status === filter;
+      const matchesType = orderType === 'all' || order.type === orderType;
+      const searchableText = [
+        order.id,
+        order.clientName,
+        order.service,
+        order.serviceTitle,
+        order.gigTitle,
+        order.ticketName,
+        order.ticketType,
+      ].filter(Boolean).join(' ').toLowerCase();
+      const matchesSearch = !normalizedQuery || searchableText.includes(normalizedQuery);
+
+      return matchesStatus && matchesType && matchesSearch;
+    }).sort((firstOrder, secondOrder) => {
+      const firstTime = getOrderTimestamp(firstOrder.createdAt || firstOrder.timestamp);
+      const secondTime = getOrderTimestamp(secondOrder.createdAt || secondOrder.timestamp);
+
+      if (Number.isNaN(firstTime) && Number.isNaN(secondTime)) return 0;
+      if (Number.isNaN(firstTime)) return 1;
+      if (Number.isNaN(secondTime)) return -1;
+      const timeDifference = secondTime - firstTime;
+      return timeDifference || secondOrder.id.localeCompare(firstOrder.id);
+    });
+  }, [orders, filter, orderType, searchQuery]);
+
+  const statusFilters: Array<{ id: 'all' | Order['status']; label: string }> = [
+    { id: 'all', label: 'All' },
+    { id: 'pending', label: 'Pending' },
+    { id: 'confirmed', label: 'Confirmed' },
+    { id: 'counter_offered', label: 'Counter offer' },
+    { id: 'rejected', label: 'Rejected' },
+  ];
+
+  const getStatusCount = (status: 'all' | Order['status']) =>
+    status === 'all' ? orders.length : orders.filter(order => order.status === status).length;
+
+  const formatFilterLabel = (value: string) =>
+    value === 'counter_offered' ? 'Counter offer' : value.charAt(0).toUpperCase() + value.slice(1);
+
+  const hasActiveFilters = Boolean(searchQuery.trim()) || filter !== 'all' || orderType !== 'all';
+
+  const clearFilters = () => {
+    setSearchQuery('');
+    setFilter('all');
+    setOrderType('all');
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -308,25 +383,77 @@ const CalendarPage = () => {
       style={styles.container}
       contentContainerStyle={{ paddingBottom: Platform.OS === 'ios' ? 180 : 160 }}
     >
-      {/* Filter Tabs */}
-      <View style={styles.filterContainer}>
-        {['all', 'pending', 'confirmed', 'rejected'].map(status => (
+      {/* Search and filters */}
+      <View style={styles.filterPanel}>
+        <View style={styles.searchContainer}>
+          <Ionicons name="search" size={19} color="#7b8190" />
+          <TextInput
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Search client, service, or order ID"
+            placeholderTextColor="#9aa1af"
+            style={styles.searchInput}
+            autoCapitalize="none"
+            returnKeyType="search"
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={8}>
+              <Ionicons name="close-circle" size={19} color="#9aa1af" />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <View style={styles.filterHeadingRow}>
+          <Text style={styles.filterHeading}>Order status</Text>
+          <View style={styles.resultActions}>
+            <Text style={styles.resultCount}>{filteredOrders.length} shown</Text>
+            {hasActiveFilters && (
+              <TouchableOpacity onPress={clearFilters} hitSlop={8}>
+                <Text style={styles.clearFiltersText}>Clear</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+        {statusFilters.map(({ id, label }) => (
           <TouchableOpacity
-            key={status}
-            style={[styles.filterTab, filter === status && styles.activeFilterTab]}
-            onPress={() => setFilter(status)}
+            key={id}
+            style={[styles.filterTab, filter === id && styles.activeFilterTab]}
+            onPress={() => setFilter(id)}
           >
-            <Text style={[styles.filterText, filter === status && styles.activeFilterText]}>
-              {status.charAt(0).toUpperCase() + status.slice(1)}
+            <Text style={[styles.filterText, filter === id && styles.activeFilterText]}>
+              {label}
             </Text>
+            <View style={[styles.countBadge, filter === id && styles.activeCountBadge]}>
+              <Text style={[styles.countBadgeText, filter === id && styles.activeCountBadgeText]}>{getStatusCount(id)}</Text>
+            </View>
           </TouchableOpacity>
         ))}
+        </ScrollView>
+
+        <Text style={styles.filterHeading}>Order type</Text>
+        <View style={styles.typeFilterRow}>
+          {[
+            { id: 'all' as const, label: 'All types', icon: 'apps-outline' as const },
+            { id: 'service' as const, label: 'Services', icon: 'briefcase-outline' as const },
+            { id: 'ticket' as const, label: 'Tickets', icon: 'ticket-outline' as const },
+          ].map(type => (
+            <TouchableOpacity
+              key={type.id}
+              style={[styles.typeFilter, orderType === type.id && styles.typeFilterActive]}
+              onPress={() => setOrderType(type.id)}
+            >
+              <Ionicons name={type.icon} size={16} color={orderType === type.id ? '#fff' : '#697386'} />
+              <Text style={[styles.typeFilterText, orderType === type.id && styles.typeFilterTextActive]}>{type.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
 
       {/* Orders List */}
       <View style={styles.ordersContainer}>
         <Text style={styles.sectionTitle}>
-          {filter === 'all' ? 'All Orders' : `${filter.charAt(0).toUpperCase() + filter.slice(1)} Orders`}
+          {filter === 'all' ? 'All Orders' : `${formatFilterLabel(filter)} Orders`}
         </Text>
         <Text style={styles.sectionSubtitle}>
           Review bookings, respond quickly, or submit a reclamation for any issue.
@@ -473,21 +600,83 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
     padding: 16,
   },
-  filterContainer: {
-    flexDirection: 'row',
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 4,
+  filterPanel: {
+    backgroundColor: '#ffffff',
+    borderRadius: 18,
+    padding: 14,
     marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#e8eaf0',
+    shadowColor: '#1d2340',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.07,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  searchContainer: {
+    height: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f6fa',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#eceef4',
+    marginBottom: 16,
+  },
+  searchInput: {
+    flex: 1,
+    color: '#202536',
+    fontSize: 14,
+    marginLeft: 9,
+    paddingVertical: 0,
+  },
+  filterHeadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 9,
+  },
+  filterHeading: {
+      filterHeadingRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 9,
+      },
+      resultActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+      },
+  },
+  resultCount: {
+    color: '#8b92a3',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  clearFiltersText: {
+    color: '#6a0dad',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  filterRow: {
+    paddingBottom: 4,
   },
   filterTab: {
-    flex: 1,
-    paddingVertical: 8,
+    flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 8,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    marginRight: 8,
+    backgroundColor: '#f5f6fa',
+    borderWidth: 1,
+    borderColor: '#f0f1f5',
   },
   activeFilterTab: {
     backgroundColor: '#6a0dad',
+    borderColor: '#6a0dad',
   },
   filterText: {
     color: '#666',
@@ -495,6 +684,56 @@ const styles = StyleSheet.create({
   },
   activeFilterText: {
     color: 'white',
+  },
+  countBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#e7e9f0',
+    marginLeft: 7,
+    paddingHorizontal: 5,
+  },
+  activeCountBadge: {
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+  countBadgeText: {
+    color: '#697386',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  activeCountBadgeText: {
+    color: '#fff',
+  },
+  typeFilterRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  typeFilter: {
+    flex: 1,
+    minHeight: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    backgroundColor: '#f5f6fa',
+    borderWidth: 1,
+    borderColor: '#f0f1f5',
+  },
+  typeFilterActive: {
+    backgroundColor: '#283b63',
+    borderColor: '#283b63',
+  },
+  typeFilterText: {
+    color: '#697386',
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 6,
+  },
+  typeFilterTextActive: {
+    color: '#fff',
   },
   ordersContainer: {
     marginBottom: 20,

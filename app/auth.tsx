@@ -1,6 +1,6 @@
 import { useAuth } from "@/src/context/AuthContext";
+import { privacyPolicySections, termsOfServiceSections } from "@/src/constants/legal";
 import { auth, db } from "@/src/firebase/firebaseConfig";
-import { initiatePhoneVerification, verifyCode } from "@/src/firebase/phoneVerificationService";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as AuthSession from "expo-auth-session";
@@ -27,6 +27,7 @@ import {
   View,
 } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
+import { getAuthErrorMessage, getPasswordResetErrorMessage } from "@/src/utils/authErrors";
 
 const { width, height } = Dimensions.get("window");
 const AUTH_PENDING_REDIRECT_KEY = "@auth_pending_redirect";
@@ -190,7 +191,7 @@ const RoleCard = ({
 // Category Tag Component (deprecated - now using inline chips)
 
 export default function AuthScreen() {
-  const { login, register } = useAuth();
+  const { login, register, resetPassword } = useAuth();
   const router = useRouter();
 
   const navigateAfterAuth = async (fallbackRoute: string) => {
@@ -221,9 +222,6 @@ export default function AuthScreen() {
     router.replace(fallbackRoute as any);
   };
 
-  // Verify redirect URI for Google Sign-In
-  console.log("REDIRECT URI:", AuthSession.makeRedirectUri());
-
   // Form states
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
@@ -231,14 +229,7 @@ export default function AuthScreen() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [isPhoneVerified, setIsPhoneVerified] = useState(false);
   const [phoneError, setPhoneError] = useState("");
-  const [codeSent, setCodeSent] = useState(false);
-  const [verificationCode, setVerificationCode] = useState('');
-  const [isSendingCode, setIsSendingCode] = useState(false);
-  const [isVerifyingCode, setIsVerifyingCode] = useState(false);
-  const [formattedPhone, setFormattedPhone] = useState('');
-  const [codeCountdown, setCodeCountdown] = useState(0);
   const [city, setCity] = useState("");
   const [userRole, setUserRole] = useState<"client" | "artist">("client");
   const [loading, setLoading] = useState(false);
@@ -273,7 +264,13 @@ export default function AuthScreen() {
   const [selectedCategory, setSelectedCategory] = useState("");
   const [showCategoryModal, setShowCategoryModal] = useState(false);
 
-  // City selection states
+  // Legal consent states
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [legalModalType, setLegalModalType] = useState<
+    "privacy" | "terms" | null
+  >(null);
+
+  const [authError, setAuthError] = useState("");
   const [showCityModal, setShowCityModal] = useState(false);
 
   // Available categories for artists - matching search page filters
@@ -398,56 +395,12 @@ export default function AuthScreen() {
   };
 
   const getFriendlyAuthErrorMessage = (error: any) => {
-    const rawErrorString =
-      typeof error?.code === "string"
-        ? error.code
-        : typeof error?.message === "string"
-          ? error.message
-          : undefined;
-
-    const authErrorMatch =
-      typeof rawErrorString === "string"
-        ? rawErrorString.match(/auth[\/:]([a-zA-Z0-9-]+)/) ||
-          rawErrorString.match(/\((auth\/[a-zA-Z0-9-]+)\)/)
-        : null;
-
-    const errorCode = authErrorMatch
-      ? authErrorMatch[1].replace(/^auth[\/:]/, "")
-      : undefined;
-
-    switch (errorCode) {
-      case "invalid-email":
-        return "Please enter a valid email address.";
-      case "user-disabled":
-        return "This account has been disabled. Please contact support.";
-      case "user-not-found":
-        return "No account was found with that email address.";
-      case "wrong-password":
-        return "Incorrect password. Please try again.";
-      case "email-already-in-use":
-        return "This email is already registered. Please log in or use a different email.";
-      case "weak-password":
-        return "Password must be at least 6 characters long.";
-      case "operation-not-allowed":
-        return "Email/password sign-in is not enabled. Please try a different sign-in method.";
-      case "invalid-credential":
-        return "We could not sign you in with gmail credentials. Please try again.";
-      default:
-        return "An unexpected error occurred. Please try again.";
-    }
+    return getAuthErrorMessage(error);
   };
 
   useEffect(() => {
     StatusBar.setBarStyle("dark-content", true);
   }, []);
-
-  // Code resend countdown
-  useEffect(() => {
-    if (codeCountdown > 0) {
-      const timer = setTimeout(() => setCodeCountdown(codeCountdown - 1), 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [codeCountdown]);
 
   // Handle Google Sign-In response
   useEffect(() => {
@@ -690,32 +643,19 @@ export default function AuthScreen() {
         return;
       }
 
-      console.log(
-        `Attempting to ${isLogin ? "login" : "register"} with email: ${email}`,
-      );
-
       if (isLogin) {
         // Perform login
         setLoading(true);
 
-        // Check if admin credentials - direct redirect to admin page
-        if (email === "admin@inevents.com" && password === "admin123456") {
-          try {
-            await login(email, password);
-          } catch {
-            // Admin user might not exist in Firebase Auth yet — register silently
-            await register(email, password, 'Admin', '', false, 'admin');
-          }
-          setLoading(false);
-          console.log("✅ Admin login successful! Redirecting to admin page...");
-          router.replace("/(admin)");
-          return;
-        }
-
         const userData = await login(email, password);
         setLoading(false);
 
-        console.log("✅ Login successful!");
+        if (!userData) return;
+
+        if (!userData.isEmailVerified) {
+          router.replace("/email-verification");
+          return;
+        }
 
         // Navigate based on user role
         if (userData?.role === "admin") {
@@ -732,15 +672,16 @@ export default function AuthScreen() {
           return;
         }
 
-        if (!validatePhoneNumber(phoneNumber)) {
+        if (!termsAccepted) {
+          setLegalModalType("terms");
+          Alert.alert(
+            "Terms & Privacy Policy required",
+            "You must accept the Terms of Service and Privacy Policy to create an account.",
+          );
           return;
         }
 
-        if (!isPhoneVerified) {
-          Alert.alert(
-            "Phone verification required",
-            "Please verify your phone number via WhatsApp before creating your account.",
-          );
+        if (!validatePhoneNumber(phoneNumber)) {
           return;
         }
 
@@ -767,25 +708,19 @@ export default function AuthScreen() {
           password,
           name,
           phoneNumber.trim(),
-          true,
+          false,
           userRole,
           artistDetails,
         );
         setLoading(false);
 
-        console.log(`✅ Registration successful! User role: ${userRole}`);
-
-        if (userRole === "artist") {
-          await navigateAfterAuth("/(artist)");
-        } else {
-          await navigateAfterAuth("/(client)");
-        }
+        router.replace("/email-verification");
       }
     } catch (error: any) {
       setLoading(false);
       console.error("Authentication error:", error);
       const errorMessage = getFriendlyAuthErrorMessage(error);
-      Alert.alert("Authentication Error", errorMessage);
+      setAuthError(errorMessage);
     }
   };
 
@@ -803,9 +738,7 @@ export default function AuthScreen() {
     setConfirmPasswordError("");
     setPhoneError("");
     setPhoneNumber("");
-    setIsPhoneVerified(false);
-    setCodeSent(false);
-    setVerificationCode('');
+    setAuthError("");
   };
 
   return (
@@ -853,6 +786,13 @@ export default function AuthScreen() {
             </Text>
           </View>
 
+          {/* Auth Error Banner */}
+          {authError && (
+            <View style={styles.authErrorBanner}>
+              <Text style={styles.authErrorText}>{authError}</Text>
+            </View>
+          )}
+
           {/* Form */}
           <View style={styles.formContainer}>
             {!isLogin && (
@@ -871,7 +811,6 @@ export default function AuthScreen() {
                   value={phoneNumber}
                   onChangeText={(text) => {
                     setPhoneNumber(text);
-                    setIsPhoneVerified(false);
                     if (phoneError) {
                       setPhoneError("");
                     }
@@ -881,100 +820,6 @@ export default function AuthScreen() {
                   error={phoneError}
                   placeholder="+212 6xx xxx xxx"
                 />
-
-                {!isPhoneVerified && !codeSent ? (
-                  <TouchableOpacity
-                    style={[styles.verifyButton, isSendingCode && styles.verifyButtonDisabled]}
-                    activeOpacity={0.85}
-                    onPress={async () => {
-                      if (!validatePhoneNumber(phoneNumber)) return;
-                      setIsSendingCode(true);
-                      try {
-                        const { formattedPhone: normPhone } = await initiatePhoneVerification(phoneNumber);
-                        setFormattedPhone(normPhone);
-                        setCodeSent(true);
-                        setCodeCountdown(60);
-                      } catch (error: any) {
-                        Alert.alert('Error', error?.message || 'Failed to send code');
-                      } finally {
-                        setIsSendingCode(false);
-                      }
-                    }}
-                    disabled={isSendingCode}
-                  >
-                    <Text style={styles.verifyButtonText}>
-                      {isSendingCode ? 'Sending...' : 'Verify via WhatsApp'}
-                    </Text>
-                  </TouchableOpacity>
-                ) : isPhoneVerified ? (
-                  <View style={[styles.verifyButton, styles.verifyButtonVerified]}>
-                    <Text style={[styles.verifyButtonText, styles.verifyButtonTextVerified]}>
-                      Phone verified
-                    </Text>
-                  </View>
-                ) : null}
-
-                {codeSent && !isPhoneVerified && (
-                  <View style={styles.inlineCodeContainer}>
-                    <TextInput
-                      style={styles.inlineCodeInput}
-                      value={verificationCode}
-                      onChangeText={setVerificationCode}
-                      placeholder="Enter 6-digit code"
-                      keyboardType="number-pad"
-                      maxLength={6}
-                    />
-                    <TouchableOpacity
-                      style={[styles.verifyButton, styles.verifyCodeButton, (isVerifyingCode || verificationCode.length !== 6) && styles.verifyButtonDisabled]}
-                      onPress={async () => {
-                        if (!verificationCode.trim() || verificationCode.length !== 6) {
-                          Alert.alert('Error', 'Please enter a valid 6-digit code');
-                          return;
-                        }
-                        setIsVerifyingCode(true);
-                        try {
-                          const verified = await verifyCode(formattedPhone || phoneNumber, verificationCode);
-                          if (verified) {
-                            setIsPhoneVerified(true);
-                            setPhoneError('');
-                          } else {
-                            Alert.alert('Invalid Code', 'The code is incorrect. Try again.');
-                          }
-                        } catch (error: any) {
-                          Alert.alert('Error', error?.message || 'Failed to verify code');
-                        } finally {
-                          setIsVerifyingCode(false);
-                        }
-                      }}
-                      disabled={isVerifyingCode || verificationCode.length !== 6}
-                    >
-                      <Text style={styles.verifyButtonText}>
-                        {isVerifyingCode ? 'Verifying...' : 'Verify Code'}
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.resendLink}
-                      onPress={async () => {
-                        if (codeCountdown > 0) return;
-                        setIsSendingCode(true);
-                        try {
-                          const { formattedPhone: normPhone } = await initiatePhoneVerification(phoneNumber);
-                          setFormattedPhone(normPhone);
-                          setCodeCountdown(60);
-                        } catch (error: any) {
-                          Alert.alert('Error', error?.message || 'Failed to resend code');
-                        } finally {
-                          setIsSendingCode(false);
-                        }
-                      }}
-                      disabled={codeCountdown > 0}
-                    >
-                      <Text style={[styles.resendLinkText, codeCountdown > 0 && styles.resendLinkTextDisabled]}>
-                        {codeCountdown > 0 ? `Resend in ${codeCountdown}s` : 'Resend code'}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
               </>
             )}
 
@@ -996,6 +841,33 @@ export default function AuthScreen() {
               error={passwordError}
               placeholder="Password"
             />
+
+            {isLogin && (
+              <TouchableOpacity
+                style={styles.forgotPasswordLink}
+                onPress={async () => {
+                  const trimmedEmail = email.trim();
+                  if (!trimmedEmail) {
+                    Alert.alert("Reset password", "Enter your email address first.");
+                    return;
+                  }
+                  if (!validateEmail(trimmedEmail)) return;
+                  try {
+                    await resetPassword(trimmedEmail);
+                    Alert.alert(
+                      "Check your email",
+                      "If an account exists for this email, we've sent a password reset link.",
+                    );
+                  } catch (error) {
+                    setAuthError(getPasswordResetErrorMessage(error));
+                  }
+                }}
+              >
+                <Text style={styles.forgotPasswordText}>
+                  Forgot Password?
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {!isLogin && (
               <ModernInput
@@ -1219,9 +1091,109 @@ export default function AuthScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
-          </View>
-        </KeyboardAwareScrollView>
+
+            {/* Legal — one checkbox with embedded links */}
+            <View style={styles.termsCheckRow}>
+              <TouchableOpacity
+                style={styles.termsCheckBox}
+                activeOpacity={0.7}
+                onPress={() => setTermsAccepted(!termsAccepted)}
+              >
+                <Ionicons
+                  name={termsAccepted ? "checkbox" : "square-outline"}
+                  size={22}
+                  color={termsAccepted ? "#6366F1" : "#9CA3AF"}
+                />
+              </TouchableOpacity>
+              <Text style={styles.termsCheckText}>
+                I have read and agree to{" "}
+                <Text
+                  style={styles.legalInlineLink}
+                  onPress={() => setLegalModalType("terms")}
+                >
+                  Terms of Service
+                </Text>{" "}
+                and{" "}
+                <Text
+                  style={styles.legalInlineLink}
+                  onPress={() => setLegalModalType("privacy")}
+                >
+                  Privacy Policy
+                </Text>
+              </Text>
+            </View>
+            </View>
+            </KeyboardAwareScrollView>
       </TouchableWithoutFeedback>
+
+      {/* Legal document modal (Privacy Policy / Terms of Service) */}
+      <Modal
+        visible={legalModalType !== null}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setLegalModalType(null)}
+      >
+        <View style={styles.legalModalOverlay}>
+          <View style={styles.legalModalContainer}>
+            <View style={styles.legalModalHeader}>
+              <Text style={styles.legalModalTitle}>
+                {legalModalType === "privacy"
+                  ? "Privacy Policy"
+                  : "Terms of Service"}
+              </Text>
+              <TouchableOpacity
+                onPress={() => setLegalModalType(null)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="close" size={26} color="#1F2937" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.legalModalBody}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.legalModalBodyContent}
+            >
+              {(legalModalType === "privacy"
+                ? privacyPolicySections
+                : termsOfServiceSections
+              ).map((section, index) => (
+                <View key={index} style={styles.legalSectionCard}>
+                  <Text style={styles.legalSectionTitle}>
+                    {section.title}
+                  </Text>
+                  <Text style={styles.legalSectionContent}>
+                    {section.content}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
+
+            <View style={styles.legalModalActions}>
+              <TouchableOpacity
+                style={[styles.legalRefuseButton]}
+                onPress={() => {
+                  setTermsAccepted(false);
+                  setLegalModalType(null);
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.legalRefuseText}>Refuse</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.legalAcceptButton}
+                onPress={() => {
+                  setTermsAccepted(true);
+                  setLegalModalType(null);
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.legalAcceptText}>Accept</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1396,6 +1368,22 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
 
+  // ── Auth Errors ─────────────────────────────────────
+  authErrorBanner: {
+    backgroundColor: "#FEF2F2",
+    borderLeft: "4px solid #EF4444",
+    padding: 12,
+    marginBottom: 20,
+    borderRadius: 8,
+    marginHorizontal: 24,
+  },
+
+  authErrorText: {
+    color: "#B91C1C",
+    fontSize: 14,
+    fontWeight: "500",
+  },
+
   // ── Buttons ────────────────────────────────────────
   button: {
     borderRadius: 16,
@@ -1435,76 +1423,6 @@ const styles = StyleSheet.create({
 
   buttonTextOutline: {
     color: "#6366F1",
-  },
-
-  verifyButton: {
-    borderRadius: 16,
-    paddingVertical: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 18,
-    backgroundColor: "#25D366",
-    shadowColor: "#25D366",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    elevation: 3,
-  },
-
-  verifyButtonVerified: {
-    backgroundColor: "#E5F4EA",
-    shadowColor: "#10B981",
-  },
-
-  verifyButtonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-
-  verifyButtonTextVerified: {
-    color: "#10B981",
-  },
-
-  verifyButtonDisabled: {
-    opacity: 0.6,
-  },
-
-  verifyCodeButton: {
-    backgroundColor: "#6366f1",
-    shadowColor: "#6366f1",
-    marginBottom: 4,
-  },
-
-  inlineCodeContainer: {
-    marginBottom: 18,
-  },
-
-  inlineCodeInput: {
-    borderWidth: 1,
-    borderColor: "#d1d5db",
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 18,
-    textAlign: "center",
-    letterSpacing: 2,
-    backgroundColor: "#f9fafb",
-    marginBottom: 12,
-  },
-
-  resendLink: {
-    alignItems: "center",
-    paddingVertical: 8,
-  },
-
-  resendLinkText: {
-    color: "#6366f1",
-    fontSize: 14,
-    fontWeight: "500",
-  },
-
-  resendLinkTextDisabled: {
-    color: "#9ca3af",
   },
 
   submitButton: {
@@ -1586,6 +1504,148 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     fontSize: 15,
     marginLeft: 4,
+  },
+
+  // ── Legal Consent ─────────────────────────────
+  termsCheckRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "center",
+    marginTop: 24,
+    paddingHorizontal: 20,
+    gap: 10,
+  },
+
+  termsCheckBox: {
+    width: 24,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 1,
+  },
+
+  termsCheckText: {
+    flex: 1,
+    color: "#4B5563",
+    fontSize: 13,
+    lineHeight: 19,
+  },
+
+  legalInlineLink: {
+    color: "#6366F1",
+    fontWeight: "600",
+    textDecorationLine: "underline",
+  },
+
+  forgotPasswordLink: {
+    marginTop: 16,
+    paddingHorizontal: 24,
+    alignSelf: "center",
+  },
+
+  forgotPasswordText: {
+    color: "#6366F1",
+    fontSize: 14,
+    fontWeight: "500",
+    textAlign: "center",
+  },
+
+  // Legal document modal
+  legalModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.6)",
+    justifyContent: "flex-end",
+  },
+
+  legalModalContainer: {
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: height * 0.85,
+    paddingBottom: 28,
+  },
+
+  legalModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF2F7",
+  },
+
+  legalModalTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+
+  legalModalBody: {
+    maxHeight: height * 0.55,
+  },
+
+  legalModalBodyContent: {
+    padding: 20,
+    gap: 16,
+  },
+
+  legalSectionCard: {
+    backgroundColor: "#F8FAFC",
+    borderRadius: 12,
+    padding: 16,
+  },
+
+  legalSectionTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#0F172A",
+    marginBottom: 8,
+  },
+
+  legalSectionContent: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: "#4B5563",
+  },
+
+  legalModalActions: {
+    flexDirection: "row",
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#EEF2F7",
+  },
+
+  legalRefuseButton: {
+    flex: 1,
+    height: 50,
+    borderRadius: 14,
+    backgroundColor: "#F3F4F6",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  legalRefuseText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#6B7280",
+  },
+
+  legalAcceptButton: {
+    flex: 1,
+    height: 50,
+    borderRadius: 14,
+    backgroundColor: "#6366F1",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  legalAcceptText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#FFFFFF",
   },
 
   // ── Role Cards ─────────────────────────────────────

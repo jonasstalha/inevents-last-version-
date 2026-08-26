@@ -100,8 +100,13 @@ export default function ProfileScreen() {
       return;
     }
 
+    if (!user.isEmailVerified) {
+      router.replace('/email-verification');
+      return;
+    }
+
     setNeedsLogin(false);
-  }, [authLoading, user]);
+  }, [authLoading, user, router]);
 
   // ── live data sync (runs once per mount for this user) ────────────────────
   useEffect(() => {
