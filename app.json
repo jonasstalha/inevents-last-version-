@@ -7,7 +7,7 @@
       "policy": "sdkVersion"
     },
     "orientation": "portrait",
-    "icon": "./assets/indexpage/icon.png",
+    "icon": "./assets/indexpage/icon-square.png",
     "splash": {
       "image": "./assets/indexpage/icon.png",
       "backgroundColor": "#5B5BD6",
