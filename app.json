@@ -19,6 +19,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.ios.inevent",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "This app requires location access to pick your event venue and service location.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Location access is used to select delivery and service locations for your order.",
@@ -37,7 +38,7 @@
       "router": {},
       "cloudFunctionBaseUrl": "https://us-central1-inevents-2fe56.cloudfunctions.net",
       "eas": {
-        "projectId": "afeba79f-e762-4cff-9265-0180546f9582"
+        "projectId": "83d171a5-5e5d-4d60-bbcb-f4a541efc109"
       }
     },
     "android": {
@@ -50,8 +51,18 @@
       "expo-router",
       "expo-web-browser",
       "@react-native-community/datetimepicker",
+      "@react-native-firebase/app",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "15.1",
+            "useFrameworks": "static"
+          }
+        }
+      ],
       "./plugins/withFirebaseModularHeaders"
     ],
-    "owner": "jsx789666"
+    "owner": "dino7896"
   }
 }
