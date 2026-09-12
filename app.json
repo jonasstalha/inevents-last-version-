@@ -56,12 +56,17 @@
         "expo-build-properties",
         {
           "ios": {
-            "deploymentTarget": "15.1",
+            "deploymentTarget": "16.4",
             "useFrameworks": "static"
           }
         }
       ],
-      "./plugins/withFirebaseModularHeaders"
+      "./plugins/withFirebaseModularHeaders",
+      "expo-image",
+      "expo-sharing",
+      "expo-splash-screen",
+      "expo-status-bar",
+      "expo-video"
     ],
     "owner": "dino7896"
   }

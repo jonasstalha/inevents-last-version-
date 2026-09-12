@@ -6,7 +6,7 @@ import { getAuth } from 'firebase/auth';
 import { ArrowLeft } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, PROVIDER_GOOGLE } from '@/src/components/common/NativeMap';
 
 const getStatusColor = (status: string): string => {
   switch (status) {

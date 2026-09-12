@@ -26,38 +26,12 @@ import { useAuth } from '../../context/AuthContext';
 import { addServiceToFirebase, addTicketToFirebase } from '../../firebase/artistsService';
 import { updateServiceWithImages } from '../../firebase/artistServices';
 import { useArtistStore } from './ArtistStore';
+import NativeMap, { Circle as NativeCircle, Marker as NativeMarker } from '../common/NativeMap';
 
-// Map components - loaded lazily to avoid initialization errors
-let MapView: any = null;
-let Marker: any = null;
-let Circle: any = null;
-let mapLoadError = false;
-let mapsLoaded = false;
-
-const loadMapsIfNeeded = () => {
-  if (mapsLoaded || mapLoadError || Platform.OS === 'web') return;
-  
-  try {
-    const maps = require('react-native-maps');
-    MapView = maps.default || maps.MapView;
-    Marker = maps.Marker;
-    Circle = maps.Circle || null;
-    mapsLoaded = true;
-    console.log('react-native-maps loaded successfully');
-  } catch (e) {
-    try {
-      const maps = require('expo-maps');
-      MapView = maps.MapView;
-      Marker = maps.Marker;
-      Circle = maps.Circle || null;
-      mapsLoaded = true;
-      console.log('expo-maps loaded successfully');
-    } catch (e2) {
-      console.log('Maps not available on this platform');
-      mapLoadError = true;
-    }
-  }
-};
+const MapView: any = NativeMap;
+const Marker: any = NativeMarker;
+const Circle: any = NativeCircle;
+const mapLoadError = false;
 
 // Fallback type for MapPressEvent for web
 let MapPressEvent: any = undefined;
@@ -168,11 +142,7 @@ export default function Ticket() {
   // Load maps when location modal opens
   useEffect(() => {
     if (locationModalVisible && !mapsReady && !mapLoadError) {
-      loadMapsIfNeeded();
-      // Check if maps loaded after a small delay
-      setTimeout(() => {
-        setMapsReady(true);
-      }, 500);
+      setMapsReady(Platform.OS !== 'web');
     }
   }, [locationModalVisible]);
 

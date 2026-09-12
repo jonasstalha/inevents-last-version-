@@ -8,7 +8,7 @@ import { addServiceReview } from "@/src/firebase/reviewService";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { ResizeMode, Video } from "expo-av";
+import { useVideoPlayer, VideoView } from "expo-video";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getAuth } from "firebase/auth";
 import { getDownloadURL, ref as storageRef } from "firebase/storage";
@@ -104,6 +104,21 @@ type MediaItem = {
   uri: string;
 };
 
+function ServiceVideo({ uri, style }: { uri: string; style: any }) {
+  const player = useVideoPlayer(uri, (videoPlayer) => {
+    videoPlayer.loop = false;
+  });
+
+  return (
+    <VideoView
+      player={player}
+      style={style}
+      nativeControls
+      contentFit="contain"
+    />
+  );
+}
+
 export default function ServiceDetailScreen() {
   const { gigId } = useLocalSearchParams();
   const serviceId = Array.isArray(gigId) ? gigId[0] : gigId;
@@ -165,8 +180,6 @@ export default function ServiceDetailScreen() {
     uri: string;
     index: number;
   } | null>(null);
-  const videoRef = useRef<any>(null);
-
   const scrollY = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -1243,15 +1256,7 @@ export default function ServiceDetailScreen() {
                 renderItem={({ item, index }) => (
                   <View style={styles.mediaSlide}>
                     {item.type === "video" ? (
-                      <Video
-                        ref={item.uri === mediaItems[selectedImage]?.uri ? videoRef : undefined}
-                        source={{ uri: item.uri }}
-                        style={styles.mainImage}
-                        useNativeControls
-                        isLooping={false}
-                        resizeMode={ResizeMode.CONTAIN}
-                        onError={(e) => console.error("Video error:", e)}
-                      />
+                      <ServiceVideo uri={item.uri} style={styles.mainImage} />
                     ) : (
                       <TouchableOpacity
                         activeOpacity={0.95}
@@ -2315,20 +2320,9 @@ export default function ServiceDetailScreen() {
               )}
 
               {previewMedia?.type === "video" && (
-                <Video
-                  source={{ uri: previewMedia.uri }}
+                <ServiceVideo
+                  uri={previewMedia.uri}
                   style={styles.fullScreenVideo}
-                  useNativeControls
-                  shouldPlay={true}
-                  isLooping={false}
-                  onError={(e) => {
-                    console.error("Video error:", e);
-                    Alert.alert(
-                      "Video Error",
-                      "Failed to load video. Please try again.",
-                    );
-                  }}
-                  progressUpdateIntervalMillis={500}
                 />
               )}
             </View>

@@ -17,7 +17,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import MapView, { Marker } from 'react-native-maps';
+import MapView, { Marker } from '../common/NativeMap';
 import { Theme } from '../../constants/theme';
 import { createServiceWithImages, updateServiceWithImages } from '../../firebase/artistServices';
 import { pickImages, pickVideo } from '../../firebase/storageService';

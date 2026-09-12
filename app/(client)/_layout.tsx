@@ -1,6 +1,5 @@
 import { useAuth } from '@/src/context/AuthContext';
 import { FontAwesome5 } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
 import { Tabs, useRouter } from 'expo-router';
 import { collection, getDocs, getFirestore, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
 import { Bell, LogIn } from 'lucide-react-native';
@@ -62,7 +61,6 @@ const Theme = {
 
 // Header component with title and right icons
 function Header({ title }) {
-  const navigation = useNavigation();
   const router = useRouter();
   const { user } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
