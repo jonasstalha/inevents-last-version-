@@ -8,8 +8,8 @@ const path = require('path');
 const serviceAccount = require(path.join(__dirname, 'serviceAccountKey.json'));
 
 // TODO: Change these to your desired admin credentials
-const ADMIN_EMAIL = 'admin@example.com';
-const ADMIN_PASSWORD = 'Admin123';
+const ADMIN_EMAIL = 'admin@inevent.ma';
+const ADMIN_PASSWORD = 'inevent2026';
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),

@@ -1,9 +1,9 @@
 import { useAuth } from '@/src/context/AuthContext';
+import { getAuthErrorMessage } from '@/src/utils/authErrors';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { getAuthErrorMessage } from '@/src/utils/authErrors';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -268,7 +268,7 @@ export default function AuthScreen() {
         setLoading(false);
         
          if (userRole) {
-           if (!userRole.isEmailVerified) {
+          if (!userRole.isEmailVerified && userRole.role !== 'admin') {
              router.replace('/email-verification');
              return;
            }

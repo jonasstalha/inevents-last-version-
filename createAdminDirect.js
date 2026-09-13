@@ -17,60 +17,38 @@ const firebaseConfig = {
 };
 
 async function createAdminDirect() {
+  const adminEmail = 'admin@inevent.ma';
+  const adminPassword = 'inevent2026';
+
   try {
-    console.log('🔥 Creating admin user for direct admin access...');
-    
+    console.log('Creating admin user for direct admin access...');
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
     const auth = getAuth(app);
-    
-    const adminEmail = 'admin@inevents.com';
-    const adminPassword = 'admin123456';
-    
-    try {
-      // Create user in Firebase Auth
-      const userCredential = await createUserWithEmailAndPassword(auth, adminEmail, adminPassword);
-      const userId = userCredential.user.uid;
-      
-      // Create admin user document in Firestore
-      const userRef = doc(db, 'users', userId);
-      await setDoc(userRef, {
-        id: userId,
-        name: 'Admin User',
-        email: adminEmail,
-        phone: '+1-555-0000',
-        role: 'admin',
-        status: 'active',
-        signupDate: new Date(),
-        lastLogin: new Date(),
-        revenue: 0,
-        region: 'Admin Region',
-        isAdmin: true
-      });
-      
-      console.log('✅ Admin user created successfully!');
-      console.log('\n📋 Admin Credentials:');
-      console.log('─────────────────────────────────────');
-      console.log('Email: admin@inevents.com');
-      console.log('Password: admin123456');
-      console.log('─────────────────────────────────────');
-      console.log('\nThis admin user will be redirected directly to the admin page.');
-      
-    } catch (error) {
-      if (error.code === 'auth/email-already-in-use') {
-        console.log('⚠️  Admin user already exists');
-        console.log('\n📋 Admin Credentials:');
-        console.log('─────────────────────────────────────');
-        console.log('Email: admin@inevents.com');
-        console.log('Password: admin123456');
-        console.log('─────────────────────────────────────');
-      } else {
-        console.error('❌ Error creating admin user:', error.message);
-      }
-    }
-    
+    const userCredential = await createUserWithEmailAndPassword(auth, adminEmail, adminPassword);
+    const userId = userCredential.user.uid;
+
+    await setDoc(doc(db, 'users', userId), {
+      id: userId,
+      name: 'Admin User',
+      email: adminEmail,
+      phone: '+1-555-0000',
+      role: 'admin',
+      status: 'active',
+      signupDate: new Date(),
+      lastLogin: new Date(),
+      revenue: 0,
+      region: 'Admin Region',
+      isAdmin: true,
+    });
+
+    console.log(`Admin user created: ${adminEmail}`);
   } catch (error) {
-    console.error('❌ Error:', error.message);
+    if (error.code === 'auth/email-already-in-use') {
+      console.error(`Admin user already exists: ${adminEmail}. Reset its password in Firebase Console if needed.`);
+    } else {
+      console.error('Error creating admin user:', error.message);
+    }
   }
 }
 

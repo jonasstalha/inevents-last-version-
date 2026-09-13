@@ -1,17 +1,19 @@
+import { registerPushTokenForUser } from '@/src/services/pushNotifications';
+import Constants from 'expo-constants';
 import {
-  createUserWithEmailAndPassword,
-  User as FirebaseUser,
-  onAuthStateChanged,
-  reload,
-  sendEmailVerification,
-  sendPasswordResetEmail,
-  signInWithEmailAndPassword,
-  signOut
+    createUserWithEmailAndPassword,
+    User as FirebaseUser,
+    onAuthStateChanged,
+    reload,
+    sendPasswordResetEmail,
+    signInWithEmailAndPassword,
+    signOut
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { auth, db } from '../firebase/firebaseConfig';
-import { registerPushTokenForUser } from '@/src/services/pushNotifications';
+
+const cloudFunctionBaseUrl = Constants.expoConfig?.extra?.cloudFunctionBaseUrl as string;
 
 interface User {
   uid: string;
@@ -195,7 +197,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-const register = async (
+  const sendCustomVerificationEmail = async (firebaseUser: FirebaseUser) => {
+    const idToken = await firebaseUser.getIdToken();
+    const response = await fetch(`${cloudFunctionBaseUrl}/sendVerificationEmail`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({ email: firebaseUser.email }),
+    });
+    if (!response.ok) {
+      throw new Error('Unable to send verification email');
+    }
+  };
+
+  const register = async (
     email: string,
     password: string,
     name: string,
@@ -231,7 +248,7 @@ const register = async (
       };
 
       await setDoc(doc(db, 'users', firebaseUser.uid), userData);
-      await sendEmailVerification(firebaseUser);
+      await sendCustomVerificationEmail(firebaseUser);
       setUser(userData);
     } catch (error) {
       console.error('Registration error:', error);
@@ -270,7 +287,7 @@ const register = async (
   const resendVerificationEmail = async () => {
     const firebaseUser = auth.currentUser;
     if (!firebaseUser) throw new Error('No authenticated user');
-    await sendEmailVerification(firebaseUser);
+    await sendCustomVerificationEmail(firebaseUser);
   };
 
   const resetPassword = async (email: string) => {

@@ -1,0 +1,21 @@
+* [33m9b6c24d[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m)[m Fix iOS video module and update Expo dependencies
+* [33m4dcbd43[m fix iOS Firebase build configuration
+* [33mee4be1f[m fix Expo app icon configuration
+* [33mbadd816[m fix iOS Firebase pod integration
+* [33m1d55b7e[m fix authentication orders coupons and booking UX
+* [33m545d2c9[m[33m ([m[1;32magents/remove-provider-button-update[m[33m)[m recap: invoices hub (filter chips, notifications, stats), admin services (real views/orders, gold approval, price cleanup), dashboard improvements, auth refinements
+* [33m4ae12e7[m Initial commit
+* [33m3400334[m Agent host session 8cbb7fa0-1467-41f0-bbda-dd29c6385e27 - turn 2
+* [33m41af131[m Agent host session 8cbb7fa0-1467-41f0-bbda-dd29c6385e27 - turn 1
+* [33md1e7da3[m Agent host session 8cbb7fa0-1467-41f0-bbda-dd29c6385e27 - baseline checkpoint
+* [33m5ff4a09[m[33m ([m[1;31morigin/master[m[33m)[m save changes complete client less
+*   [33m575c1f4[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Merge: Resolve conflicts by keeping enhanced authentication system
+[33m|[m[34m\[m  
+[33m|[m * [33m32ac7b3[m savee for gomme worj
+[33m|[m * [33mb2423d3[m save
+[33m|[m * [33m4734e7c[m Add coupon management system and user statistics improvements
+[33m|[m * [33m4f40a17[m this is sqve profile
+[33m|[m * [33m72c6995[m Fix modal sizing and implement custom order flow with personal info forms
+[33m|[m * [33ma3e9aa7[m Fix missing topTickets and topGlobalServices state variables
+[33m|[m * [33mec5e859[m Initial commit: InEvents React Native app with Firebase integration
+* [33m7d8b829[m docs: Add GitHub ready status - all code complete and ready to push

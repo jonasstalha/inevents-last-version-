@@ -1,7 +1,7 @@
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { getAuth, signOut } from 'firebase/auth';
-import { LogOut, LayoutDashboard, Users, Briefcase, CreditCard, Ticket } from 'lucide-react-native';
-import React, { useEffect } from 'react';
+import { Briefcase, CreditCard, LayoutDashboard, LogOut, Ticket, Users } from 'lucide-react-native';
+import { useEffect } from 'react';
 import { Alert, BackHandler, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Theme } from '../../src/constants/theme';
@@ -33,7 +33,7 @@ export default function AdminLayout() {
   useEffect(() => {
     if (loading) return;
     if (!user) router.replace('/auth');
-    else if (!user.isEmailVerified) router.replace('/email-verification');
+    else if (!user.isEmailVerified && user.role !== 'admin') router.replace('/email-verification');
     else if (user.role !== 'admin') router.replace(user.role === 'artist' ? '/(artist)' : '/(client)');
   }, [loading, user, router]);
 

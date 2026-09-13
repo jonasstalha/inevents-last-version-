@@ -8,6 +8,7 @@ import {
   ArrowUp,
   BarChart3,
   Bell,
+  Calendar,
   Check,
   ChevronRight,
   Circle,
@@ -3029,7 +3030,7 @@ service cloud.firestore {
                   <Text style={{ color: newCoupon.expirationDate ? '#333' : '#999', fontSize: 14 }}>
                     {newCoupon.expirationDate || 'Select expiration date'}
                   </Text>
-                  <Ionicons name="calendar-outline" size={18} color={Theme.colors.primary} />
+                  <Calendar size={18} color={Theme.colors.primary} />
                 </TouchableOpacity>
                 {showCouponExpiryPicker && (
                   <DateTimePicker

@@ -5,7 +5,7 @@ import { getAuth } from 'firebase/auth';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fetchServicesByArtistId, deleteServiceWithImages } from '../../src/firebase/artistServices';
+import { deleteServiceWithImages, fetchServicesByArtistId } from '../../src/firebase/artistServices';
 import { fetchArtistById } from '../../src/firebase/artistsService';
 
 type ServiceCardProps = {
@@ -173,7 +173,10 @@ const PublicProfile = () => {
   };
 
   const handleViewDetails = useCallback((serviceId: string) => {
-    router.push(`/(client)/(hidden)/gig/${serviceId}`);
+    Alert.alert(
+      'Customer access required',
+      'Log out and sign in as a customer to view the customer service page.',
+    );
   }, [router]);
 
   const handleDeleteService = async (serviceId: string) => {

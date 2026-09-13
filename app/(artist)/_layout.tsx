@@ -1,13 +1,12 @@
 // @ts-nocheck
-import React, { useEffect, useState } from 'react';
-import { Tabs, useRouter } from 'expo-router';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { Platform, StyleSheet, Text, TouchableOpacity, View, Animated, Easing } from 'react-native';
-import { FontAwesome5, Ionicons } from '@expo/vector-icons';
-import { LucideIcon } from '@/components/ui/LucideIcon';
-import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
+import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/src/context/AuthContext';
+import { FontAwesome5, Ionicons } from '@expo/vector-icons';
+import { Tabs, useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { Animated, BackHandler, Easing, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 const Theme = {
   spacing: { sm: 8, md: 12, lg: 16 },
@@ -119,6 +118,17 @@ export default function ArtistLayout() {
     else if (!user.isEmailVerified) router.replace('/email-verification');
     else if (user.role !== 'artist' && user.role !== 'admin') router.replace('/(client)');
   }, [loading, user, router]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android' || loading || !user || (user.role !== 'artist' && user.role !== 'admin')) return;
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      BackHandler.exitApp();
+      return true;
+    });
+
+    return () => subscription.remove();
+  }, [loading, user]);
 
   const getPageTitle = (routeName: string) => {
     switch (routeName) {

@@ -49,6 +49,52 @@ exports.sendEmail = functions
   }
 });
 
+// Sends Firebase verification links through the configured SMTP provider.
+exports.sendVerificationEmail = functions
+  .runWith({
+    secrets: ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS'],
+  })
+  .https.onRequest(async (req, res) => {
+    if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
+
+    try {
+      const authorization = req.headers.authorization || '';
+      if (!authorization.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Missing authorization token' });
+      }
+
+      const decodedToken = await admin.auth().verifyIdToken(authorization.slice(7));
+      const email = decodedToken.email;
+      if (!email || email.toLowerCase() !== String(req.body?.email || '').toLowerCase()) {
+        return res.status(403).json({ error: 'Email does not match authenticated user' });
+      }
+
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(process.env.SMTP_PORT || 587),
+        secure: Number(process.env.SMTP_PORT || 587) === 465,
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS,
+        },
+      });
+      const verificationLink = await admin.auth().generateEmailVerificationLink(email);
+
+      await transporter.sendMail({
+        from: 'verefecation@inevent.ma',
+        to: email,
+        subject: 'Verify your inEvent email address',
+        text: `Verify your inEvent email address by opening this link:\n\n${verificationLink}`,
+        html: `<p>Verify your inEvent email address:</p><p><a href="${verificationLink}">Verify email address</a></p>`,
+      });
+
+      return res.status(200).json({ success: true });
+    } catch (error) {
+      console.error('Verification email error:', error);
+      return res.status(500).json({ error: 'Unable to send verification email' });
+    }
+  });
+
 // WhatsApp verification sender function
 // Requires environment variables: WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN
 exports.sendWhatsAppVerification = functions

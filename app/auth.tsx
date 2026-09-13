@@ -1,33 +1,31 @@
-import { useAuth } from "@/src/context/AuthContext";
 import { privacyPolicySections, termsOfServiceSections } from "@/src/constants/legal";
+import { useAuth } from "@/src/context/AuthContext";
 import { auth, db } from "@/src/firebase/firebaseConfig";
+import { getAuthErrorMessage, getPasswordResetErrorMessage } from "@/src/utils/authErrors";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as AuthSession from "expo-auth-session";
 import * as Google from "expo-auth-session/providers/google";
 import { useRouter } from "expo-router";
 import { GoogleAuthProvider, signInWithCredential } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  Image,
-  Keyboard,
-  Modal,
-  Platform,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
-  View,
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    Keyboard,
+    Modal,
+    Platform,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    TouchableWithoutFeedback,
+    View
 } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
-import { getAuthErrorMessage, getPasswordResetErrorMessage } from "@/src/utils/authErrors";
 
 const { width, height } = Dimensions.get("window");
 const AUTH_PENDING_REDIRECT_KEY = "@auth_pending_redirect";
@@ -652,7 +650,7 @@ export default function AuthScreen() {
 
         if (!userData) return;
 
-        if (!userData.isEmailVerified) {
+        if (!userData.isEmailVerified && userData.role !== "admin") {
           router.replace("/email-verification");
           return;
         }
