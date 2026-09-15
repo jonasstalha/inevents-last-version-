@@ -1,6 +1,7 @@
 import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, orderBy, query, setDoc, updateDoc, where, Timestamp, serverTimestamp } from 'firebase/firestore';
 import { Order, OrderStatus, OrderType } from '../models/types';
 import { db, firebaseConfigObject } from './firebaseConfig';
+import { removePointsForRelatedOrder } from './rewardsService';
 
 const CLOUD_FUNCTION_BASE_URL = `https://us-central1-${firebaseConfigObject.projectId}.cloudfunctions.net`;
 
@@ -268,6 +269,23 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
     console.error('Failed updating order status:', error);
     throw error;
   }
+}
+
+export async function cancelOrder(orderId: string, clientId: string): Promise<void> {
+  const orderRef = doc(db, 'orders', orderId);
+  const snapshot = await getDoc(orderRef);
+  if (!snapshot.exists()) throw new Error('Order not found');
+
+  const order = snapshot.data() as any;
+  if (order.clientId !== clientId) throw new Error('You can only cancel your own orders');
+  if (!['pending', 'counter_offered', 'confirmed'].includes(order.status)) {
+    throw new Error('This order cannot be cancelled');
+  }
+
+  const pointsRemoved = await removePointsForRelatedOrder(clientId, orderId);
+  if (!pointsRemoved) throw new Error('Unable to remove order points');
+
+  await deleteDoc(orderRef);
 }
 
 export async function confirmOrder(orderId: string): Promise<void> {

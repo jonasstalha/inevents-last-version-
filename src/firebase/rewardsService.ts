@@ -10,7 +10,7 @@
  * pointsConfig/{rulesDoc}   ← point rules (editable in real-time; need an admin UI)
  */
 
-import { addDoc, collection, doc, getDoc, getDocs, getFirestore, increment, onSnapshot, orderBy, query, setDoc, Timestamp, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, getFirestore, increment, onSnapshot, orderBy, query, runTransaction, setDoc, Timestamp, updateDoc, where } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import app from './firebaseConfig';
 import { getPointsConfig, PointsConfigResult, WritePointsConfig } from './pointsConfigService';
@@ -134,7 +134,8 @@ export async function loadRewardRules(): Promise<void> {
  * Returns an unsubscribe function.
  */
 export function subscribeRewardRules(onNext: () => void): () => void {
-  return getPointsConfig().then(() => onNext());
+  void getPointsConfig().then(() => onNext());
+  return () => undefined;
 }
 
 /** Expose the currently cached rules — call after `loadRewardRules()` first. */
@@ -275,6 +276,44 @@ export async function addPoints(
     return true;
   } catch (error) {
     console.error('Error adding points:', error);
+    return false;
+  }
+}
+
+export async function removePointsForRelatedOrder(userId: string, orderId: string): Promise<boolean> {
+  try {
+    const transactionsQuery = query(
+      collection(db, 'rewardTransactions'),
+      where('userId', '==', userId),
+      where('relatedId', '==', orderId),
+    );
+    const transactionsSnapshot = await getDocs(transactionsQuery);
+    if (transactionsSnapshot.empty) return true;
+
+    const rewardRef = doc(db, 'userRewards', userId);
+    await runTransaction(db, async (transaction) => {
+      const rewardSnapshot = await transaction.get(rewardRef);
+      const pointsToRemove = transactionsSnapshot.docs.reduce(
+        (total, transactionDoc) => total + Math.max(0, Number(transactionDoc.data().points) || 0),
+        0,
+      );
+
+      transactionsSnapshot.docs.forEach((transactionDoc) => transaction.delete(transactionDoc.ref));
+      if (rewardSnapshot.exists() && pointsToRemove > 0) {
+        const rewardData = rewardSnapshot.data();
+        const currentPoints = Number(rewardData.totalPoints) || 0;
+        const lifetimePoints = Number(rewardData.lifetimePoints) || 0;
+        transaction.update(rewardRef, {
+          totalPoints: Math.max(0, currentPoints - pointsToRemove),
+          lifetimePoints: Math.max(0, lifetimePoints - pointsToRemove),
+          lastUpdated: Timestamp.now(),
+        });
+      }
+    });
+
+    return true;
+  } catch (error) {
+    console.error('Error removing points for cancelled order:', error);
     return false;
   }
 }

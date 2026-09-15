@@ -1,5 +1,6 @@
 
 import { Ionicons } from '@expo/vector-icons';
+import { Image as CachedImage } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getAuth } from 'firebase/auth';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -113,13 +114,22 @@ const PublicProfile = () => {
       try {
         const artist = await fetchArtistById(targetArtistId);
         if (artist) {
+          const gigs = await fetchServicesByArtistId(targetArtistId);
+          const ratedGigs = gigs.filter((gig: any) => Number(gig.reviewCount) > 0);
+          const totalReviews = ratedGigs.reduce((sum: number, gig: any) => sum + Number(gig.reviewCount || 0), 0);
+          const weightedRating = totalReviews > 0
+            ? ratedGigs.reduce(
+                (sum: number, gig: any) => sum + Number(gig.rating || 0) * Number(gig.reviewCount || 0),
+                0,
+              ) / totalReviews
+            : 0;
+
           setArtistProfile({
             name: artist.name,
             avatar: artist.profileImage || 'https://ui-avatars.com/api/?name=Artist',
             description: artist.bio || '',
-            rating: artist.rating || 0,
+            rating: weightedRating,
           });
-          const gigs = await fetchServicesByArtistId(targetArtistId);
           setServices(gigs);
         }
       } catch (e) {
@@ -232,7 +242,13 @@ const PublicProfile = () => {
     <View style={styles.headerSection}>
       <View style={styles.profileHeaderCard}>
         <View style={styles.avatarWrapper}>
-          <Image source={{ uri: artistProfile?.avatar }} style={styles.avatar} />
+          <CachedImage
+            source={artistProfile?.avatar}
+            style={styles.avatar}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            recyclingKey={artistProfile?.avatar}
+          />
         </View>
         <Text style={styles.name}>{artistProfile?.name}</Text>
         <Text style={styles.description}>{artistProfile?.description}</Text>
@@ -344,8 +360,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    borderWidth: 3,
-    borderColor: '#fff',
+    overflow: 'hidden',
     marginBottom: 8,
   },
   name: {
@@ -454,11 +469,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   avatarWrapper: {
+    width: 86,
+    height: 86,
     alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 8,
     borderWidth: 3,
     borderColor: '#fff',
-    borderRadius: 50,
+    borderRadius: 43,
     overflow: 'hidden',
     shadowColor: '#6a0dad',
     shadowOpacity: 0.15,

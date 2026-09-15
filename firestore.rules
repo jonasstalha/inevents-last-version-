@@ -30,8 +30,11 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if true; // Public read for user discovery and profiles
       allow create: if isAuthenticated();
-      allow update: if isOwnerOrAdmin(userId);
-      allow delete: if isAdmin();
+      allow update: if isOwnerOrAdmin(userId) || (
+        isAuthenticated() &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly(['rating', 'ratingUpdatedAt'])
+      );
+      allow delete: if isOwnerOrAdmin(userId);
       
       // User's tickets subcollection
       match /tickets/{ticketId} {
@@ -51,7 +54,11 @@ service cloud.firestore {
       // User's services/gigs subcollection
       match /services/{serviceId} {
         allow read: if true; // Public read for marketplace
-        allow create, update: if isOwnerOrAdmin(userId);
+        allow create: if isOwnerOrAdmin(userId);
+        allow update: if isOwnerOrAdmin(userId) || (
+          isAuthenticated() &&
+          request.resource.data.diff(resource.data).changedKeys().hasOnly(['rating', 'reviewCount', 'ratingUpdatedAt'])
+        );
         allow delete: if isAuthenticated() && (
           request.auth.uid == userId ||
           request.auth.uid == resource.data.artistId ||
@@ -220,7 +227,10 @@ service cloud.firestore {
 
       // A client may delete only their own order; admins may delete any order.
       allow delete: if isAdmin() ||
-        (isAuthenticated() && request.auth.uid == resource.data.clientId);
+        (isAuthenticated() && (
+          request.auth.uid == resource.data.clientId ||
+          request.auth.uid == resource.data.artistId
+        ));
     }
     
     // DEPRECATED: These collections are no longer used
@@ -273,7 +283,7 @@ service cloud.firestore {
       allow read: if isAuthenticated() && 
         (request.auth.uid == userId || isAdmin());
       allow create, update: if isAuthenticated() && request.auth.uid == userId;
-      allow delete: if isAdmin();
+      allow delete: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
     }
     
     // User rewards (loyalty program data)
@@ -302,7 +312,8 @@ service cloud.firestore {
          isAdmin());
       allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
       allow update: if isAuthenticated() && request.auth.uid == resource.data.userId;
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() ||
+        (isAuthenticated() && request.auth.uid == resource.data.userId);
     }
     
     // ======= ALTERNATIVE COLLECTION NAMES =======

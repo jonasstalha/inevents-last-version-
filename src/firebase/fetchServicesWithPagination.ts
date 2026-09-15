@@ -36,18 +36,22 @@ const transformServiceWithRating = async (db: any, serviceDoc: any) => {
   
   // Fetch artist info to get store name
   let artistName = 'Service Provider';
+  let artistProfileImage = '';
   try {
     const artistRef = doc(db, 'users', serviceData.userId);
     const artistSnap = await getDoc(artistRef);
     if (artistSnap.exists()) {
       const artistData = artistSnap.data();
       artistName = artistData.storeName || artistData.name || artistData.displayName || 'Service Provider';
+      artistProfileImage = artistData.profileImage || artistData.image || artistData.avatar || '';
     }
   } catch (error) {
     console.error('Error fetching artist data for service:', serviceDoc.id, error);
   }
   
   serviceData.artistName = artistName;
+  serviceData.providerImage = artistProfileImage;
+  serviceData.profileImage = artistProfileImage;
   
   try {
     const commentsRef = collection(db, 'users', serviceData.userId, 'services', serviceDoc.id, 'comments');

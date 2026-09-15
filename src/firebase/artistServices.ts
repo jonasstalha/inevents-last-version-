@@ -1,5 +1,5 @@
 import { ImagePickerAsset } from 'expo-image-picker';
-import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, getFirestore, query, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, getFirestore, query, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { getDownloadURL, ref as storageRef } from 'firebase/storage';
 import { Gig, GigInput } from '../models/types';
 import { storage } from './firebaseConfig';
@@ -361,9 +361,27 @@ export const deleteServiceWithImages = async (
     if (video) {
       await deleteServiceVideo(video);
     }
-    
-    // Delete the service document
-    await deleteDoc(serviceRef);
+
+    const globalOrdersRef = collection(db, 'orders');
+    const [serviceOrdersByServiceId, serviceOrdersByGigId, artistOrdersSnapshot] = await Promise.all([
+      getDocs(query(globalOrdersRef, where('serviceId', '==', serviceId))),
+      getDocs(query(globalOrdersRef, where('gigId', '==', serviceId))),
+      getDocs(collection(db, 'users', artistId, 'orders')),
+    ]);
+
+    const orderRefs = new Map<string, any>();
+    [...serviceOrdersByServiceId.docs, ...serviceOrdersByGigId.docs, ...artistOrdersSnapshot.docs]
+      .forEach((orderSnapshot) => {
+        const orderData = orderSnapshot.data() as any;
+        if (orderData.serviceId === serviceId || orderData.gigId === serviceId) {
+          orderRefs.set(orderSnapshot.ref.path, orderSnapshot.ref);
+        }
+      });
+
+    const deletionBatch = writeBatch(db);
+    deletionBatch.delete(serviceRef);
+    orderRefs.forEach((orderRef) => deletionBatch.delete(orderRef));
+    await deletionBatch.commit();
   } catch (error) {
     console.error('Error deleting service with images:', error);
     throw error;

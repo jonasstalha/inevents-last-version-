@@ -1,10 +1,10 @@
-import { toTimestampString } from '@/src/utils/timestampUtils';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { getAuth } from 'firebase/auth';
-import { addDoc, collection, getDocs, getFirestore, query, where } from 'firebase/firestore';
-import React, { useEffect, useMemo, useState } from 'react';
+import { collection, getDocs, getFirestore, query, where } from 'firebase/firestore';
+import { useEffect, useMemo, useState } from 'react';
 import { Alert, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { fetchServicesByArtistId } from '../../firebase/artistServices';
 import { createInvoiceForOrder } from '../../firebase/invoiceService';
 import { confirmOrder, rejectOrder, sendCounterOffer, sendOrderUpdateNotification, warnClientCancellation } from '../../firebase/orderService';
 
@@ -105,11 +105,22 @@ const CalendarPage = () => {
 
         const globalOrdersCol = collection(db, 'orders');
         const globalOrdersQuery = query(globalOrdersCol, where('artistId', '==', currentUser.uid));
-        const globalOrdersSnapshot = await getDocs(globalOrdersQuery);
+        const [globalOrdersSnapshot, activeServices] = await Promise.all([
+          getDocs(globalOrdersQuery),
+          fetchServicesByArtistId(currentUser.uid),
+        ]);
+        const activeServiceIds = new Set(activeServices.map((service) => String(service.id)));
         
         console.log('📊 Found', globalOrdersSnapshot.size, 'orders in global collection');
 
-        const ordersData: Order[] = globalOrdersSnapshot.docs.map(doc => {
+        const ordersData: Order[] = globalOrdersSnapshot.docs.filter((doc) => {
+          const data = doc.data() as any;
+          const isTicketOrder = !!(data.ticketQuantities?.length || data.ticketId || data.ticketName || data.ticketType);
+          if (isTicketOrder) return true;
+
+          const serviceId = data.serviceId || data.gigId;
+          return !serviceId || activeServiceIds.has(String(serviceId));
+        }).map(doc => {
           const data = doc.data() as any;
           const isTicketOrder = !!(data.ticketQuantities?.length || data.ticketId || data.ticketName || data.ticketType);
           const resolvedClientName = data.clientInfo?.fullName || data.clientName || 'Unknown Client';

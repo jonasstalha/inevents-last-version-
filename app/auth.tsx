@@ -1369,7 +1369,8 @@ const styles = StyleSheet.create({
   // ── Auth Errors ─────────────────────────────────────
   authErrorBanner: {
     backgroundColor: "#FEF2F2",
-    borderLeft: "4px solid #EF4444",
+    borderLeftWidth: 4,
+    borderLeftColor: "#EF4444",
     padding: 12,
     marginBottom: 20,
     borderRadius: 8,

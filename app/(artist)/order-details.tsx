@@ -1,12 +1,13 @@
+import MapView, { Marker, PROVIDER_GOOGLE } from '@/src/components/common/NativeMap';
 import { createInvoiceForOrder } from '@/src/firebase/invoiceService';
 import { completeOrder, confirmOrder, getOrderById, rejectOrder, sendOrderUpdateNotification, warnClientCancellation } from '@/src/firebase/orderService';
 import { Order } from '@/src/models/types';
+import { Image as CachedImage } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getAuth } from 'firebase/auth';
 import { ArrowLeft } from 'lucide-react-native';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE } from '@/src/components/common/NativeMap';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 const getStatusColor = (status: string): string => {
   switch (status) {
@@ -246,7 +247,15 @@ export default function OrderDetailsPage() {
       <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 180 }} showsVerticalScrollIndicator={false}>
         {/* Service Image */}
         {order.serviceImage ? (
-          <Image source={{ uri: order.serviceImage }} style={styles.serviceImage} />
+          <CachedImage
+            source={order.serviceImage}
+            style={styles.serviceImage}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            priority="high"
+            transition={150}
+            recyclingKey={order.serviceImage}
+          />
         ) : null}
 
         {/* Service Title and Status */}

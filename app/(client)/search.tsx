@@ -28,6 +28,7 @@ import {
   faXmark,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-native-fontawesome";
+import { Image as CachedImage } from "expo-image";
 import * as Linking from "expo-linking";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
@@ -38,13 +39,14 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ActivityIndicator,
   Alert,
   Animated,
   FlatList,
   Image,
+  KeyboardAvoidingView,
+  Platform,
   RefreshControl,
   ScrollView,
   Share,
@@ -55,6 +57,7 @@ import {
   View,
 } from "react-native";
 import * as Animatable from "react-native-animatable";
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { captureRef } from "react-native-view-shot";
 
 import { ArtistCard } from "@/src/components/artist/ArtistCard";
@@ -135,6 +138,27 @@ const getMainItemsTotal = (gig: any) => {
   return total > 0 ? total : Number(gig?.basePrice ?? gig?.price ?? 500) || 500;
 };
 
+const getServiceTimestamp = (value: any): number => {
+  if (!value) return 0;
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.seconds === "number") {
+    return value.seconds * 1000 + Math.floor((value.nanoseconds || 0) / 1000000);
+  }
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+};
+
+const sortServicesByNewest = (serviceList: any[]) =>
+  [...serviceList].sort(
+    (first, second) =>
+      getServiceTimestamp(second.createdAt) - getServiceTimestamp(first.createdAt),
+  );
+
 const transformGigData = (gig: any) => {
   const totalRating = gig.totalRating || 0;
   const totalRaters = gig.totalRaters || 0;
@@ -142,6 +166,7 @@ const transformGigData = (gig: any) => {
   const displayPrice = getMainItemsTotal(gig);
   return {
     id: gig.id,
+    userId: gig.userId,
     title: gig.title,
     description: gig.description || gig.location || "",
     image:
@@ -153,6 +178,12 @@ const transformGigData = (gig: any) => {
     category: gig.category || "",
     providerName:
       gig.artistName || gig.userName || gig.providerName || "Service Provider",
+    providerImage:
+      gig.providerImage ||
+      gig.profileImage ||
+      gig.artistProfileImage ||
+      gig.avatar ||
+      "",
     city: gig.city || gig.location || "",
     location: gig.location || gig.city || "",
     basePrice: displayPrice,
@@ -247,10 +278,44 @@ const skeletonStyles = StyleSheet.create({
 });
 
 // ─── Service Card ────────────────────────────────────────────────────────────
+const CachedServiceImage = React.memo(
+  ({ uri, priority }: { uri: string; priority: "high" | "normal" }) => {
+    const [loaded, setLoaded] = useState(false);
+
+    useEffect(() => {
+      setLoaded(false);
+    }, [uri]);
+
+    return (
+      <>
+        {!loaded && (
+          <View style={styles.serviceImagePlaceholder}>
+            <FontAwesomeIcon
+              icon={faBriefcase}
+              size={40}
+              color="rgba(255,255,255,0.45)"
+            />
+          </View>
+        )}
+        <CachedImage
+          source={uri}
+          style={[styles.serviceImage, { opacity: loaded ? 1 : 0 }]}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          priority={priority}
+          transition={150}
+          recyclingKey={uri}
+          onLoad={() => setLoaded(true)}
+        />
+      </>
+    );
+  },
+);
+
 interface ServiceCardProps {
   service: ReturnType<typeof transformGigData>;
-  onPress: () => void;
-  onShare: () => void;
+  onPress: (gigId: string) => void;
+  onShare: (service: ReturnType<typeof transformGigData>) => void;
   index: number;
 }
 
@@ -285,7 +350,7 @@ const ServiceCard = React.memo(
       <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
         <TouchableOpacity
           style={styles.serviceCard}
-          onPress={onPress}
+          onPress={() => onPress(service.id)}
           onPressIn={handlePressIn}
           onPressOut={handlePressOut}
           activeOpacity={1}
@@ -300,10 +365,9 @@ const ServiceCard = React.memo(
             {service.image &&
             typeof service.image === "string" &&
             service.image.startsWith("http") ? (
-              <Image
-                source={{ uri: service.image }}
-                style={styles.serviceImage}
-                resizeMode="cover"
+              <CachedServiceImage
+                uri={service.image}
+                priority={index < 7 ? "high" : "normal"}
               />
             ) : (
               <View style={styles.serviceImagePlaceholder}>
@@ -376,7 +440,7 @@ const ServiceCard = React.memo(
               <View style={styles.cardActions}>
                 <TouchableOpacity
                   style={styles.shareIconBtn}
-                  onPress={onShare}
+                  onPress={() => onShare(service)}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
                   <FontAwesomeIcon icon={faShare} size={14} color="#64748b" />
@@ -384,7 +448,7 @@ const ServiceCard = React.memo(
 
                 <TouchableOpacity
                   style={[styles.viewButton, { backgroundColor: accentColor }]}
-                  onPress={onPress}
+                  onPress={() => onPress(service.id)}
                 >
                   <Text style={styles.viewButtonText}>Voir</Text>
                   <FontAwesomeIcon
@@ -421,6 +485,12 @@ const StoryImageTemplate = React.memo(
     const providerName =
       service.providerName || service.artistName || "Service Provider";
     const serviceLocation = service.city || service.location || "";
+    const providerAvatar =
+      service.providerImage ||
+      service.profileImage ||
+      service.artistImage ||
+      service.avatar ||
+      "";
     const initials = providerName
       .split(" ")
       .slice(0, 2)
@@ -461,9 +531,16 @@ const StoryImageTemplate = React.memo(
         <View style={storyStyles.content}>
           {/* Provider row */}
           <View style={storyStyles.providerRow}>
-            <View style={storyStyles.avatarCircle}>
-              <Text style={storyStyles.avatarText}>{initials}</Text>
-            </View>
+            {providerAvatar ? (
+              <Image
+                source={{ uri: providerAvatar }}
+                style={storyStyles.avatarImage}
+              />
+            ) : (
+              <View style={storyStyles.avatarCircle}>
+                <Text style={storyStyles.avatarText}>{initials}</Text>
+              </View>
+            )}
             <View style={{ flex: 1 }}>
               <Text style={storyStyles.providerName} numberOfLines={1}>
                 {providerName}
@@ -471,6 +548,11 @@ const StoryImageTemplate = React.memo(
               {serviceLocation ? (
                 <Text style={storyStyles.providerLocation} numberOfLines={1}>
                   📍 {serviceLocation}
+                </Text>
+              ) : null}
+              {service.userId ? (
+                <Text style={storyStyles.profileLabel} numberOfLines={1}>
+                  Profil du prestataire
                 </Text>
               ) : null}
             </View>
@@ -614,6 +696,13 @@ const storyStyles = StyleSheet.create({
     borderWidth: 3,
     borderColor: "rgba(255,255,255,0.25)",
   },
+  avatarImage: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    borderWidth: 3,
+    borderColor: "rgba(255,255,255,0.25)",
+  },
   avatarText: {
     fontSize: 32,
     fontWeight: "800",
@@ -629,6 +718,12 @@ const storyStyles = StyleSheet.create({
     fontSize: 24,
     color: "rgba(255,255,255,0.55)",
     marginTop: 6,
+  },
+  profileLabel: {
+    fontSize: 18,
+    color: "rgba(255,255,255,0.8)",
+    marginTop: 8,
+    fontWeight: "600",
   },
   catPill: {
     alignSelf: "flex-start",
@@ -848,6 +943,11 @@ export default function SearchScreen() {
     return results;
   }, [services, searchQuery, selectedCategory]);
 
+  const transformedGigs = useMemo(
+    () => filteredGigs.map(transformGigData),
+    [filteredGigs],
+  );
+
   // ── Fetch artists once ────────────────────────────────────────────────────
   useEffect(() => {
     setArtistsLoading(true);
@@ -870,8 +970,9 @@ export default function SearchScreen() {
         lastDocRef.current = result.lastDoc;
         hasMoreRef.current = result.hasMore;
         setHasMoreDisplay(result.hasMore);
-        setLocalServices(result.services);
-        setServices(result.services);
+        const newestFirst = sortServicesByNewest(result.services);
+        setLocalServices(newestFirst);
+        setServices(newestFirst);
       } catch (e) {
         console.error("Init fetch error:", e);
         hasMoreRef.current = false;
@@ -927,7 +1028,7 @@ export default function SearchScreen() {
       );
 
       if (result.services.length > 0) {
-        const merged = [...services, ...result.services];
+        const merged = sortServicesByNewest([...services, ...result.services]);
         lastDocRef.current = result.lastDoc;
         hasMoreRef.current = result.hasMore;
         setHasMoreDisplay(result.hasMore);
@@ -988,8 +1089,9 @@ export default function SearchScreen() {
       lastDocRef.current = result.lastDoc;
       hasMoreRef.current = result.hasMore;
       setHasMoreDisplay(result.hasMore);
-      setLocalServices(result.services);
-      setServices(result.services);
+      const newestFirst = sortServicesByNewest(result.services);
+      setLocalServices(newestFirst);
+      setServices(newestFirst);
     } catch (e) {
       console.error("Refresh error:", e);
     } finally {
@@ -1077,7 +1179,7 @@ export default function SearchScreen() {
     if (!storyTemplateRef.current || !selectedServiceForShare) return null;
     setIsGeneratingImage(true);
     try {
-      await new Promise((r) => setTimeout(r, 600));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
       const uri = await captureRef(storyTemplateRef, {
         format: "png",
         quality: 1,
@@ -1138,11 +1240,23 @@ export default function SearchScreen() {
   const copyLink = async () => {
     if (!selectedServiceForShare) return;
     try {
-      const url = Linking.createURL(
+      const serviceUrl = Linking.createURL(
         `/(client)/(hidden)/gig/${selectedServiceForShare.id}`,
       );
+      const profileUrl = selectedServiceForShare.userId
+        ? Linking.createURL(`/artist-profile?id=${selectedServiceForShare.userId}`)
+        : null;
+
+      const message = [
+        `${selectedServiceForShare.title}`,
+        profileUrl ? `Profil du prestataire: ${profileUrl}` : null,
+        `Service: ${serviceUrl}`,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+
       await Share.share({
-        message: url,
+        message,
         title: selectedServiceForShare.title,
       });
       closeShareModal();
@@ -1153,7 +1267,7 @@ export default function SearchScreen() {
 
   // ── Memoized renderItem ───────────────────────────────────────────────────
   const renderServiceItem = useCallback(
-    ({ item, index }: { item: any; index: number }) => (
+    ({ item, index }: { item: ReturnType<typeof transformGigData>; index: number }) => (
       <Animatable.View
         animation="fadeInUp"
         duration={350}
@@ -1161,9 +1275,9 @@ export default function SearchScreen() {
         useNativeDriver
       >
         <ServiceCard
-          service={transformGigData(item)}
-          onPress={() => handleGigPress(item.id)}
-          onShare={() => handleShareService(transformGigData(item))}
+          service={item}
+          onPress={handleGigPress}
+          onShare={handleShareService}
           index={index}
         />
       </Animatable.View>
@@ -1374,7 +1488,7 @@ export default function SearchScreen() {
         <View style={styles.listContainer}>
           {filteredGigs.length > 0 ? (
             <FlatList
-              data={filteredGigs}
+              data={transformedGigs}
               keyExtractor={keyExtractorService}
               renderItem={renderServiceItem}
               contentContainerStyle={styles.listContent}
@@ -1449,10 +1563,20 @@ export default function SearchScreen() {
       {/* ── Filter Modal ──────────────────────────────────────────────────── */}
       {showFilterModal && (
         <View style={styles.modalBackdrop}>
-          <View style={[
-            styles.filterModalContent,
-            { paddingBottom: Math.max(24, 16 + (insets?.bottom || 0)) },
-          ]}>
+          <KeyboardAvoidingView
+            style={styles.filterKeyboardAvoiding}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
+          >
+            <View style={[
+              styles.filterModalContent,
+              { paddingBottom: Math.max(24, 16 + (insets?.bottom || 0)) },
+            ]}>
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.filterScrollContent}
+            >
             <View style={styles.filterModalHandle} />
             <View style={styles.filterModalHeader}>
               <Text style={styles.filterModalTitle}>Filtres</Text>
@@ -1557,13 +1681,15 @@ export default function SearchScreen() {
             >
               <Text style={styles.applyFilterText}>Appliquer les filtres</Text>
             </TouchableOpacity>
+            </ScrollView>
             <TouchableOpacity
               style={styles.clearFilterButton}
               onPress={handleClearFilters}
             >
               <Text style={styles.clearFilterText}>Tout effacer</Text>
             </TouchableOpacity>
-          </View>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       )}
 
@@ -1862,6 +1988,7 @@ const styles = StyleSheet.create({
   },
   serviceImage: { width: "100%", height: "100%", resizeMode: "cover" },
   serviceImagePlaceholder: {
+    position: "absolute",
     width: "100%",
     height: "100%",
     justifyContent: "center",
@@ -2010,6 +2137,10 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     zIndex: 1000,
   },
+  filterKeyboardAvoiding: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
   filterModalHandle: {
     width: 36,
     height: 4,
@@ -2026,6 +2157,9 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 44,
     maxHeight: "90%",
+  },
+  filterScrollContent: {
+    paddingBottom: 4,
   },
   filterModalHeader: {
     flexDirection: "row",

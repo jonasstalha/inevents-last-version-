@@ -1,11 +1,15 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View, Linking } from 'react-native';
-import { ArrowLeft } from 'lucide-react-native';
-import { doc, getDoc, onSnapshot, updateDoc, Timestamp } from 'firebase/firestore';
-import { db } from '@/src/firebase/firebaseConfig';
-import { Order } from '@/src/models/types';
 import { OrderStatusBadge } from '@/src/components/orders/OrderStatusBadge';
+import { db } from '@/src/firebase/firebaseConfig';
+import { cancelOrder } from '@/src/firebase/orderService';
+import { useAuth } from '@/src/context/AuthContext';
+import { Order } from '@/src/models/types';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { doc, getDoc, onSnapshot, Timestamp, updateDoc } from 'firebase/firestore';
+import { ArrowLeft } from 'lucide-react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Image, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+
+const DEFAULT_PROFILE_IMAGE = 'https://cdn-icons-png.flaticon.com/512/149/149071.png';
 
 const normalizeTimestamp = (ts: any): string | undefined => {
   if (!ts) return undefined;
@@ -20,6 +24,7 @@ export default function ClientOrderDetails() {
   const params = useLocalSearchParams();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
 
   useEffect(() => {
     const orderId = params.orderId as string | undefined;
@@ -91,6 +96,30 @@ export default function ClientOrderDetails() {
     }
   }, [order]);
 
+  const handleCancelOrder = useCallback(() => {
+    if (!order || !user?.uid) return;
+    Alert.alert(
+      'Cancel order',
+      'Cancel this order and remove its earned points? The order will also be removed from the artist\'s orders.',
+      [
+        { text: 'Keep order', style: 'cancel' },
+        {
+          text: 'Cancel order',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await cancelOrder(order.id, user.uid);
+              Alert.alert('Order cancelled', 'The order and its earned points were removed.');
+              router.back();
+            } catch (error: any) {
+              Alert.alert('Unable to cancel order', error?.message || 'Please try again.');
+            }
+          },
+        },
+      ],
+    );
+  }, [order, user?.uid, router]);
+
   const openInvoice = async () => {
     if (!order?.invoiceUrl) {
       Alert.alert('Invoice not available yet');
@@ -147,13 +176,18 @@ export default function ClientOrderDetails() {
               </View>
             );
           })()}
-          <Text style={styles.meta}>Payment: {order.paymentStatus || 'unpaid'}</Text>
-          <Text style={styles.meta}>Created: {new Date(order.createdAt).toLocaleString()}</Text>
-
           <Text style={styles.sectionTitle}>Customer</Text>
-          <Text style={styles.fieldText}>{order.clientName || order.clientInfo?.fullName || 'Client'}</Text>
-          {order.clientInfo?.email ? <Text style={styles.fieldText}>{order.clientInfo.email}</Text> : null}
-          {order.clientInfo?.phone ? <Text style={styles.fieldText}>{order.clientInfo.phone}</Text> : null}
+          <View style={styles.customerProfile}>
+            <Image
+              source={{ uri: order.clientPhoto || DEFAULT_PROFILE_IMAGE }}
+              style={styles.customerAvatar}
+            />
+            <View style={styles.customerDetails}>
+              <Text style={styles.fieldText}>{order.clientName || order.clientInfo?.fullName || 'Client'}</Text>
+              {order.clientInfo?.email ? <Text style={styles.fieldText}>{order.clientInfo.email}</Text> : null}
+              {order.clientInfo?.phone ? <Text style={styles.fieldText}>{order.clientInfo.phone}</Text> : null}
+            </View>
+          </View>
 
           {order.status === 'counter_offered' && order.counterOfferPrice != null && (
             <View style={styles.counterOfferCard}>
@@ -187,6 +221,12 @@ export default function ClientOrderDetails() {
           <TouchableOpacity style={[styles.invoiceButton, !order.invoiceUrl && styles.disabledButton]} onPress={openInvoice} disabled={!order.invoiceUrl}>
             <Text style={styles.invoiceButtonText}>{order.invoiceUrl ? 'Download invoice' : 'Invoice not yet ready'}</Text>
           </TouchableOpacity>
+
+          {['pending', 'counter_offered', 'confirmed'].includes(order.status) && (
+            <TouchableOpacity style={styles.cancelButton} onPress={handleCancelOrder}>
+              <Text style={styles.cancelButtonText}>Cancel Order</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </ScrollView>
     </View>
@@ -261,6 +301,21 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 15,
   },
+  customerProfile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  customerAvatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    marginRight: 12,
+    backgroundColor: '#e5e7eb',
+  },
+  customerDetails: {
+    flex: 1,
+  },
   fieldText: {
     color: '#4b5563',
     marginBottom: 6,
@@ -274,6 +329,20 @@ const styles = StyleSheet.create({
   },
   invoiceButtonText: {
     color: '#0f766e',
+    fontWeight: '700',
+  },
+  cancelButton: {
+    marginTop: 12,
+    minHeight: 48,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#dc2626',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#dc2626',
+    fontSize: 16,
     fontWeight: '700',
   },
   disabledButton: {

@@ -4,6 +4,112 @@ const nodemailer = require('nodemailer');
 const https = require('https');
 admin.initializeApp();
 
+const deleteMatchingDocuments = async (firestore, collectionName, fieldName, value) => {
+  const snapshot = await firestore.collection(collectionName).where(fieldName, '==', value).get();
+  if (snapshot.empty) return;
+
+  let batch = firestore.batch();
+  let batchSize = 0;
+  for (const document of snapshot.docs) {
+    batch.delete(document.ref);
+    batchSize += 1;
+    if (batchSize === 400) {
+      await batch.commit();
+      batch = firestore.batch();
+      batchSize = 0;
+    }
+  }
+  if (batchSize > 0) await batch.commit();
+};
+
+const deleteMatchingDocumentsForFields = async (firestore, collectionName, fields, value) => {
+  const documentIds = new Set();
+  for (const fieldName of fields) {
+    const snapshot = await firestore.collection(collectionName).where(fieldName, '==', value).get();
+    snapshot.docs.forEach((document) => documentIds.add(document.id));
+  }
+
+  if (documentIds.size === 0) return;
+  let batch = firestore.batch();
+  let batchSize = 0;
+  for (const documentId of documentIds) {
+    batch.delete(firestore.doc(`${collectionName}/${documentId}`));
+    batchSize += 1;
+    if (batchSize === 400) {
+      await batch.commit();
+      batch = firestore.batch();
+      batchSize = 0;
+    }
+  }
+  if (batchSize > 0) await batch.commit();
+};
+
+exports.deleteAccount = functions
+  .runWith({ invoker: 'public' })
+  .https.onRequest(async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
+
+  const authorization = req.headers.authorization || req.headers.Authorization || '';
+  const tokenMatch = String(authorization).match(/^Bearer\s+(.+)$/i);
+  if (!tokenMatch) {
+    return res.status(401).json({
+      error: 'Missing authorization token',
+      code: 'account-delete-authenticate',
+    });
+  }
+
+  let decodedToken;
+  try {
+    decodedToken = await admin.auth().verifyIdToken(tokenMatch[1].trim());
+  } catch (error) {
+    console.error('Account deletion token verification failed:', error);
+    return res.status(401).json({
+      error: 'Invalid or expired authorization token',
+      code: 'account-delete-authenticate',
+      cause: error?.code || 'auth/invalid-id-token',
+    });
+  }
+
+  const userId = decodedToken.uid;
+  try {
+    const firestore = admin.firestore();
+    const cleanupResults = await Promise.allSettled([
+      firestore.recursiveDelete(firestore.doc(`users/${userId}`)),
+      firestore.doc(`userStatistics/${userId}`).delete(),
+      deleteMatchingDocuments(firestore, 'services', 'artistId', userId),
+      deleteMatchingDocuments(firestore, 'tickets', 'artistId', userId),
+      deleteMatchingDocumentsForFields(firestore, 'orders', ['artistId', 'clientId'], userId),
+      deleteMatchingDocumentsForFields(firestore, 'customOrders', ['artistId', 'clientId'], userId),
+      deleteMatchingDocumentsForFields(firestore, 'incomingCustomOrders', ['artistId', 'clientId'], userId),
+    ]);
+
+    const cleanupWarnings = cleanupResults
+      .filter((result) => result.status === 'rejected')
+      .map((result) => result.reason?.code || result.reason?.message || 'unknown-cleanup-error');
+    if (cleanupWarnings.length > 0) {
+      console.error('Account cleanup completed with warnings:', cleanupWarnings);
+    }
+
+    try {
+      await admin.auth().deleteUser(userId);
+    } catch (authError) {
+      if (authError?.code !== 'auth/user-not-found') throw authError;
+    }
+
+    return res.status(200).json({
+      success: true,
+      cleanupWarnings: cleanupWarnings.length > 0 ? cleanupWarnings : undefined,
+    });
+  } catch (error) {
+    console.error('Account deletion error:', error);
+    return res.status(500).json({
+      error: 'Unable to delete account',
+      code: 'account-delete-delete-auth-user',
+      cause: error?.code || 'unknown',
+    });
+  }
+  });
+
 const projectId =
   process.env.GCLOUD_PROJECT ||
   (() => {

@@ -1,42 +1,43 @@
+import { FontAwesome5 } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as Linking from 'expo-linking';
-import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { ChevronRight, RefreshCw } from 'lucide-react-native';
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Image,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { Card } from '@/src/components/common/Card';
 import { ProfileEditModal } from '@/src/components/profile/ProfileEditModal';
 import { Theme } from '@/src/constants/theme';
 import { useAuth } from '@/src/context/AuthContext';
-import { updateProfileWithImage } from '@/src/firebase/profileService';
 import {
-  doc,
-  onSnapshot,
-  db,
+    db,
+    doc,
+    onSnapshot,
 } from '@/src/firebase/firebaseConfig';
-import { AUTH_PENDING_REDIRECT_KEY } from '@/src/utils/requireAuth';
+import { updateProfileWithImage } from '@/src/firebase/profileService';
 import { recalculateUserStatistics, UserStats } from '@/src/firebase/userStatsService';
+import { AUTH_PENDING_REDIRECT_KEY } from '@/src/utils/requireAuth';
 
 export default function ProfileScreen() {
-  const { user, logout, loading: authLoading, refreshUser } = useAuth();
+  const { user, logout, deleteAccount, loading: authLoading, refreshUser } = useAuth();
   const router = useRouter();
 
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [statsLoading, setStatsLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   const [stats, setStats] = useState<UserStats>({
     orders: 0,
@@ -118,17 +119,12 @@ export default function ProfileScreen() {
     refreshUser().finally(() => setSyncing(false));
 
     // Load initial statistics
-    refreshUserStats().finally(() => {
-      // Set up live listeners after initial load
-      if (user.uid) {
+    refreshUserStats();
+    const unsubStats = syncLiveStats();
 
-        const unsubStats = syncLiveStats();
-
-        return () => {
-          if (typeof unsubStats === 'function') unsubStats();
-        };
-      }
-    });
+    return () => {
+      if (typeof unsubStats === 'function') unsubStats();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
 
@@ -181,6 +177,41 @@ export default function ProfileScreen() {
             }
           },
           style: 'destructive',
+        },
+      ],
+    );
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete account',
+      'This permanently deletes your account, profile, and related orders. This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete account',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setIsDeletingAccount(true);
+              await deleteAccount();
+              router.replace('/auth');
+            } catch (error: any) {
+              console.error('Account deletion error:', error);
+              const message = error?.code === 'auth/requires-recent-login'
+                ? 'Please log out and log back in before deleting your account.'
+                : error?.code === 'auth/network-request-failed'
+                  ? 'Please check your internet connection and try again.'
+                : error?.code === 'account-delete-authenticate'
+                  ? 'Your session expired. Please log out and log in again.'
+                : error?.code === 'account-delete-delete-auth-user'
+                  ? 'Firebase could not remove the account. Please try again.'
+                : 'Unable to delete your account. Please try again.';
+              Alert.alert('Account deletion failed', message);
+            } finally {
+              setIsDeletingAccount(false);
+            }
+          },
         },
       ],
     );
@@ -395,6 +426,12 @@ export default function ProfileScreen() {
             const uri = `https://wa.me/+212701186390?text=${encodeURIComponent('Hello, I need help with InEvent app.')}`;
             Linking.openURL(uri);
           }}
+        />
+        <MenuItem
+          icon="trash"
+          title={isDeletingAccount ? 'Deleting Account...' : 'Delete Account'}
+          textColor={Theme.colors.error}
+          onPress={handleDeleteAccount}
         />
         <MenuItem
           icon="sign-out-alt"

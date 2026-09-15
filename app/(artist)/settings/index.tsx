@@ -4,11 +4,14 @@ import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View, Modal, Animated, Dimensions, Alert, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useArtistStore } from '../../../src/components/artist/ArtistStore';
+import { useAuth } from '../../../src/context/AuthContext';
 
 const SettingsPage = () => {
   const router = useRouter();
   const { settings, resetStore } = useArtistStore();
+  const { deleteAccount } = useAuth();
   const [showComingSoonModal, setShowComingSoonModal] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [modalAnimation] = useState(new Animated.Value(0));
 
   const showComingSoonPrompt = () => {
@@ -48,6 +51,36 @@ const SettingsPage = () => {
 
   const handleLanguage = () => {
     showComingSoonPrompt();
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete account',
+      'This permanently deletes your account, services, tickets, and related orders. This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete account',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setIsDeletingAccount(true);
+              await deleteAccount();
+              resetStore();
+              router.replace('/auth');
+            } catch (error: any) {
+              console.error('Account deletion error:', error);
+              const message = error?.code === 'auth/requires-recent-login'
+                ? 'Please log out and log back in before deleting your account.'
+                : 'Unable to delete your account. Please try again.';
+              Alert.alert('Account deletion failed', message);
+            } finally {
+              setIsDeletingAccount(false);
+            }
+          },
+        },
+      ],
+    );
   };
 
   const handleLogout = async () => {
@@ -164,6 +197,17 @@ const SettingsPage = () => {
           </View>
         </TouchableOpacity>
       </View>
+
+      <TouchableOpacity
+        style={[styles.deleteAccountButton, isDeletingAccount && styles.disabledButton]}
+        onPress={handleDeleteAccount}
+        disabled={isDeletingAccount}
+      >
+        <Ionicons name="trash-outline" size={24} color="#b00020" />
+        <Text style={styles.deleteAccountText}>
+          {isDeletingAccount ? 'Deleting Account...' : 'Delete Account'}
+        </Text>
+      </TouchableOpacity>
 
       {/* Logout Button */}
       <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
@@ -309,6 +353,27 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     marginLeft: 8,
+  },
+  deleteAccountButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff0f1',
+    borderWidth: 1,
+    borderColor: '#f3b4bb',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    padding: 16,
+    borderRadius: 12,
+  },
+  deleteAccountText: {
+    color: '#b00020',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  disabledButton: {
+    opacity: 0.6,
   },
   modalOverlay: {
     flex: 1,

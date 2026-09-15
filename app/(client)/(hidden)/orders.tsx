@@ -1,9 +1,9 @@
-import React, { useMemo, useState } from 'react';
-import { useRouter } from 'expo-router';
-import { ActivityIndicator, Alert, FlatList, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { OrderStatusBadge } from '@/src/components/orders/OrderStatusBadge';
 import { useOrders } from '@/src/hooks/useOrders';
 import { Order } from '@/src/models/types';
-import { OrderStatusBadge } from '@/src/components/orders/OrderStatusBadge';
+import { useRouter } from 'expo-router';
+import { useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, FlatList, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 const orderTabs = [
   { id: 'all', label: 'All' },
@@ -67,7 +67,6 @@ export default function ClientOrdersScreen() {
 
         <Text style={styles.descriptionText}>{item.notes || item.description || 'No additional notes'}</Text>
         <Text style={[styles.priceText, { color: '#34c759', fontSize: 20 }]}>{finalPrice.toFixed(2)} MAD</Text>
-        <Text style={styles.metaText}>Payment: {item.paymentStatus || 'unpaid'}</Text>
 
         <View style={styles.actionRow}>
           <TouchableOpacity style={styles.detailsButton} onPress={() => router.push(`/(client)/order/${item.id}`)}>

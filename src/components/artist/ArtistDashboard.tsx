@@ -10,8 +10,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import { fetchServicesByArtistId } from '../../firebase/artistServices';
 import { addServiceToFirebase, addTicketToFirebase, fetchArtistById } from '../../firebase/artistsService';
-import { db } from '../../firebase/firebaseConfig';
 import { fetchServiceByIdFromFirebase } from '../../firebase/fetchAllServices';
+import { db } from '../../firebase/firebaseConfig';
 import uploadServiceImage from '../../firebase/uploadServiceImage';
 import AnalyticsPage from './AnalyticsPage';
 import { useArtistStore } from './ArtistStore';
@@ -58,7 +58,7 @@ const ArtistMobileApp = () => {
     resetStore,
   } = useArtistStore();
 
-  const { logout: authLogout } = useAuth();
+  const { logout: authLogout, user: authUser } = useAuth();
 
   const [activeTab, setActiveTab] = useState('home');
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
@@ -88,29 +88,33 @@ const ArtistMobileApp = () => {
     const fetchProfile = async () => {
       const auth = getAuth();
       const user = auth.currentUser;
-      if (!user) return;
+      if (!user) {
+        setProfileLoading(false);
+        return;
+      }
       setProfileLoading(true);
       try {
         console.log('Fetching artist with ID:', user.uid, 'from Firebase...');
         const artist = await fetchArtistById(user.uid);
         console.log('Processing artist:', artist?.name);
         if (artist) {
+          const artistData = artist as any;
           setArtistProfile({
-            name: artist.name || '',
-            image: artist.profileImage || '',
-            description: artist.bio || '',
-            rating: typeof artist.rating === 'number' ? artist.rating : 0,
-            reviewsCount: (artist as any).reviewCount || (artist as any).reviewsCount || 0
+            name: artistData.storeName || artistData.name || artistData.displayName || authUser?.name || '',
+            image: artistData.profileImage || artistData.image || artistData.avatar || '',
+            description: artistData.bio || artistData.description || '',
+            rating: typeof artistData.rating === 'number' ? artistData.rating : 0,
+            reviewsCount: artistData.reviewCount || artistData.reviewsCount || 0
           });
-          console.log('Successfully fetched artist:', artist.name, 'from Firebase');
+          console.log('Successfully fetched artist profile from Firebase');
         }
       } catch (e) {
         console.error('Error fetching artist profile:', e);
-        // Set default values on error
+        // Keep authenticated profile data visible if the artist lookup fails.
         setArtistProfile({
-          name: 'Professional Artist',
+          name: authUser?.name || user.displayName || '',
           image: '',
-          description: 'Welcome to my profile',
+          description: '',
           rating: 0,
           reviewsCount: 0
         });
@@ -127,7 +131,7 @@ const ArtistMobileApp = () => {
       setWalletBalance(0.00);
       setHasGivenStarterCredits(true);
     }
-  }, [hasGivenStarterCredits]);
+  }, [hasGivenStarterCredits, authUser?.name]);
 
   // Real-time notifications listener
   const currentUserId = getAuth().currentUser?.uid;
@@ -1131,7 +1135,7 @@ const ArtistMobileApp = () => {
   };
 
   return (
-    <View style={[styles.mainContainer, { backgroundColor: '#f5f5f5' }]}> {/* Remove violet color from safe area */}
+    <View style={[styles.mainContainer, { backgroundColor: '#f5f5f5' }]}>
       <StatusBar barStyle="dark-content" backgroundColor="#f5f5f5" />
       {renderContent()}
       <View style={[styles.tabBar, { paddingBottom: insets.bottom }]}> 

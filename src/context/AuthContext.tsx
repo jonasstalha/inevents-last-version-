@@ -5,6 +5,7 @@ import {
     User as FirebaseUser,
     onAuthStateChanged,
     reload,
+    sendEmailVerification,
     sendPasswordResetEmail,
     signInWithEmailAndPassword,
     signOut
@@ -23,6 +24,8 @@ interface User {
   isPhoneVerified: boolean;
   isEmailVerified: boolean;
   role: 'client' | 'artist' | 'admin' | null;
+  profileImage?: string;
+  photoURL?: string;
   storeName?: string;
   storeBio?: string;
   city?: string;
@@ -49,6 +52,7 @@ interface AuthContextType {
     }
   ) => Promise<void>;
   logout: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
   refreshUser: () => Promise<User | null>;
   resetPassword: (email: string) => Promise<void>;
   resendVerificationEmail: () => Promise<void>;
@@ -74,6 +78,8 @@ const buildUserFromFirebase = (firebaseUser: FirebaseUser, profileData?: any): U
     isPhoneVerified: Boolean(profileData?.isPhoneVerified),
     isEmailVerified: firebaseUser.emailVerified,
     role: resolvedRole,
+    profileImage: profileData?.profileImage || firebaseUser.photoURL || undefined,
+    photoURL: firebaseUser.photoURL || profileData?.profileImage || undefined,
   };
   if (resolvedRole === 'artist') {
     return {
@@ -198,18 +204,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const sendCustomVerificationEmail = async (firebaseUser: FirebaseUser) => {
-    const idToken = await firebaseUser.getIdToken();
-    const response = await fetch(`${cloudFunctionBaseUrl}/sendVerificationEmail`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${idToken}`,
-      },
-      body: JSON.stringify({ email: firebaseUser.email }),
-    });
-    if (!response.ok) {
-      throw new Error('Unable to send verification email');
-    }
+    await sendEmailVerification(firebaseUser);
   };
 
   const register = async (
@@ -266,11 +261,62 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const deleteAccount = async () => {
+    const firebaseUser = auth.currentUser;
+    if (!firebaseUser) throw new Error('No authenticated user');
+
+    // Account deletion is security-sensitive, so force Firebase Auth to issue
+    // a current token before sending it to the backend.
+    let response: Response;
+    try {
+      const idToken = await firebaseUser.getIdToken(true);
+      response = await fetch(`${cloudFunctionBaseUrl}/deleteAccount`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+      });
+    } catch (requestError: any) {
+      const error = new Error('Unable to reach account deletion service') as Error & { code?: string };
+      error.code = requestError?.code === 'auth/network-request-failed'
+        ? requestError.code
+        : 'auth/network-request-failed';
+      throw error;
+    }
+      if (!response.ok) {
+        let errorCode = 'account-delete-failed';
+        try {
+          const errorBody = await response.json();
+          errorCode = errorBody?.code || errorCode;
+          console.error('Account deletion service response:', {
+            status: response.status,
+            body: errorBody,
+          });
+        } catch {
+          // Keep the generic error when the endpoint did not return JSON.
+          console.error('Account deletion service returned:', response.status);
+        }
+        const error = new Error('Unable to delete account') as Error & { code?: string };
+        error.code = errorCode;
+        throw error;
+      }
+      await signOut(auth);
+    setUser(null);
+  };
+
   const refreshUser = async () => {
     try {
       const firebaseUser = auth.currentUser;
       if (!firebaseUser) return null;
-      await reload(firebaseUser);
+      try {
+        await reload(firebaseUser);
+      } catch (reloadError: any) {
+        if (reloadError?.code !== 'auth/network-request-failed') {
+          throw reloadError;
+        }
+        console.warn('Using cached authentication data while offline.');
+      }
       const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
       const userData = buildUserFromFirebase(firebaseUser, userDoc.data());
       await setDoc(doc(db, 'users', firebaseUser.uid), {
@@ -295,7 +341,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, authState, login, register, logout, refreshUser, resetPassword, resendVerificationEmail }}>
+    <AuthContext.Provider value={{ user, loading, authState, login, register, logout, deleteAccount, refreshUser, resetPassword, resendVerificationEmail }}>
       {children}
     </AuthContext.Provider>
   );

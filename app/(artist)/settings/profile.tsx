@@ -5,32 +5,33 @@ import { useRouter } from 'expo-router';
 import { getAuth } from 'firebase/auth';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActionSheetIOS,
-  ActivityIndicator,
-  Alert,
-  Animated,
-  BackHandler,
-  Easing,
-  Image,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActionSheetIOS,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    BackHandler,
+    Easing,
+    Image,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    RefreshControl,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import {
-  getCurrentUserProfile,
-  updateProfileWithImage,
-  uploadProfileImage,
-} from '../../../src/firebase/profileService';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { SERVICE_CATEGORIES } from '../../../src/components/artist/ServiceCategorySelector';
 import { TICKET_CATEGORIES } from '../../../src/components/artist/TicketCategorySelector';
+import { useAuth } from '../../../src/context/AuthContext';
+import {
+    getCurrentUserProfile,
+    updateProfileWithImage,
+    uploadProfileImage,
+} from '../../../src/firebase/profileService';
 
 /* ============================================================================
    DESIGN TOKENS — change one value, restyle the whole screen
@@ -193,6 +194,7 @@ const InitialsAvatar = ({ name, size = 130 }: { name: string; size?: number }) =
 const ProfileEditPage = () => {
   const router = useRouter();
   const toast = useToast();
+  const { deleteAccount } = useAuth();
 
   const [profile, setProfile] = useState<ProfileState>(EMPTY_PROFILE);
   const [original, setOriginal] = useState<ProfileState>(EMPTY_PROFILE);
@@ -410,6 +412,32 @@ const ProfileEditPage = () => {
     }
   };
 
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete account',
+      'This permanently deletes your account and profile. This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete account',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteAccount();
+              router.replace('/auth');
+            } catch (error: any) {
+              console.error('Account deletion error:', error);
+              const message = error?.code === 'auth/requires-recent-login'
+                ? 'Please log out and log back in before deleting your account.'
+                : 'Unable to delete your account. Please try again.';
+              Alert.alert('Account deletion failed', message);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   /* -------- Loading state -------- */
   if (isLoading) {
     return (
@@ -426,7 +454,7 @@ const ProfileEditPage = () => {
       <StatusBar barStyle="light-content" backgroundColor={T.primary} />
       <KeyboardAvoidingView
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         {/* Header */}
         <LinearGradient colors={[T.primary, T.primaryLight]} style={styles.header}>
@@ -456,10 +484,14 @@ const ProfileEditPage = () => {
           <Animated.View style={[styles.progressFill, { width: `${completion}%` }]} />
         </View>
 
-        <ScrollView
+        <KeyboardAwareScrollView
           style={styles.scrollView}
           contentContainerStyle={{ paddingBottom: Platform.OS === 'ios' ? 180 : 160 }}
           showsVerticalScrollIndicator={false}
+          enableOnAndroid
+          extraScrollHeight={24}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={T.primary} />}
         >
           {loadError && (
@@ -609,7 +641,12 @@ const ProfileEditPage = () => {
               </View>
             </Section>
           </View>
-        </ScrollView>
+
+          <TouchableOpacity style={styles.deleteAccountButton} onPress={handleDeleteAccount}>
+            <Ionicons name="trash-outline" size={18} color={T.danger} />
+            <Text style={styles.deleteAccountText}>Delete Account</Text>
+          </TouchableOpacity>
+        </KeyboardAwareScrollView>
 
         {/* Sticky save bar */}
         <View style={styles.stickyBar} pointerEvents="box-none">
@@ -873,6 +910,19 @@ const styles = StyleSheet.create({
   },
   optionText: { fontSize: 13, color: T.textSecondary, fontWeight: '500' },
   optionTextSelected: { color: '#fff', fontWeight: '600' },
+  deleteAccountButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: T.s2,
+    marginTop: T.s5,
+    paddingVertical: T.s3,
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    borderRadius: T.rMd,
+    backgroundColor: '#fff1f2',
+  },
+  deleteAccountText: { color: T.danger, fontSize: 14, fontWeight: '700' },
 
   // Sticky save
   stickyBar: {

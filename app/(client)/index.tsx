@@ -1,28 +1,28 @@
+import { useApp } from '@/src/context/AppContext';
 import { useAuth } from '@/src/context/AuthContext';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Animated,
-  Alert,
-  Dimensions,
-  FlatList,
-  Modal,
-  RefreshControl,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Alert,
+    Animated,
+    Dimensions,
+    FlatList,
+    Modal,
+    RefreshControl,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import { dummyTickets } from './tickets';
 import { fetchArtists, fetchServices, fetchTickets } from '../../src/api';
-import { useApp } from '@/src/context/AppContext';
 import { fetchArtistsFromFirebase } from '../../src/firebase/artistsService';
 import { fetchAllServices, fetchAllTickets } from '../../src/firebase/clientTicketsService';
 import { useMarketplaceStore } from '../../stores/useMarketplaceStore';
+import { dummyTickets } from './tickets';
 
 const { width, height } = Dimensions.get('window');
 
@@ -350,6 +350,13 @@ export default function EventApp() {
     image: service.cover || service.image || (Array.isArray(service.images) && service.images.length > 0 ? service.images[0] : null),
   });
 
+  const handleOpenHomeService = (serviceId: string | number) => {
+    router.replace({
+      pathname: '/(client)/(hidden)/gig/[gigId]',
+      params: { gigId: String(serviceId) },
+    });
+  };
+
   const renderServiceCard = (service: any, index: number) => {
     const transformedService = transformServiceData(service);
     const gradientIndex = index % 6;
@@ -357,7 +364,7 @@ export default function EventApp() {
       <TouchableOpacity
         key={service.id}
         style={styles.enhancedServiceCard}
-        onPress={() => { }}
+        onPress={() => handleOpenHomeService(service.id)}
         activeOpacity={0.95}
       >
         <View style={styles.serviceCardHeader}>

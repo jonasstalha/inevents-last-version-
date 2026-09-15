@@ -1,6 +1,9 @@
 import { fetchArtistById } from "@/src/firebase/artistsService";
 import { recordCouponUsage } from "@/src/firebase/couponService";
-import { fetchServiceByIdFromFirebase } from "@/src/firebase/fetchAllServices";
+import {
+  fetchAllServicesFromFirebase,
+  fetchServiceByIdFromFirebase,
+} from "@/src/firebase/fetchAllServices";
 import { storage } from "@/src/firebase/firebaseConfig";
 import { createOrder } from "@/src/firebase/orderService";
 import { validatePromoCode } from "@/src/firebase/promoService";
@@ -8,11 +11,12 @@ import { addServiceReview } from "@/src/firebase/reviewService";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { useVideoPlayer, VideoView } from "expo-video";
+import { Image as CachedImage } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useVideoPlayer, VideoView } from "expo-video";
 import { getAuth } from "firebase/auth";
 import { getDownloadURL, ref as storageRef } from "firebase/storage";
-import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -122,6 +126,12 @@ function ServiceVideo({ uri, style }: { uri: string; style: any }) {
 export default function ServiceDetailScreen() {
   const { gigId } = useLocalSearchParams();
   const serviceId = Array.isArray(gigId) ? gigId[0] : gigId;
+  const hasInvalidServiceId =
+    !serviceId ||
+    serviceId === "gigId" ||
+    serviceId === "[gigId]" ||
+    serviceId.includes("[") ||
+    serviceId.includes("]");
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [selectedImage, setSelectedImage] = useState(0);
@@ -136,6 +146,9 @@ export default function ServiceDetailScreen() {
   const [showReviewForm, setShowReviewForm] = useState(false);
   const [reviewText, setReviewText] = useState("");
   const [reviewRating, setReviewRating] = useState(5);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [orderSubmitting, setOrderSubmitting] = useState(false);
+  const orderSubmittingRef = useRef(false);
 
   const [clientBudget, setClientBudget] = useState("");
   const [personalInfo, setPersonalInfo] = useState<any>({
@@ -170,6 +183,7 @@ export default function ServiceDetailScreen() {
   const [promoError, setPromoError] = useState<string | null>(null);
   const [showAllReviews, setShowAllReviews] = useState(false);
   const [serviceData, setServiceData] = useState<any>(null);
+  const [similarServices, setSimilarServices] = useState<any[]>([]);
   const [serviceVideos, setServiceVideos] = useState<string[]>([]);
   const [providerData, setProviderData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -275,12 +289,29 @@ export default function ServiceDetailScreen() {
     restoreDraft();
   }, [gigId]);
 
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardHeight(event.endCoordinates.height);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
   // Fetch service details when component mounts
   useEffect(() => {
     const fetchData = async () => {
-      if (!serviceId || serviceId === 'gigId') {
+      if (hasInvalidServiceId) {
         setError("No service ID provided");
         setIsLoading(false);
+        router.replace("/(client)/search");
         return;
       }
 
@@ -350,6 +381,9 @@ export default function ServiceDetailScreen() {
           image: resolvedImages[0] || null,
           images: resolvedImages,
         });
+        if (resolvedImages.length > 1) {
+          void CachedImage.prefetch(resolvedImages.slice(1), "memory-disk");
+        }
 
         const rawServiceVideos = Array.from(
           new Set(
@@ -373,6 +407,79 @@ export default function ServiceDetailScreen() {
         ).filter((uri): uri is string => !!uri);
 
         setServiceVideos(resolvedVideos);
+
+        void (async () => {
+          try {
+            const allServices = await fetchAllServicesFromFirebase();
+            const normalizeValues = (value: any): string[] => {
+              const values = Array.isArray(value)
+                ? value
+                : typeof value === "string"
+                  ? value.split(",")
+                  : [];
+              return values
+                .map((item) => String(item).trim().toLowerCase())
+                .filter(Boolean);
+            };
+            const getCategoryValues = (serviceValue: any): string[] => [
+              ...normalizeValues(serviceValue.category),
+              ...normalizeValues(serviceValue.serviceCategory),
+              ...normalizeValues(serviceValue.categoryName),
+              ...normalizeValues(serviceValue.categories),
+            ];
+            const currentCategories = new Set(getCategoryValues(serviceAny));
+
+            if (currentCategories.size === 0) {
+              setSimilarServices([]);
+              return;
+            }
+
+            const rankedServices = allServices
+              .filter(
+                (candidate: any) =>
+                  (candidate.id !== serviceId ||
+                    candidate.userId !== serviceAny.userId) &&
+                  getCategoryValues(candidate).some((category) =>
+                    currentCategories.has(category),
+                  ),
+              )
+              .sort((first: any, second: any) => {
+                const firstRating = Number(first.rating) || 0;
+                const secondRating = Number(second.rating) || 0;
+                if (secondRating !== firstRating) {
+                  return secondRating - firstRating;
+                }
+                return String(first.title || "").localeCompare(
+                  String(second.title || ""),
+                );
+              });
+
+            const recommendations = await Promise.all(
+              rankedServices.slice(0, 5).map(async (candidate: any) => {
+                const candidateImage =
+                  candidate.cover ||
+                  candidate.image ||
+                  candidate.imageUrl ||
+                  (Array.isArray(candidate.images)
+                    ? candidate.images[0]
+                    : null);
+                return {
+                  ...candidate,
+                  previewImage:
+                    (await resolveStorageUrl(candidateImage)) ||
+                    DEFAULT_SERVICE_IMAGE,
+                };
+              }),
+            );
+            setSimilarServices(recommendations);
+          } catch (similarServicesError) {
+            console.warn(
+              "Failed to load similar services:",
+              similarServicesError,
+            );
+            setSimilarServices([]);
+          }
+        })();
 
         // If service has a userId, fetch the provider/artist details
         if (service.userId) {
@@ -446,7 +553,7 @@ export default function ServiceDetailScreen() {
     };
 
     fetchData();
-  }, [serviceId]);
+  }, [serviceId, hasInvalidServiceId, router]);
 
   // Calculate real average rating from reviews/comments
   const realAvgRating =
@@ -520,6 +627,7 @@ export default function ServiceDetailScreen() {
           })),
         ]
       : [{ type: "image" as const, uri: DEFAULT_SERVICE_IMAGE }];
+  const imageItems = mediaItems.filter((item) => item.type === "image");
 
   useEffect(() => {
     if (selectedImage >= mediaItems.length && mediaItems.length > 0) {
@@ -673,6 +781,10 @@ export default function ServiceDetailScreen() {
   };
 
   const handleFinalSubmit = async () => {
+    if (orderSubmittingRef.current) return;
+    orderSubmittingRef.current = true;
+    setOrderSubmitting(true);
+
     try {
       Keyboard.dismiss();
 
@@ -844,6 +956,9 @@ export default function ServiceDetailScreen() {
         error?.message ||
         "There was a problem placing your order. Please try again.";
       Alert.alert("Error", errorMsg);
+    } finally {
+      orderSubmittingRef.current = false;
+      setOrderSubmitting(false);
     }
   };
 
@@ -1003,7 +1118,7 @@ export default function ServiceDetailScreen() {
       const orderId = await createOrder({
         clientId: currentUser.uid,
         clientName: clientInfo.fullName,
-        clientPhoto: undefined,
+        clientPhoto: currentUser.photoURL || undefined,
         artistId: artistId,
         artistName: defaultServiceData.provider.name,
         artistPhoto: defaultServiceData.provider.avatar,
@@ -1193,7 +1308,7 @@ export default function ServiceDetailScreen() {
         <Animated.View
           pointerEvents="none"
           style={[
-            StyleSheet.absoluteFillObject,
+            StyleSheet.absoluteFill,
             {
               backgroundColor: "#fff",
               opacity: headerBgOpacity,
@@ -1262,7 +1377,15 @@ export default function ServiceDetailScreen() {
                         activeOpacity={0.95}
                         onPress={() => handleImagePress(item, index)}
                       >
-                        <Image source={{ uri: item.uri }} style={styles.mainImage} />
+                        <CachedImage
+                          source={item.uri}
+                          style={styles.mainImage}
+                          contentFit="cover"
+                          cachePolicy="memory-disk"
+                          priority={index === selectedImage ? "high" : "normal"}
+                          transition={150}
+                          recyclingKey={item.uri}
+                        />
                       </TouchableOpacity>
                     )}
                   </View>
@@ -1331,9 +1454,13 @@ export default function ServiceDetailScreen() {
                             <Ionicons name="play" size={18} color="#fff" />
                           </View>
                         ) : media?.uri ? (
-                          <Image
-                            source={{ uri: media.uri }}
+                          <CachedImage
+                            source={media.uri}
                             style={styles.thumbnailImage}
+                            contentFit="cover"
+                            cachePolicy="memory-disk"
+                            priority="low"
+                            recyclingKey={media.uri}
                           />
                         ) : null}
                       </TouchableOpacity>
@@ -1778,6 +1905,98 @@ export default function ServiceDetailScreen() {
                   </TouchableOpacity>
                 )}
               </View>
+
+              {similarServices.length > 0 && (
+                <View style={styles.similarServicesSection}>
+                  <View style={styles.similarServicesHeader}>
+                    <View>
+                      <Text style={styles.sectionTitle}>More like this</Text>
+                      <Text style={styles.similarServicesSubtitle}>
+                        {String(
+                          serviceData?.category ||
+                            serviceData?.serviceCategory ||
+                            serviceData?.categoryName ||
+                            serviceData?.categories?.[0] ||
+                            "This category",
+                        )}
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name="sparkles-outline"
+                      size={20}
+                      color={COLORS.primary}
+                    />
+                  </View>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.similarServicesList}
+                  >
+                    {similarServices.map((similarService) => {
+                      return (
+                        <TouchableOpacity
+                          key={`${similarService.userId}:${similarService.id}`}
+                          activeOpacity={0.88}
+                          style={styles.similarServiceCard}
+                          onPress={() =>
+                            router.replace({
+                              pathname: "/(client)/(hidden)/gig/[gigId]",
+                              params: { gigId: String(similarService.id) },
+                            })
+                          }
+                        >
+                          <View style={styles.similarServiceImageWrap}>
+                            <CachedImage
+                              source={similarService.previewImage}
+                              style={styles.similarServiceImage}
+                              contentFit="cover"
+                              cachePolicy="memory-disk"
+                            />
+                            <View style={styles.similarServiceCategoryBadge}>
+                              <Text
+                                style={styles.similarServiceCategoryText}
+                                numberOfLines={1}
+                              >
+                                {similarService.category ||
+                                  similarService.serviceCategory ||
+                                  similarService.categoryName ||
+                                  similarService.categories?.[0] ||
+                                  "Service"}
+                              </Text>
+                            </View>
+                          </View>
+                          <View style={styles.similarServiceBody}>
+                            <Text
+                              style={styles.similarServiceTitle}
+                              numberOfLines={2}
+                            >
+                              {similarService.title || "Service"}
+                            </Text>
+                            <Text
+                              style={styles.similarServiceProvider}
+                              numberOfLines={1}
+                            >
+                              {similarService.artistName ||
+                                similarService.providerName ||
+                                "Service provider"}
+                            </Text>
+                            <View style={styles.similarServiceOpenRow}>
+                              <Text style={styles.similarServiceOpenText}>
+                                View service
+                              </Text>
+                              <Ionicons
+                                name="arrow-forward"
+                                size={14}
+                                color={COLORS.primary}
+                              />
+                            </View>
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
             </View>
           </Animated.View>
         </Animated.ScrollView>
@@ -2118,10 +2337,20 @@ export default function ServiceDetailScreen() {
                     <TouchableOpacity
                       activeOpacity={0.9}
                       onPress={handleFinalSubmit}
-                      style={styles.modalSend}
+                      disabled={orderSubmitting}
+                      style={[
+                        styles.modalSend,
+                        orderSubmitting && styles.modalSendDisabled,
+                      ]}
                     >
-                      <Text style={styles.modalSendText}>Send order</Text>
-                      <Ionicons name="send" size={15} color="#fff" />
+                      {orderSubmitting ? (
+                        <ActivityIndicator color="#fff" size="small" />
+                      ) : (
+                        <>
+                          <Text style={styles.modalSendText}>Send order</Text>
+                          <Ionicons name="send" size={15} color="#fff" />
+                        </>
+                      )}
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -2130,15 +2359,32 @@ export default function ServiceDetailScreen() {
         </Modal>
 
         {/* Review Modal */}
-        <Modal visible={showReviewForm} animationType="fade" transparent>
+        <Modal
+          visible={showReviewForm}
+          animationType="slide"
+          transparent
+          presentationStyle="overFullScreen"
+          onRequestClose={() => setShowReviewForm(false)}
+        >
           <KeyboardAvoidingView
             style={{ flex: 1 }}
             behavior={Platform.OS === "ios" ? "padding" : undefined}
             keyboardVerticalOffset={Platform.OS === "ios" ? 80 : 0}
           >
-            <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-              <View style={styles.modalOverlay}>
-                <View style={[styles.modalContent, styles.modalContentCompact]}>
+            <View style={styles.modalOverlay}>
+              <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+                <View style={styles.modalOverlayBackground} />
+              </TouchableWithoutFeedback>
+                <View
+                  style={[
+                    styles.modalContent,
+                    styles.modalContentCompact,
+                    styles.reviewModalContent,
+                    keyboardHeight > 0 && {
+                      marginBottom: keyboardHeight,
+                    },
+                  ]}
+                >
                   <View style={styles.modalHandle} />
                   <View style={styles.modalHeader}>
                     <View>
@@ -2157,7 +2403,14 @@ export default function ServiceDetailScreen() {
                     </TouchableOpacity>
                   </View>
 
+                  <ScrollView
+                    style={styles.reviewFormScroll}
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={styles.reviewFormScrollContent}
+                  >
                   <View style={{ paddingHorizontal: 20 }}>
+                <Text style={styles.reviewPrompt}>How was your experience?</Text>
                 <View style={styles.ratingSelector}>
                   {[1, 2, 3, 4, 5].map((star) => (
                     <TouchableOpacity
@@ -2176,15 +2429,27 @@ export default function ServiceDetailScreen() {
                     </TouchableOpacity>
                   ))}
                 </View>
+                <Text style={styles.ratingValueLabel}>
+                  {reviewRating} out of 5
+                </Text>
 
+                <View style={styles.reviewInputHeader}>
+                  <Text style={styles.reviewInputLabel}>Your comment</Text>
+                  <Text style={styles.reviewCharacterCount}>
+                    {reviewText.length}/500
+                  </Text>
+                </View>
                 <TextInput
                   multiline
                   numberOfLines={4}
-                  placeholder="Share your experience…"
+                  maxLength={500}
+                  placeholder="Tell others what you liked about this service..."
                   placeholderTextColor={COLORS.textSubtle}
                   value={reviewText}
                   onChangeText={setReviewText}
                   style={styles.textArea}
+                  textAlignVertical="top"
+                  returnKeyType="default"
                 />
 
                 {reviewError && (
@@ -2201,7 +2466,8 @@ export default function ServiceDetailScreen() {
                     </Text>
                   </View>
                 )}
-              </View>
+                  </View>
+                  </ScrollView>
 
               <View style={styles.modalActions}>
                 <TouchableOpacity
@@ -2275,15 +2541,14 @@ export default function ServiceDetailScreen() {
                     <ActivityIndicator color="#fff" size="small" />
                   ) : (
                     <>
-                      <Text style={styles.modalSendText}>Submit</Text>
+                      <Text style={styles.modalSendText}>Post review</Text>
                       <Ionicons name="checkmark" size={16} color="#fff" />
                     </>
                   )}
                 </TouchableOpacity>
               </View>
             </View>
-          </View>
-        </TouchableWithoutFeedback>
+            </View>
       </KeyboardAvoidingView>
     </Modal>
 
@@ -2305,17 +2570,21 @@ export default function ServiceDetailScreen() {
               </TouchableOpacity>
               {previewMedia?.type === "image" && (
                 <Text style={styles.mediaCounter}>
-                  {previewMedia.index + 1} / {mediaItems.length}
+                  {previewMedia.index + 1} / {imageItems.length}
                 </Text>
               )}
             </View>
 
             <View style={styles.fullScreenContent}>
               {previewMedia?.type === "image" && (
-                <Image
-                  source={{ uri: previewMedia.uri }}
+                <CachedImage
+                  source={previewMedia.uri}
                   style={styles.fullScreenImage}
-                  resizeMode="contain"
+                  contentFit="contain"
+                  cachePolicy="memory-disk"
+                  priority="high"
+                  transition={150}
+                  recyclingKey={previewMedia.uri}
                 />
               )}
 
@@ -2328,7 +2597,7 @@ export default function ServiceDetailScreen() {
             </View>
 
             {previewMedia?.type === "image" &&
-              defaultServiceData.images.length > 1 && (
+              imageItems.length > 1 && (
                 <View style={styles.imageNavigation}>
                   <TouchableOpacity
                     activeOpacity={0.7}
@@ -2339,7 +2608,7 @@ export default function ServiceDetailScreen() {
                       );
                       setPreviewMedia({
                         type: "image",
-                        uri: defaultServiceData.images[newIndex],
+                        uri: imageItems[newIndex].uri,
                         index: newIndex,
                       });
                     }}
@@ -2361,32 +2630,30 @@ export default function ServiceDetailScreen() {
                     activeOpacity={0.7}
                     onPress={() => {
                       const newIndex = Math.min(
-                        defaultServiceData.images.length - 1,
+                        imageItems.length - 1,
                         (previewMedia.index || 0) + 1,
                       );
                       setPreviewMedia({
                         type: "image",
-                        uri: defaultServiceData.images[newIndex],
+                        uri: imageItems[newIndex].uri,
                         index: newIndex,
                       });
                     }}
                     style={[
                       styles.navButton,
                       (previewMedia.index || 0) ===
-                        defaultServiceData.images.length - 1 &&
+                        imageItems.length - 1 &&
                         styles.navButtonDisabled,
                     ]}
                     disabled={
-                      (previewMedia.index || 0) ===
-                      defaultServiceData.images.length - 1
+                      (previewMedia.index || 0) === imageItems.length - 1
                     }
                   >
                     <Ionicons
                       name="chevron-forward"
                       size={22}
                       color={
-                        (previewMedia.index || 0) ===
-                        defaultServiceData.images.length - 1
+                        (previewMedia.index || 0) === imageItems.length - 1
                           ? "#666"
                           : "#fff"
                       }
@@ -3070,6 +3337,97 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
   },
+  similarServicesSection: {
+    paddingTop: 22,
+    paddingBottom: 28,
+    backgroundColor: COLORS.surfaceSubtle,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.divider,
+  },
+  similarServicesHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+  },
+  similarServicesSubtitle: {
+    color: COLORS.primaryDark,
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: -8,
+    marginBottom: 14,
+    textTransform: "capitalize",
+  },
+  similarServicesList: {
+    paddingHorizontal: 20,
+    gap: 16,
+  },
+  similarServiceCard: {
+    width: 252,
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.xl,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: COLORS.borderSoft,
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  similarServiceImage: {
+    width: "100%",
+    height: 168,
+    backgroundColor: COLORS.surfaceMuted,
+  },
+  similarServiceImageWrap: {
+    position: "relative",
+  },
+  similarServiceCategoryBadge: {
+    position: "absolute",
+    left: 10,
+    bottom: 10,
+    maxWidth: 150,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: RADIUS.pill,
+    backgroundColor: "rgba(15, 23, 42, 0.78)",
+  },
+  similarServiceCategoryText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "700",
+    textTransform: "capitalize",
+  },
+  similarServiceBody: {
+    padding: 16,
+  },
+  similarServiceTitle: {
+    color: COLORS.text,
+    fontSize: 17,
+    fontWeight: "700",
+    lineHeight: 23,
+    minHeight: 46,
+  },
+  similarServiceProvider: {
+    color: COLORS.textMuted,
+    fontSize: 13,
+    marginTop: 8,
+  },
+  similarServiceOpenRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.borderSoft,
+  },
+  similarServiceOpenText: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: "700",
+  },
 
   // ─── Action bar ──────────────────────────────────────────
   actionBar: {
@@ -3142,12 +3500,12 @@ const styles = StyleSheet.create({
 
   // ─── Modal ───────────────────────────────────────────────
   modalOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: "flex-end",
     zIndex: 1,
   },
   modalOverlayBackground: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: COLORS.overlay,
     zIndex: 1,
   },
@@ -3163,6 +3521,10 @@ const styles = StyleSheet.create({
   },
   modalContentCompact: {
     paddingBottom: Platform.OS === "ios" ? 20 : 12,
+  },
+  reviewModalContent: {
+    maxHeight: screenHeight * 0.72,
+    flexShrink: 1,
   },
   modalHandle: {
     width: 40,
@@ -3207,6 +3569,43 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
     flexGrow: 1,
+  },
+  reviewFormScroll: {
+    flexShrink: 1,
+  },
+  reviewFormScrollContent: {
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  reviewPrompt: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: COLORS.text,
+    textAlign: "center",
+    marginBottom: 2,
+  },
+  ratingValueLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: COLORS.primaryDark,
+    textAlign: "center",
+    marginTop: -8,
+    marginBottom: 20,
+  },
+  reviewInputHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  reviewInputLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: COLORS.text,
+  },
+  reviewCharacterCount: {
+    fontSize: 12,
+    color: COLORS.textSubtle,
   },
   textArea: {
     borderWidth: 1,

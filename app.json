@@ -42,7 +42,8 @@
       }
     },
     "android": {
-      "package": "com.jonass7896.InEvent"
+      "package": "com.jonass7896.InEvent",
+      "softwareKeyboardLayoutMode": "resize"
     },
     "plugins": [
       "expo-font",
