@@ -13,9 +13,6 @@ const compatibilitySettings = `
         build_config.build_settings['SWIFT_ENABLE_EXPLICIT_MODULES'] = 'NO'
         build_config.build_settings['DEFINES_MODULE'] = 'NO'
       end
-      if target.name.end_with?('-xcprivacy')
-        build_config.build_settings['PRODUCT_NAME'] = target.name
-      end
     end
   end
   installer.pods_project.save`;
