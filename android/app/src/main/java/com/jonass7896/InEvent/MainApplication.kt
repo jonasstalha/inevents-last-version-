@@ -18,12 +18,10 @@ import expo.modules.ExpoReactHostFactory
 
 class MainApplication : Application(), ReactApplication {
 
+  private val packages: List<ReactPackage> = PackageList(this).packages
+
   override val reactNativeHost: ReactNativeHost = object : DefaultReactNativeHost(this) {
-        override fun getPackages(): List<ReactPackage> =
-            PackageList(this).packages.apply {
-              // Packages that cannot be autolinked yet can be added manually here, for example:
-              // add(MyReactNativePackage())
-            }
+        override fun getPackages(): List<ReactPackage> = packages
 
           override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"
 
@@ -33,7 +31,7 @@ class MainApplication : Application(), ReactApplication {
       }
 
   override val reactHost: ReactHost
-        get() = ExpoReactHostFactory.getDefaultReactHost(applicationContext, reactNativeHost.packages)
+    get() = ExpoReactHostFactory.getDefaultReactHost(applicationContext, packages)
 
   override fun onCreate() {
     super.onCreate()
