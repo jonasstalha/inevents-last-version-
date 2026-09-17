@@ -1,13 +1,14 @@
 import { OrderStatusBadge } from '@/src/components/orders/OrderStatusBadge';
+import { useAuth } from '@/src/context/AuthContext';
 import { db } from '@/src/firebase/firebaseConfig';
 import { cancelOrder } from '@/src/firebase/orderService';
-import { useAuth } from '@/src/context/AuthContext';
 import { Order } from '@/src/models/types';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { doc, getDoc, onSnapshot, Timestamp, updateDoc } from 'firebase/firestore';
 import { ArrowLeft } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const DEFAULT_PROFILE_IMAGE = 'https://cdn-icons-png.flaticon.com/512/149/149071.png';
 
@@ -135,26 +136,26 @@ export default function ClientOrderDetails() {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
+      <SafeAreaView edges={['top']} style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#4f46e5" />
         <Text style={styles.loadingText}>Loading order details...</Text>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (!order) {
     return (
-      <View style={styles.emptyContainer}>
+      <SafeAreaView edges={['top']} style={styles.emptyContainer}>
         <Text style={styles.emptyText}>Order details unavailable.</Text>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Text style={styles.backButtonText}>Go back</Text>
         </TouchableOpacity>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.screen}>
+    <SafeAreaView edges={['top']} style={styles.screen}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <ArrowLeft size={24} color="#111827" />
@@ -163,7 +164,11 @@ export default function ClientOrderDetails() {
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={{ paddingBottom: Platform.OS === 'ios' ? 280 : 220 }}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: order.status === 'confirmed' ? '#34c759' : order.status === 'rejected' ? '#ff3b30' : '#9e9e9e' }]}>
           <Text style={styles.name}>{order.serviceTitle || order.gigTitle || order.ticketName || 'Order'}</Text>
           <OrderStatusBadge status={order.status} />
@@ -229,7 +234,7 @@ export default function ClientOrderDetails() {
           )}
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 

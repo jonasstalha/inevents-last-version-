@@ -8,6 +8,7 @@ import { getAuth } from 'firebase/auth';
 import { ArrowLeft } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const getStatusColor = (status: string): string => {
   switch (status) {
@@ -216,26 +217,26 @@ export default function OrderDetailsPage() {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
+      <SafeAreaView edges={['top']} style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#4f46e5" />
         <Text style={styles.loadingText}>Loading order details...</Text>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (!order) {
     return (
-      <View style={styles.emptyContainer}>
+      <SafeAreaView edges={['top']} style={styles.emptyContainer}>
         <Text style={styles.emptyText}>Order details were not found.</Text>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Text style={styles.backButtonText}>Go back</Text>
         </TouchableOpacity>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.screen}>
+    <SafeAreaView edges={['top']} style={styles.screen}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <ArrowLeft size={24} color="#111827" />
@@ -244,7 +245,11 @@ export default function OrderDetailsPage() {
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 180 }} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={{ paddingBottom: Platform.OS === 'ios' ? 280 : 220 }}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Service Image */}
         {order.serviceImage ? (
           <CachedImage
@@ -456,7 +461,7 @@ export default function OrderDetailsPage() {
 
         <View style={styles.section}>{renderActionButtons()}</View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 

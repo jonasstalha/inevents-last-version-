@@ -38,7 +38,7 @@
       "router": {},
       "cloudFunctionBaseUrl": "https://us-central1-inevents-2fe56.cloudfunctions.net",
       "eas": {
-        "projectId": "83d171a5-5e5d-4d60-bbcb-f4a541efc109"
+        "projectId": "1669d075-25ea-4182-9a6d-35aae69b5c31"
       }
     },
     "android": {
@@ -69,6 +69,6 @@
       "expo-status-bar",
       "expo-video"
     ],
-    "owner": "dino7896"
+    "owner": "youness999"
   }
 }

@@ -250,7 +250,7 @@ function CustomTabBar({ state, descriptors, navigation }) {
                         color: iconProps.color,
                         fontWeight: isFocused ? '600' : 'normal',
                       }
-                    ]}>{label}</Text>
+                    ]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>{label}</Text>
                   </View>
                 </TabBarButton>
               );
