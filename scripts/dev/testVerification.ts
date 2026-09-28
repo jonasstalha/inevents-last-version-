@@ -1,5 +1,5 @@
 // Test file for WhatsApp verification
-import { initiatePhoneVerification, verifyCode } from './src/firebase/phoneVerificationService';
+import { initiatePhoneVerification, verifyCode } from '../../src/firebase/phoneVerificationService';
 
 // Test phone verification
 async function testPhoneVerification() {

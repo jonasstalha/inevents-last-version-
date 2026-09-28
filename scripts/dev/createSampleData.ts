@@ -5,7 +5,7 @@
 
 import { getAuth } from 'firebase/auth';
 import { addDoc, collection, getFirestore, serverTimestamp } from 'firebase/firestore';
-import app from './src/firebase/firebaseConfig';
+import app from '../../src/firebase/firebaseConfig';
 
 const db = getFirestore(app);
 const auth = getAuth(app);

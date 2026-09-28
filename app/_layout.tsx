@@ -61,6 +61,17 @@ function RootLayoutInner() {
         console.warn('Failed to read pending auth redirect:', error);
       }
 
+      try {
+        const introSeen = await AsyncStorage.getItem('intro_seen');
+        if (!user && introSeen === 'true' && segments.length === 0) {
+          router.replace('/auth');
+          setHasHandledInitialRoute(true);
+          return;
+        }
+      } catch (error) {
+        console.warn('Failed to read intro state:', error);
+      }
+
       if (user && user.isEmailVerified) {
         console.log(`🔄 App restarted: User logged in as ${user.role}`);
         if (user.role === 'admin') {

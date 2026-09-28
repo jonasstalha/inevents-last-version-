@@ -1,6 +1,6 @@
 (async () => {
   try {
-    const { fetchAllServices, fetchAllTickets } = require('./src/firebase/clientTicketsService');
+    const { fetchAllServices, fetchAllTickets } = require('../../src/firebase/clientTicketsService');
     console.log('Fetching services...');
     const services = await fetchAllServices();
     console.log('Services count:', Array.isArray(services) ? services.length : typeof services);

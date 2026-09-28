@@ -1,13 +1,12 @@
 import { useAuth } from '@/src/context/AuthContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import {
   Animated,
   Dimensions,
   Image,
   StyleSheet,
-  Text,
-  TouchableOpacity,
   View
 } from 'react-native';
 
@@ -21,8 +20,8 @@ export default function WelcomeScreen() {
   const logoAnim = useRef(new Animated.Value(0)).current;
   const sloganAnim = useRef(new Animated.Value(0)).current;
 
-  // Open the appropriate area based on user role
-  const openClientFolder = () => {
+  // Continue to the appropriate area based on user role.
+  const openApp = useCallback(() => {
     if (user?.role === 'admin') {
       router.replace('/(admin)');
     } else if (user?.role === 'artist') {
@@ -30,7 +29,7 @@ export default function WelcomeScreen() {
     } else {
       router.replace('/(client)/search');
     }
-  };
+  }, [router, user?.role]);
 
   useEffect(() => {
     Animated.sequence([
@@ -45,7 +44,17 @@ export default function WelcomeScreen() {
         useNativeDriver: true,
       }),
     ]).start();
-  }, []);
+
+    const openAfterFirstVisit = async () => {
+      await AsyncStorage.setItem('intro_seen', 'true');
+      return setTimeout(openApp, 1500);
+    };
+
+    const timeoutPromise = openAfterFirstVisit();
+    return () => {
+      timeoutPromise.then(clearTimeout).catch(() => undefined);
+    };
+  }, [openApp]);
 
 
 
@@ -90,9 +99,6 @@ export default function WelcomeScreen() {
         >
           Discover. Connect. Experience.
         </Animated.Text>
-  <TouchableOpacity style={styles.button} onPress={openClientFolder}>
-          <Text style={styles.buttonText}>Enter App</Text>
-        </TouchableOpacity>
       </View>
     </View>
   );
@@ -116,23 +122,6 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     alignItems: 'center',
     paddingBottom: 40,
-  },
-  button: {
-    backgroundColor: '#001C4A',
-    paddingVertical: 14,
-    paddingHorizontal: 40,
-    borderRadius: 12,
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 6,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-    letterSpacing: 1,
   },
   logo: {
     width: 250, // Fixed width, increased for better visibility

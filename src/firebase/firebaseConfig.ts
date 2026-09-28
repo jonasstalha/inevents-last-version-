@@ -8,9 +8,17 @@ import {
   query,
   where,
 } from 'firebase/firestore';
-import { getAuth, type Auth } from 'firebase/auth';
+import {
+  getAuth,
+  initializeAuth,
+  type Auth,
+} from 'firebase/auth';
+// The React Native entry exposes this export, but the shared type declaration does not.
+// @ts-expect-error React Native-only Firebase Auth export
+import { getReactNativePersistence } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 // Firebase config for inexvents-2fe56 project
 const firebaseConfig = {
@@ -27,7 +35,11 @@ const hasExistingApp = getApps().length > 0;
 // Initialize app once
 const app = hasExistingApp ? getApp() : initializeApp(firebaseConfig);
 
-const auth: Auth = getAuth(app);
+const auth: Auth = Platform.OS === 'web'
+  ? getAuth(app)
+  : initializeAuth(app, {
+      persistence: getReactNativePersistence(ReactNativeAsyncStorage),
+    });
 
 // Initialize Firestore & Storage
 const db = getFirestore(app);

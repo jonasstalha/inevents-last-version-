@@ -1,6 +1,6 @@
 import { getAuth } from 'firebase/auth';
 import { addDoc, collection, getDocs, getFirestore, query, where } from 'firebase/firestore';
-import app from './firebaseConfig';
+import app from '../../src/firebase/firebaseConfig';
 
 const testOrderCreation = async () => {
   try {

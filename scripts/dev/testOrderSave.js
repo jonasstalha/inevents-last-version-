@@ -1,6 +1,6 @@
 import { getAuth } from 'firebase/auth';
 import { addDoc, collection, getFirestore } from 'firebase/firestore';
-import app from './firebaseConfig';
+import app from '../../src/firebase/firebaseConfig';
 
 const testOrderSave = async () => {
   try {

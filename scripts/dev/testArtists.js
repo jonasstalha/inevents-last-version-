@@ -2,7 +2,7 @@
  * Test Firebase Artists Service
  */
 
-const { fetchArtistsFromFirebase, fetchArtistById } = require('./src/firebase/artistsService');
+const { fetchArtistsFromFirebase, fetchArtistById } = require('../../src/firebase/artistsService');
 
 async function testArtistsService() {
   console.log('🧪 Testing Firebase Artists Service...');

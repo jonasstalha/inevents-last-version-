@@ -5,9 +5,9 @@
 
 import { getAuth } from 'firebase/auth';
 import { collection, getDocs, getFirestore } from 'firebase/firestore';
-import app from './src/firebase/firebaseConfig';
-import { awardOrderPoints, awardTicketPoints } from './src/firebase/rewardsService';
-import { recalculateUserStatistics } from './src/firebase/userStatsService';
+import app from '../../src/firebase/firebaseConfig';
+import { awardOrderPoints, awardTicketPoints } from '../../src/firebase/rewardsService';
+import { recalculateUserStatistics } from '../../src/firebase/userStatsService';
 
 const db = getFirestore(app);
 const auth = getAuth(app);
